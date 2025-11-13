@@ -17,7 +17,7 @@ import re
 _SOLUTION_CLIP_CHARS = 300
 
 
-def extract_solution(solution_str, method="strict"):
+def extract_solution(solution_str, method="flexible"):
     assert method in ["strict", "flexible"]
 
     # Optimization: Regular expression matching on very long strings can be slow.

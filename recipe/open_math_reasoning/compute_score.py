@@ -18,5 +18,11 @@ def compute_score_data_source(data_source, response, ground_truth):
 
     if data_source in ["aime24", "aime25"]:
         return compute_score(response, ground_truth)
+    elif data_source in ["openai/gsm8k"]:
+        from verl.utils.reward_score.gsm8k import compute_score
+        return compute_score(response, ground_truth)
+    elif "math" in data_source.lower():
+        from verl.utils.reward_score.gsm8k import compute_score
+        return compute_score(response, ground_truth)
     else:
         raise ValueError(f"Unknown data source: {data_source}")
