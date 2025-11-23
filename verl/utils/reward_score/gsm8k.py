@@ -13,40 +13,172 @@
 # limitations under the License.
 
 import re
+from typing import Optional
+import numpy as np
 
-_SOLUTION_CLIP_CHARS = 300
+
+def normalize_answer(answer: str) -> str:
+    """
+    Normalize answer for comparison.
+    - Remove whitespace
+    - Convert to lowercase
+    - Remove LaTeX formatting
+    - Handle common equivalences
+
+    Adapted from interleaved-rl/src/evaluation/math_eval.py
+    """
+    if not answer:
+        return ""
+
+    # Remove extra whitespace
+    answer = ' '.join(answer.split())
+
+    # Remove LaTeX commands but keep content
+    answer = re.sub(r'\\text\{([^}]+)\}', r'\1', answer)
+    answer = re.sub(r'\\mathrm\{([^}]+)\}', r'\1', answer)
+    answer = re.sub(r'\\mathbf\{([^}]+)\}', r'\1', answer)
+
+    # Remove common LaTeX symbols
+    answer = answer.replace('\\%', '%')
+    answer = answer.replace('\\$', '$')
+    answer = answer.replace('\\,', '')
+    answer = answer.replace('\\:', '')
+    answer = answer.replace('\\;', '')
+    answer = answer.replace('\\!', '')
+
+    # Remove dollar signs (for math mode)
+    answer = answer.replace('$', '')
+
+    # Convert to lowercase for comparison
+    answer = answer.lower()
+
+    # Remove trailing punctuation
+    answer = answer.rstrip('.')
+
+    return answer.strip()
 
 
-def extract_solution(solution_str, method="flexible"):
+def extract_number(text: str) -> Optional[float]:
+    """
+    Extract numerical value from text for comparison.
+
+    Adapted from interleaved-rl/src/evaluation/math_eval.py
+    """
+    if not text:
+        return None
+
+    # Remove common units and symbols
+    text = text.replace(',', '')  # Remove thousands separator
+    text = text.replace('$', '')
+    text = text.replace('%', '')
+
+    # Try to extract number
+    match = re.search(r'-?\d+\.?\d*', text)
+    if match:
+        try:
+            return float(match.group(0))
+        except ValueError:
+            pass
+
+    return None
+
+
+def extract_boxed_answer(text: str) -> Optional[str]:
+    """
+    Extract answer from \\boxed{} format (common in MATH dataset).
+
+    Adapted from interleaved-rl/src/evaluation/math_eval.py
+    """
+    # Match \boxed{...} including nested braces
+    pattern = r'\\boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
+    matches = re.findall(pattern, text)
+
+    if matches:
+        # Return the last boxed answer (typically the final answer)
+        return matches[-1].strip()
+
+    return None
+
+
+def extract_solution(solution_str, method="strict"):
+    """
+    Extract numerical answer from GSM8K format.
+    GSM8K answers typically end with #### followed by the number.
+
+    Adapted from interleaved-rl/src/evaluation/math_eval.py
+
+    Args:
+        solution_str: the solution text
+        method: 'strict' uses only #### format, 'flexible' tries multiple patterns
+
+    Returns:
+        Extracted answer string or None
+    """
     assert method in ["strict", "flexible"]
 
-    # Optimization: Regular expression matching on very long strings can be slow.
-    # For math problems, the final answer is usually at the end.
-    # We only match on the last 300 characters, which is a safe approximation for 300 tokens.
-    if len(solution_str) > _SOLUTION_CLIP_CHARS:
-        solution_str = solution_str[-_SOLUTION_CLIP_CHARS:]
-
     if method == "strict":
-        # this also tests the formatting of the model
-        solutions = re.findall("#### (\\-?[0-9\\.\\,]+)", solution_str)
-        if len(solutions) == 0:
-            final_answer = None
-        else:
-            # take the last solution
-            final_answer = solutions[-1].replace(",", "").replace("$", "")
+        # First try to find #### format (takes FIRST match like interleaved-rl)
+        match = re.search(r'####\s*(.+?)(?:\n|$)', solution_str)
+        if match:
+            return match.group(1).strip().replace(",", "").replace("$", "")
+        return None
+
     elif method == "flexible":
-        answer = re.findall("(\\-?[0-9\\.\\,]+)", solution_str)
-        final_answer = None
-        if len(answer) == 0:
-            # no reward is there is no answer
-            pass
-        else:
-            invalid_str = ["", "."]
-            # find the last number that is not '.'
-            for final_answer in reversed(answer):
-                if final_answer not in invalid_str:
-                    break
-    return final_answer
+        # First try to find #### format
+        match = re.search(r'####\s*(.+?)(?:\n|$)', solution_str)
+        if match:
+            return match.group(1).strip()
+
+        # Otherwise, try to find boxed format
+        boxed = extract_boxed_answer(solution_str)
+        if boxed:
+            return boxed
+
+        # Last resort: extract the last number mentioned
+        numbers = re.findall(r'-?\d+\.?\d*', solution_str)
+        if numbers:
+            return numbers[-1]
+
+        return None
+
+
+def check_answer_equivalence(predicted: str, ground_truth: str, strict: bool = False) -> bool:
+    """
+    Check if predicted answer matches ground truth.
+
+    Adapted from interleaved-rl/src/evaluation/math_eval.py
+
+    Args:
+        predicted: Model's predicted answer
+        ground_truth: Ground truth answer
+        strict: If True, require exact match after normalization
+
+    Returns:
+        True if answers match
+    """
+    if not predicted or not ground_truth:
+        return False
+
+    # Normalize both answers
+    pred_norm = normalize_answer(predicted)
+    gt_norm = normalize_answer(ground_truth)
+
+    # Exact match after normalization
+    if pred_norm == gt_norm:
+        return True
+
+    if strict:
+        return False
+
+    # Try numerical comparison
+    pred_num = extract_number(pred_norm)
+    gt_num = extract_number(gt_norm)
+
+    if pred_num is not None and gt_num is not None:
+        # Use relative tolerance for floating point comparison
+        return np.isclose(pred_num, gt_num, rtol=1e-4, atol=1e-8)
+
+    return False
 
 
 def compute_score(solution_str, ground_truth, method="strict", format_score=0.0, score=1.0):
@@ -66,7 +198,8 @@ def compute_score(solution_str, ground_truth, method="strict", format_score=0.0,
     if answer is None:
         return 0
     else:
-        if answer == ground_truth:
+        # Use normalization and numerical comparison with tolerance
+        if check_answer_equivalence(answer, ground_truth, strict=(method == "strict")):
             return score
         else:
             return format_score

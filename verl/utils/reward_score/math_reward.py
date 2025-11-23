@@ -13,13 +13,100 @@
 # limitations under the License.
 # Adapted from https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/hendrycks_math/utils.py
 
+import re
+from typing import Optional
+import numpy as np
+
+
+def normalize_answer(answer: str) -> str:
+    """
+    Normalize answer for comparison.
+    - Remove whitespace
+    - Convert to lowercase
+    - Remove LaTeX formatting
+    - Handle common equivalences
+
+    Adapted from interleaved-rl/src/evaluation/math_eval.py
+    """
+    if not answer:
+        return ""
+
+    # Remove extra whitespace
+    answer = ' '.join(answer.split())
+
+    # Remove LaTeX commands but keep content
+    answer = re.sub(r'\\text\{([^}]+)\}', r'\1', answer)
+    answer = re.sub(r'\\mathrm\{([^}]+)\}', r'\1', answer)
+    answer = re.sub(r'\\mathbf\{([^}]+)\}', r'\1', answer)
+
+    # Remove common LaTeX symbols
+    answer = answer.replace('\\%', '%')
+    answer = answer.replace('\\$', '$')
+    answer = answer.replace('\\,', '')
+    answer = answer.replace('\\:', '')
+    answer = answer.replace('\\;', '')
+    answer = answer.replace('\\!', '')
+
+    # Remove dollar signs (for math mode)
+    answer = answer.replace('$', '')
+
+    # Convert to lowercase for comparison
+    answer = answer.lower()
+
+    # Remove trailing punctuation
+    answer = answer.rstrip('.')
+
+    return answer.strip()
+
+
+def extract_number(text: str) -> Optional[float]:
+    """
+    Extract numerical value from text for comparison.
+
+    Adapted from interleaved-rl/src/evaluation/math_eval.py
+    """
+    if not text:
+        return None
+
+    # Remove common units and symbols
+    text = text.replace(',', '')  # Remove thousands separator
+    text = text.replace('$', '')
+    text = text.replace('%', '')
+
+    # Try to extract number
+    match = re.search(r'-?\d+\.?\d*', text)
+    if match:
+        try:
+            return float(match.group(0))
+        except ValueError:
+            pass
+
+    return None
+
+
+def extract_boxed_answer(text: str) -> Optional[str]:
+    """
+    Extract answer from \\boxed{} format using regex.
+
+    Adapted from interleaved-rl/src/evaluation/math_eval.py
+    """
+    # Match \boxed{...} including nested braces
+    pattern = r'\\boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
+    matches = re.findall(pattern, text)
+
+    if matches:
+        # Return the last boxed answer (typically the final answer)
+        return matches[-1].strip()
+
+    return None
+
 
 def compute_score(solution_str, ground_truth) -> float:
     retval = 0.0
     try:
-        string_in_last_boxed = last_boxed_only_string(solution_str)
-        if string_in_last_boxed is not None:
-            answer = remove_boxed(string_in_last_boxed)
+        # Use the new regex-based extraction
+        answer = extract_boxed_answer(solution_str)
+        if answer is not None:
             if is_equiv(answer, ground_truth):
                 retval = 1.0
     except Exception as e:
@@ -41,7 +128,27 @@ def is_equiv(str1, str2, verbose=False):
         ss2 = strip_string(str2)
         if verbose:
             print(ss1, ss2)
-        return ss1 == ss2
+
+        # First try exact match after strip_string normalization
+        if ss1 == ss2:
+            return True
+
+        # Then try additional normalization and numerical comparison
+        # (matching interleaved-rl approach)
+        norm1 = normalize_answer(ss1)
+        norm2 = normalize_answer(ss2)
+
+        if norm1 == norm2:
+            return True
+
+        # Try numerical comparison with tolerance
+        num1 = extract_number(norm1)
+        num2 = extract_number(norm2)
+
+        if num1 is not None and num2 is not None:
+            return np.isclose(num1, num2, rtol=1e-4, atol=1e-8)
+
+        return False
     except Exception:
         return str1 == str2
 
