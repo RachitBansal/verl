@@ -25,21 +25,18 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from verl.utils.reward_score import default_compute_score
-
 
 def extract_answer(response: str, dataset_type: str, ground_truth: str) -> float:
     """Extract and evaluate a single response."""
     # Use the default scoring function
     if dataset_type == "gsm8k":
-        data_source = "openai/gsm8k"
+        from verl.utils.reward_score.gsm8k import compute_score
+        return compute_score(response, ground_truth, method="flexible")
     elif dataset_type == "math":
-        data_source = "lighteval/MATH"
+        from verl.utils.reward_score.gsm8k import compute_score
+        return compute_score(response, ground_truth, method="flexible")
     else:
         raise ValueError(f"Unknown dataset type: {dataset_type}")
-    
-    score = default_compute_score(data_source, response, ground_truth)
-    return score
 
 
 def majority_vote(responses: list, dataset_type: str, ground_truth: str) -> tuple:
@@ -54,9 +51,6 @@ def majority_vote(responses: list, dataset_type: str, ground_truth: str) -> tupl
     Returns:
         (majority_vote_correct, any_correct, num_correct)
     """
-    if not responses:
-        return 0.0, 0.0, 0
-    
     scores = []
     for response in responses:
         score = extract_answer(response, dataset_type, ground_truth)
@@ -97,7 +91,7 @@ def main():
     print(f"Samples per example: {n_samples}")
     print("")
     
-    majority_scores = []
+    # majority_scores = []
     pass_at_k_scores = []
     num_correct_list = []
     
@@ -109,12 +103,12 @@ def main():
             responses, args.dataset_type, ground_truth
         )
         
-        majority_scores.append(majority_correct)
+        # majority_scores.append(majority_correct)
         pass_at_k_scores.append(any_correct)
         num_correct_list.append(num_correct)
     
     # Compute metrics
-    majority_vote_acc = np.mean(majority_scores)
+    # majority_vote_acc = np.mean(majority_scores)
     pass_at_k = np.mean(pass_at_k_scores)
     avg_correct = np.mean(num_correct_list)
     
@@ -136,7 +130,7 @@ def main():
     print(f"Number of samples per prompt: {n_samples}")
     print("")
     print(f"Single Sample Accuracy:           {single_sample_acc:.4f} ({single_sample_acc*100:.2f}%)")
-    print(f"Majority Voting Accuracy:         {majority_vote_acc:.4f} ({majority_vote_acc*100:.2f}%)")
+    # print(f"Majority Voting Accuracy:         {majority_vote_acc:.4f} ({majority_vote_acc*100:.2f}%)")
     print(f"Pass@{n_samples} (Any Correct):            {pass_at_k:.4f} ({pass_at_k*100:.2f}%)")
     print(f"Average # Correct per Example:    {avg_correct:.2f} / {n_samples}")
     print("=" * 60)
