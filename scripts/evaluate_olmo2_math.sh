@@ -12,6 +12,13 @@
 set -e  # Exit on error
 set -u  # Exit on undefined variable
 
+# ---- Activate your prebuilt env
+source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
+
+# Use the env's Python explicitly everywhere:
+PYBIN=/n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/python
+echo "Python: $PYBIN"
+
 #############################################
 # CONFIGURATION
 #############################################
@@ -33,7 +40,7 @@ TENSOR_PARALLEL_SIZE=1  # Increase if model doesn't fit in single GPU
 GPU_MEMORY_UTIL=0.85
 
 # Dataset Configuration
-BASE_DIR="/n/netscratch/dam_lab/Lab/sqin/rl_pretrain"
+BASE_DIR="/n/netscratch/dam_lab/Lab/brachit/verl"
 DATA_DIR="${BASE_DIR}/data"
 GSM8K_DIR="${DATA_DIR}/gsm8k"
 MATH_DIR="${DATA_DIR}/math"

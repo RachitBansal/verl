@@ -1,0 +1,5 @@
+Loading predictions from /n/netscratch/dam_lab/Lab/brachit/verl/eval_results/olmo2-1b-step14000-4shot-8samples-temp0.6/gsm8k_predictions.parquet
+Dataset: gsm8k
+Number of test examples: 1319
+Samples per example: 8
+
