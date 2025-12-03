@@ -75,6 +75,61 @@ def main(config):
 
     print(metric_dict)
 
+    # Log to wandb if configured
+    try:
+        print(f"DEBUG: Checking for logger in config...")
+        print(f"DEBUG: config.get('logger') = {config.get('logger')}")
+
+        if config.get("logger"):
+            from omegaconf import ListConfig
+            from verl.utils.tracking import Tracking
+
+            # Handle both list and ListConfig from OmegaConf
+            if isinstance(config.logger, (list, ListConfig)):
+                logger_backends = list(config.logger)
+            else:
+                logger_backends = [config.logger]
+            print(f"DEBUG: logger_backends = {logger_backends}")
+
+            # Extract wandb config if present
+            wandb_config = {}
+            if "wandb" in logger_backends:
+                print(f"DEBUG: wandb in logger_backends, checking wandb config...")
+                print(f"DEBUG: config.get('wandb') = {config.get('wandb')}")
+
+                if config.get("wandb"):
+                    wandb_config = {
+                        "project": config.wandb.get("project", "evaluation"),
+                        "name": config.wandb.get("run_name", "eval_run"),
+                        "entity": config.wandb.get("entity", None),
+                        "tags": config.wandb.get("tags", [])
+                    }
+
+                    print(f"DEBUG: wandb_config = {wandb_config}")
+
+                    # Initialize tracking with wandb
+                    tracking = Tracking(
+                        project_name=wandb_config["project"],
+                        experiment_name=wandb_config["name"],
+                        default_backend=logger_backends,
+                        config=OmegaConf.to_container(config)
+                    )
+
+                    # Log metrics
+                    tracking.log(metric_dict, step=0)
+
+                    print(f"✓ Metrics logged to wandb: {wandb_config['project']}/{wandb_config['name']}")
+                else:
+                    print("WARNING: wandb in logger_backends but no wandb config found")
+            else:
+                print(f"DEBUG: wandb not in logger_backends")
+        else:
+            print("DEBUG: No logger configured in config")
+    except Exception as e:
+        print(f"ERROR: Failed to log to wandb: {e}")
+        import traceback
+        traceback.print_exc()
+
 
 if __name__ == "__main__":
     main()
