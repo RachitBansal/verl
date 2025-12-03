@@ -23,7 +23,7 @@ EVAL_MATH=false    # Set to true to evaluate on MATH
 # Model Configuration
 MODEL_PATH=/n/netscratch/dam_lab/Lab/sqin/olmo/checkpoints/OLMo2-1B-stage1-50B/step22000-hf
 MODEL_NAME="1B-step22000"
-N_SAMPLES=1
+N_SAMPLES=32
 
 
 # Hardware Configuration
@@ -40,7 +40,7 @@ MATH_DIR="${DATA_DIR}/math"
 
 # Evaluation Configuration
 N_SHOT=8  # Number of few-shot examples (matching interleaved-rl)
-TEMPERATURE=0.0  # 0.0 for greedy, >0 for sampling
+TEMPERATURE=0.6  # 0.0 for greedy, >0 for sampling
 TOP_P=0.95
 TOP_K=-1  # -1 means no top-k filtering (matching interleaved-rl)
 

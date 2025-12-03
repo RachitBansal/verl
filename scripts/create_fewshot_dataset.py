@@ -66,6 +66,8 @@ def create_fewshot_messages(n_shot, dataset_type="gsm8k"):
     """Create few-shot messages to prepend to prompts."""
     if dataset_type == "gsm8k":
         examples = GSM8K_FEWSHOT_EXAMPLES[:n_shot]
+    elif dataset_type == "math":
+        examples = GSM8K_FEWSHOT_EXAMPLES[:n_shot]
     else:
         raise ValueError(f"Unsupported dataset type: {dataset_type}")
 
