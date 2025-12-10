@@ -156,13 +156,16 @@ def load_reward_manager(
         else:
             final_compute_score = default_compute_score
 
+        # Wrap final_compute_score with reward_kwargs if provided
+        if reward_kwargs:
+            final_compute_score = partial(_call_with_kwargs, final_compute_score, reward_kwargs)
+
     # Instantiate and return the reward manager with the specified parameters
     return reward_manager_cls(
         tokenizer=tokenizer,
         num_examine=num_examine,
         compute_score=final_compute_score,
         reward_fn_key=config.data.reward_fn_key,
-        **reward_kwargs,
     )
 
 

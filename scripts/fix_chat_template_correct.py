@@ -7,7 +7,7 @@ The issue: chat template adds "Answer: " but should add "Answer: Let's solve thi
 
 from transformers import AutoTokenizer
 
-MODEL_PATH = '/n/netscratch/dam_lab/Lab/sqin/olmo/checkpoints/OLMo2-1B-stage1-50B/step22000-hf'
+MODEL_PATH = '/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step10000-hf'
 
 print("=" * 100)
 print("FIXING OLMO-2 CHAT TEMPLATE (CORRECT VERSION)")
@@ -25,7 +25,7 @@ print(repr(tokenizer.chat_template))
 print()
 
 # The CORRECT template that matches interleaved-rl
-new_template = "{% for message in messages %}{{ message['content'] }}\n{% endfor %}{% if add_generation_prompt %}Answer: Let's solve this step by step.\n{% endif %}"
+new_template = "{% for message in messages %}{{ message['content'] }}\n{% endfor %}{% if add_generation_prompt %}{% endif %}"
 
 print("NEW chat template (matching interleaved-rl):")
 print(repr(new_template))
@@ -90,8 +90,7 @@ if response.lower() == 'y':
     print("✓ Done! Chat template updated.")
     print()
     print("Next steps:")
-    print("  1. Re-run: bash scripts/evaluate_olmo2_math_hf.sh")
-    print("  2. You should now get ~14% accuracy")
+    print("  Re-run: bash scripts/evaluate_olmo2_math_hf.sh")
 else:
     print()
     print("Change NOT saved. The tokenizer was not modified.")

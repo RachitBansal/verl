@@ -64,24 +64,33 @@ There are 100/4= <<100/4=25>>25 purple four leaf clovers
 
 def create_fewshot_messages(n_shot, dataset_type="gsm8k"):
     """Create few-shot messages to prepend to prompts."""
-    if dataset_type == "gsm8k":
-        examples = GSM8K_FEWSHOT_EXAMPLES[:n_shot]
-    elif dataset_type == "math":
-        examples = GSM8K_FEWSHOT_EXAMPLES[:n_shot]
-    else:
-        raise ValueError(f"Unsupported dataset type: {dataset_type}")
+    import re
+
+    examples = GSM8K_FEWSHOT_EXAMPLES[:n_shot]
 
     messages = []
     for example in examples:
-        # Add question as user message - NO instruction (match training data format)
+        # Add question as user message
         messages.append({
             "role": "user",
             "content": f"Question: {example['question']}"
         })
-        # Add answer as assistant message
+
+        # Convert answer format based on dataset type
+        answer = example['answer']
+        if dataset_type in ["math", "openmathinstruct2"]:
+            # Convert #### format to \boxed{} format for MATH and OpenMathInstruct-2
+            # Find the final answer after ####
+            match = re.search(r'####\s*(.+?)(?:\n|$)', answer)
+            if match:
+                final_answer = match.group(1).strip()
+                # Replace #### with \boxed{} (need 4 backslashes to get literal \b in f-string)
+                answer = re.sub(r'####\s*.+?(?:\n|$)', f'\\\\boxed{{{final_answer}}}', answer)
+
+        # Add answer as assistant message (NO instruction in few-shot examples)
         messages.append({
             "role": "assistant",
-            "content": f"Answer: {example['answer']}"
+            "content": f"Answer: {answer}"
         })
 
     return messages
@@ -97,6 +106,16 @@ def add_fewshot_to_dataset(input_file, output_file, n_shot, dataset_type="gsm8k"
 
     # Get few-shot messages
     fewshot_messages = create_fewshot_messages(n_shot, dataset_type)
+
+    # Get the answer instruction based on dataset type
+    if dataset_type == "gsm8k":
+        answer_instruction = "Answer: Let's think step by step and output the final answer after \"####\"."
+    elif dataset_type == "math":
+        answer_instruction = "Answer: Let's think step by step and output the final answer within \\boxed{}."
+    elif dataset_type == "openmathinstruct2":
+        answer_instruction = "Answer: Let's think step by step and output the final answer within \\boxed{}."
+    else:
+        raise ValueError(f"Unsupported dataset type: {dataset_type}")
 
     # Process each row
     new_prompts = []
@@ -120,14 +139,24 @@ def add_fewshot_to_dataset(input_file, output_file, n_shot, dataset_type="gsm8k"
                 if not content.startswith("Question:"):
                     content = "Question: " + content
 
-                # Remove the original instruction if present (from preprocessing)
-                # Keep it clean like the training data - NO instruction
-                original_instruction = ' Let\'s think step by step and output the final answer after "####".'
-                if original_instruction in content:
-                    content = content.replace(original_instruction, "")
+                # Remove any existing instruction suffixes (to avoid duplication)
+                instructions_to_remove = [
+                    ' Let\'s think step by step and output the final answer after "####".',  # GSM8K
+                    " Let's think step by step and output the final answer within \\\\boxed{}.",  # MATH (double backslash)
+                    " Let's think step by step and output the final answer within \\boxed{}.",  # MATH (single backslash)
+                ]
+                for instruction in instructions_to_remove:
+                    if instruction in content:
+                        content = content.replace(instruction, "")
 
                 new_prompt[i]['content'] = content
                 break
+
+        # Add the assistant message with the appropriate instruction
+        new_prompt.append({
+            "role": "assistant",
+            "content": answer_instruction
+        })
 
         new_prompts.append(new_prompt)
 
@@ -145,7 +174,8 @@ if __name__ == "__main__":
     parser.add_argument("--train_file", type=str, help="Train file (not used, for compatibility)")
     parser.add_argument("--output_file", type=str, required=True, help="Output parquet file")
     parser.add_argument("--n_shot", type=int, required=True, help="Number of few-shot examples")
-    parser.add_argument("--dataset_type", type=str, default="gsm8k", choices=["gsm8k", "math"],
+    parser.add_argument("--dataset_type", type=str, default="gsm8k",
+                        choices=["gsm8k", "math", "openmathinstruct2"],
                         help="Dataset type")
 
     args = parser.parse_args()
