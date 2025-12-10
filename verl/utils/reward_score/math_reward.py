@@ -15,7 +15,6 @@
 
 import re
 from typing import Optional
-import numpy as np
 
 
 def normalize_answer(answer: str) -> str:
@@ -141,12 +140,9 @@ def is_equiv(str1, str2, verbose=False):
         if norm1 == norm2:
             return True
 
-        # Try numerical comparison with tolerance
-        num1 = extract_number(norm1)
-        num2 = extract_number(norm2)
-
-        if num1 is not None and num2 is not None:
-            return np.isclose(num1, num2, rtol=1e-4, atol=1e-8)
+        # Removed buggy numerical fallback that incorrectly extracts only
+        # the first digit from LaTeX fractions (e.g., \frac{1}{2} -> 1)
+        # If answers don't match after proper LaTeX normalization, they're different
 
         return False
     except Exception:

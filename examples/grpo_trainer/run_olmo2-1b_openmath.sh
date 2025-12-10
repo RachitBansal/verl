@@ -1,36 +1,41 @@
 #!/usr/bin/env bash
-# Non-SLURM version for local/interactive execution
-# GRPO training with OLMo2-1B on OpenMathInstruct-1 dataset
+# GRPO training with OLMo2-1B on OpenMathInstruct-2 GSM8K subset
+# Author: Sunny + Claude
 
 set -x
 
-# ============================================================================
-# Model Configuration
-# ============================================================================
-# Use custom local checkpoint instead of HuggingFace hub model
-OLMO_CHECKPOINT="/n/netscratch/dam_lab/Lab/sqin/olmo/checkpoints/OLMo2-1B-stage1"
+# Clean up any existing Ray processes
+echo "Cleaning up existing Ray processes..."
+ray stop 2>/dev/null || true
+sleep 30
 
 # ============================================================================
-# Dataset Configuration - OpenMathInstruct-1
+# Configuration
 # ============================================================================
-# NOTE: You need to download and prepare the OpenMathInstruct-1 dataset first.
-# Run: python3 examples/grpo_trainer/prepare_openmath_data.py
-DATA_DIR="/n/netscratch/dam_lab/Lab/sqin/tmp_data/openmath"
-TRAIN_FILE="${DATA_DIR}/train.parquet"
-VAL_FILE="${DATA_DIR}/validation.parquet"
+# Model checkpoint
+STEP_NUM=22000
+OLMO_CHECKPOINT="/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step${STEP_NUM}-hf"
 
-# ============================================================================
-# Environment Configuration
-# ============================================================================
-export DISABLE_FLASH_ATTN=1
-export USE_EAGER_ATTN=0
+# GPU configuration (auto-detect from SLURM if available)
+N_GPUS_PER_NODE=${SLURM_GPUS_PER_NODE:-1}
 
-# Wandb configuration (uncomment and set your key if using wandb)
+# Dataset (run: python3 examples/data_preprocess/openmathinstruct2.py)
+DATA_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2_gsm8k"
+TRAIN_FILE="${DATA_DIR}/train_gsm8k.parquet"
+VAL_FILE="${DATA_DIR}/val_gsm8k.parquet"
+
+# Output directory for checkpoints
+OUTPUT_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments"
+
+# Reward: partial credit for \boxed{} format (0.1 = 10% reward for formatting)
+FORMAT_SCORE=0.1
+
+# Wandb (optional)
 # export WANDB_API_KEY="your_key_here"
-# export WANDB_MODE=offline
+export WANDB_ENTITY="harvardml"  # Ensure all team members log to same entity
 
 # ============================================================================
-# Training Configuration
+# Training
 # ============================================================================
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
@@ -61,13 +66,15 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=16 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     algorithm.use_kl_in_reward=False \
+    +reward_model.reward_kwargs.format_score=${FORMAT_SCORE} \
     trainer.critic_warmup=0 \
     trainer.logger='["console","wandb"]' \
-    trainer.project_name='verl_grpo_openmath' \
-    trainer.experiment_name='olmo2_1b_openmath_stage1' \
-    trainer.n_gpus_per_node=4 \
+    trainer.project_name='rl_pretrain' \
+    trainer.experiment_name="olmo2_1b_step${STEP_NUM}_omigsm8k" \
+    trainer.default_local_dir="${OUTPUT_DIR}/olmo2_1b_step${STEP_NUM}_omigsm8k" \
+    trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
-    trainer.save_freq=20 \
+    trainer.save_freq=50 \
     trainer.test_freq=5 \
     trainer.total_epochs=10 \
     "$@"
