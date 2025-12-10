@@ -1,0 +1,5 @@
+Loading predictions from /n/netscratch/dam_lab/Lab/brachit/verl/eval_results/olmo2-1b-step22000-4shot-32samples-temp0.6/math_predictions.parquet
+Dataset: math
+Number of test examples: 5000
+Samples per example: 32
+

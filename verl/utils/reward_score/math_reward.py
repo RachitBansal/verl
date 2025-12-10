@@ -15,7 +15,6 @@
 
 import re
 from typing import Optional
-import numpy as np
 
 
 def normalize_answer(answer: str) -> str:
@@ -141,12 +140,9 @@ def is_equiv(str1, str2, verbose=False):
         if norm1 == norm2:
             return True
 
-        # Try numerical comparison with tolerance
-        num1 = extract_number(norm1)
-        num2 = extract_number(norm2)
-
-        if num1 is not None and num2 is not None:
-            return np.isclose(num1, num2, rtol=1e-4, atol=1e-8)
+        # Removed buggy numerical fallback that incorrectly extracts only
+        # the first digit from LaTeX fractions (e.g., \frac{1}{2} -> 1)
+        # If answers don't match after proper LaTeX normalization, they're different
 
         return False
     except Exception:
@@ -206,7 +202,7 @@ def fix_fracs(string):
             else:
                 try:
                     assert len(substr) >= 2
-                except Exception:
+                except:  # noqa: E722
                     return string
                 a = substr[0]
                 b = substr[1]
@@ -237,7 +233,7 @@ def fix_a_slash_b(string):
         assert string == "{}/{}".format(a, b)
         new_string = "\\frac{" + str(a) + "}{" + str(b) + "}"
         return new_string
-    except Exception:
+    except:  # noqa: E722
         return string
 
 
@@ -295,8 +291,8 @@ def strip_string(string):
     string = remove_right_units(string)
 
     # remove percentage
-    string = string.replace("\\\\%", "")
     string = string.replace("\\%", "")
+    string = string.replace("\%", "")  # noqa: W605
 
     # " 0." equivalent to " ." and "{0." equivalent to "{." Alternatively, add "0" if "." is the start of the string
     string = string.replace(" .", " 0.")
