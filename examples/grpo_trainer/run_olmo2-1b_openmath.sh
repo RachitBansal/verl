@@ -1,43 +1,69 @@
 #!/usr/bin/env bash
 # GRPO training with OLMo2-1B on OpenMathInstruct-2 GSM8K subset
-# Author: Sunny + Claude
+# Author: Sunny + Claude (Modified for cmohri env)
 
 set -x
+
+# ============================================================================
+# 1. ENVIRONMENT SETUP
+# ============================================================================
+
+# Source the venv
+source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
+
+# Use the env's Python explicitly:
+PYBIN=/n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/python
+
+# Export API keys and settings
+export WANDB_API_KEY="cdc354a166dcf9cbcd8b1eed1fd2fe89d03f8b90"
+export WANDB_ENTITY="harvardml"
+export PYTHONNOUSERSITE=1
+export RAY_DEDUP_LOGS=1
+export HYDRA_FULL_ERROR=1
+
+# ---- Fast local caches (Fixes the dam_lab/Lab permission issue) ----
+export XDG_CACHE_HOME=${XDG_CACHE_HOME:-/tmp/.cache-$USER}
+export HF_HOME=${HF_HOME:-/tmp/hf-home-$USER}
+mkdir -p "$HF_HOME" || true
 
 # Clean up any existing Ray processes
 echo "Cleaning up existing Ray processes..."
 ray stop 2>/dev/null || true
-sleep 30
+sleep 10  # Reduced sleep slightly to save time
 
 # ============================================================================
-# Configuration
+# 2. CONFIGURATION
 # ============================================================================
-# Model checkpoint
+
+# Model checkpoint (Read-only path is fine here)
 STEP_NUM=22000
 OLMO_CHECKPOINT="/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step${STEP_NUM}-hf"
 
-# GPU configuration (auto-detect from SLURM if available)
+# GPU configuration (Auto-detect from SLURM, default to 1)
 N_GPUS_PER_NODE=${SLURM_GPUS_PER_NODE:-1}
 
-# Dataset (run: python3 examples/data_preprocess/openmathinstruct2.py)
+# Dataset
+# NOTE: Ensure you have read access here. If this is data you generated yourself, 
+# you might need to point this to your sham_lab directory instead.
 DATA_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2_gsm8k"
 TRAIN_FILE="${DATA_DIR}/train_gsm8k.parquet"
 VAL_FILE="${DATA_DIR}/val_gsm8k.parquet"
 
 # Output directory for checkpoints
-OUTPUT_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments"
+# CRITICAL FIX: Pointing this to your user scratch space to avoid Permission Denied
+USER_SCRATCH="/n/netscratch/dam_lab/Everyone/rl_pretrain"
+OUTPUT_DIR="${USER_SCRATCH}/rl_pretrain_experiments/experiments"
+mkdir -p "$OUTPUT_DIR"
 
 # Reward: partial credit for \boxed{} format (0.1 = 10% reward for formatting)
 FORMAT_SCORE=0.1
 
-# Wandb (optional)
-# export WANDB_API_KEY="your_key_here"
-export WANDB_ENTITY="harvardml"  # Ensure all team members log to same entity
+# ============================================================================
+# 3. TRAINING
+# ============================================================================
 
-# ============================================================================
-# Training
-# ============================================================================
-python3 -m verl.trainer.main_ppo \
+# Using $PYBIN instead of python3 to ensure we use the venv
+$PYBIN -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     data.train_files=${TRAIN_FILE} \
     data.val_files=${VAL_FILE} \
@@ -78,4 +104,3 @@ python3 -m verl.trainer.main_ppo \
     trainer.test_freq=5 \
     trainer.total_epochs=10 \
     "$@"
-

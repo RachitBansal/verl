@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=verl-grpo-olmo2-openmath
-#SBATCH --account=kempner_dam_lab
+#SBATCH --account=kempner_sham_lab
 #SBATCH --partition=kempner_h100
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -9,12 +9,12 @@
 #SBATCH --mem=200G
 #SBATCH --time=24:00:00
 #SBATCH --output=logs/slurm-%j.out
-#SBATCH --error=logs/slurm-%j.out
+#SBATCH --error=logs/slurm-%j.errr
 
-module purge
-module load Mambaforge
-module load cuda cudnn
-mamba activate openrlhf
+# module purge
+# module load Mambaforge
+# module load cuda cudnn
+# mamba activate openrlhf
 
 # Print job info
 echo "Job started at $(date)"

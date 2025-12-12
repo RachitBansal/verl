@@ -10,7 +10,7 @@ Creates three deduplicated datasets:
 Usage:
      python examples/data_preprocess/openmathinstruct2.py \
       --n_val 1000 \
-      --n_subset 5000 \
+      --n_samples 5000 \
       --seed 42 \
       --local_save_dir /n/netscratch/dam_lab/Lab/sqin/rl_pretrain/data/openmathinstruct2_gsm8k \
       --cache_dir /n/netscratch/dam_lab/Lab/sqin/cache/datasets
@@ -37,7 +37,7 @@ if __name__ == "__main__":
         "--cache_dir", default=None, help="Cache directory for downloading datasets from HuggingFace."
     )
     parser.add_argument(
-        "--n_subset", default=5000, type=int, help="Number of samples for train_subset.parquet (from entire dataset)."
+        "--n_samples", default=5000, type=int, help="Number of samples for train_subset.parquet (from entire dataset)."
     )
     parser.add_argument(
         "--n_val", default=1000, type=int, help="Number of GSM8K samples for validation."
@@ -118,8 +118,8 @@ if __name__ == "__main__":
 
     # === Dataset 1: train_subset - Random samples from entire dataset ===
     print(f"\n=== Creating train_subset.parquet ===", flush=True)
-    print(f"Randomly sampling {args.n_subset} examples from entire dataset...", flush=True)
-    train_subset = train_dataset.shuffle(seed=args.seed).select(range(args.n_subset))
+    print(f"Randomly sampling {args.n_samples} examples from entire dataset...", flush=True)
+    train_subset = train_dataset.shuffle(seed=args.seed).select(range(args.n_samples))
     train_subset = train_subset.map(
         function=lambda ex, idx: process_fn(ex, idx, "train_subset"),
         with_indices=True
