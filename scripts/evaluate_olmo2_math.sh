@@ -25,15 +25,15 @@ set -u  # Exit on undefined variable
 
 # Evaluation Control
 EVAL_GSM8K=true   # Set to true to evaluate on GSM8K
-EVAL_MATH=true    # Set to true to evaluate on MATH
+EVAL_MATH=false    # Set to true to evaluate on MATH
+OPENMATHINSTRUCT2=false  # Set to true to evaluate OpenMathInstruct-2 subset
 
 # Dataset Preparation Control
-OPENMATHINSTRUCT2=true  # Set to true to prepare OpenMathInstruct-2 subset
 OPENMATHINSTRUCT2_N_SAMPLES=5000  # Number of samples to randomly select
 
 # Model Configuration
-MODEL_PATH=/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step22000-hf
-MODEL_NAME="1B-step22000"
+MODEL_PATH=/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step5000-hf
+MODEL_NAME="1B-step5000"
 N_SAMPLES=1
 
 
@@ -44,7 +44,7 @@ TENSOR_PARALLEL_SIZE=1  # Increase if model doesn't fit in single GPU
 GPU_MEMORY_UTIL=0.85
 
 # Dataset Configuration
-BASE_DIR="/n/netscratch/dam_lab/Everyone/sqin/rl_pretrain"
+BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain"
 DATA_DIR="${BASE_DIR}/data"
 CACHE_DIR="/n/netscratch/dam_lab/Lab/sqin/cache"  # HuggingFace datasets cache - change it per user 
 GSM8K_DIR="${DATA_DIR}/gsm8k"
@@ -52,10 +52,10 @@ MATH_DIR="${DATA_DIR}/math"
 OPENMATHINSTRUCT2_DIR="${DATA_DIR}/openmathinstruct2"
 
 # Evaluation Configuration
-N_SHOT=8  # Number of few-shot examples (matching interleaved-rl)
+N_SHOT=8  # Number of few-shot examples
 TEMPERATURE=0.0  # 0.0 for greedy, >0 for sampling
 TOP_P=0.95
-TOP_K=-1  # -1 means no top-k filtering (matching interleaved-rl)
+TOP_K=-1  # -1 means no top-k filtering 
 
 # Generation Configuration
 BATCH_SIZE=256

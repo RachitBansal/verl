@@ -7,7 +7,7 @@ The issue: chat template adds "Answer: " but should add "Answer: Let's solve thi
 
 from transformers import AutoTokenizer
 
-MODEL_PATH = '/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step10000-hf'
+MODEL_PATH = '/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step5000_omigsm8k/hf_model/step800'
 
 print("=" * 100)
 print("FIXING OLMO-2 CHAT TEMPLATE (CORRECT VERSION)")
