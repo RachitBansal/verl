@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """
-Fix OLMo-2 chat template to add the FULL generation prompt.
-
-The issue: chat template adds "Answer: " but should add "Answer: Let's solve this step by step.\n"
+Fix OLMo-2 chat template.
 """
 
 from transformers import AutoTokenizer
@@ -44,11 +42,16 @@ print("=" * 100)
 print()
 
 # Before
-print("BEFORE (current template):")
-before_result = tokenizer.apply_chat_template(test_messages, tokenize=False, add_generation_prompt=True)
-print(before_result)
-print("Ends with:", repr(before_result[-50:]))
-print()
+if tokenizer.chat_template is not None:
+    print("BEFORE (current template):")
+    before_result = tokenizer.apply_chat_template(test_messages, tokenize=False, add_generation_prompt=True)
+    print(before_result)
+    print("Ends with:", repr(before_result[-50:]))
+    print()
+else:
+    print("BEFORE: No chat template set")
+    print()
+    before_result = None
 
 # Update the template
 tokenizer.chat_template = new_template
@@ -65,12 +68,17 @@ print("=" * 100)
 print("DIFFERENCE")
 print("=" * 100)
 print()
-print("Old prompt ended with:")
-print(repr(before_result[-60:]))
-print()
-print("New prompt ends with:")
-print(repr(after_result[-60:]))
-print()
+if before_result is not None:
+    print("Old prompt ended with:")
+    print(repr(before_result[-60:]))
+    print()
+    print("New prompt ends with:")
+    print(repr(after_result[-60:]))
+    print()
+else:
+    print("New prompt ends with:")
+    print(repr(after_result[-60:]))
+    print()
 print("This matches interleaved-rl's: 'Answer: Let's solve this step by step.\\n'")
 print()
 
@@ -88,9 +96,6 @@ if response.lower() == 'y':
     print("Saving updated tokenizer...")
     tokenizer.save_pretrained(MODEL_PATH)
     print("✓ Done! Chat template updated.")
-    print()
-    print("Next steps:")
-    print("  Re-run: bash scripts/evaluate_olmo2_math_hf.sh")
 else:
     print()
     print("Change NOT saved. The tokenizer was not modified.")
