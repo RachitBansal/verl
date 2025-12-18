@@ -23,18 +23,32 @@ set -u  # Exit on undefined variable
 # CONFIGURATION
 #############################################
 
-# Evaluation Control
-EVAL_GSM8K=true   # Set to true to evaluate on GSM8K
-EVAL_MATH=false    # Set to true to evaluate on MATH
-OPENMATHINSTRUCT2=false  # Set to true to evaluate OpenMathInstruct-2 subset
+source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
+
+# Evaluation Control (defaults; can be overridden by args)
+EVAL_GSM8K_DEFAULT=true    # arg4
+EVAL_MATH_DEFAULT=false    # arg5
+OPENMATHINSTRUCT2=false    # Keep disabled unless manually toggled
 
 # Dataset Preparation Control
 OPENMATHINSTRUCT2_N_SAMPLES=5000  # Number of samples to randomly select
 
-# Model Configuration
-MODEL_PATH=/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step5000-hf
-MODEL_NAME="1B-step5000"
-N_SAMPLES=1
+# Model Configuration defaults (can be overridden by args)
+MODEL_PATH_DEFAULT=/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step5000-hf  # arg1
+MODEL_NAME_DEFAULT="1B-step5000"  # arg2
+N_SAMPLES_DEFAULT=1  # arg3
+
+# Positional arguments from launcher:
+#   $1 = MODEL_PATH
+#   $2 = MODEL_NAME
+#   $3 = N_SAMPLES
+#   $4 = EVAL_GSM8K (true/false)
+#   $5 = EVAL_MATH (true/false)
+MODEL_PATH="${1:-${MODEL_PATH_DEFAULT}}"
+MODEL_NAME="${2:-${MODEL_NAME_DEFAULT}}"
+N_SAMPLES="${3:-${N_SAMPLES_DEFAULT}}"
+EVAL_GSM8K="${4:-${EVAL_GSM8K_DEFAULT}}"
+EVAL_MATH="${5:-${EVAL_MATH_DEFAULT}}"
 
 
 # Hardware Configuration
@@ -52,10 +66,14 @@ MATH_DIR="${DATA_DIR}/math"
 OPENMATHINSTRUCT2_DIR="${DATA_DIR}/openmathinstruct2"
 
 # Evaluation Configuration
-N_SHOT=8  # Number of few-shot examples
+N_SHOT=1  # Number of few-shot examples
 TEMPERATURE=0.0  # 0.0 for greedy, >0 for sampling
 TOP_P=0.95
 TOP_K=-1  # -1 means no top-k filtering 
+
+if [ "${N_SAMPLES}" -gt 1 ]; then
+    TEMPERATURE=0.6
+fi
 
 # Generation Configuration
 BATCH_SIZE=256

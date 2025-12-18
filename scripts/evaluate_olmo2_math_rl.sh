@@ -16,10 +16,20 @@ set -u  # Exit on undefined variable
 # CONFIGURATION
 #############################################
 
-# Model Configuration
-MODEL_PATH=/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step14000_omigsm8k/hf_model/step800
-MODEL_NAME=1B-step14000-rl-step650
-N_SAMPLES=1
+source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
+
+# Model Configuration defaults (can be overridden by args)
+MODEL_PATH_DEFAULT=/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step14000_omigsm8k/hf_model/step800  # arg1
+MODEL_NAME_DEFAULT=1B-step14000-rl-step650  # arg2
+N_SAMPLES_DEFAULT=1  # arg3
+
+# Positional arguments from launcher:
+#   $1 = MODEL_PATH
+#   $2 = MODEL_NAME
+#   $3 = N_SAMPLES
+MODEL_PATH="${1:-${MODEL_PATH_DEFAULT}}"
+MODEL_NAME="${2:-${MODEL_NAME_DEFAULT}}"
+N_SAMPLES="${3:-${N_SAMPLES_DEFAULT}}"
 
 
 # Hardware Configuration
@@ -39,6 +49,10 @@ N_SHOT=0  # Number of few-shot examples
 TEMPERATURE=0.0  # 0.0 for greedy, >0 for sampling
 TOP_P=0.95
 TOP_K=-1  # -1 means no top-k filtering
+
+if [ "${N_SAMPLES}" -gt 1 ]; then
+    TEMPERATURE=0.6
+fi
 
 # Generation Configuration
 BATCH_SIZE=256
