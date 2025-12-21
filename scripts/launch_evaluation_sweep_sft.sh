@@ -20,13 +20,13 @@ CHECKPOINT_BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments"
 
 # Base directory for verl
 BASE_DIR="/n/netscratch/dam_lab/Lab/brachit/rl/verl"
-EVAL_SCRIPT="${BASE_DIR}/scripts/evaluate_olmo2_math.sh"
+EVAL_SCRIPT="${BASE_DIR}/scripts/evaluate_olmo2_math_rl.sh"
 
 # N_SAMPLES values to test (top-k generations per prompt)
 N_SAMPLES_LIST=(1 8 32 128)
 
 # SLURM Configuration
-SLURM_PARTITION="kempner_h100"
+SLURM_PARTITION="kempner_requeue"
 SLURM_ACCOUNT="kempner_dam_lab"
 SLURM_TIME="24:00:00"
 SLURM_NODES=1
@@ -137,7 +137,7 @@ echo ""
 cd "${BASE_DIR}"
 
 # Run SFT evaluation (GSM8K enabled, MATH disabled by default)
-bash "${EVAL_SCRIPT}" "${model_path}" "${model_name}" "${n_samples}" "true" "false"
+bash "${EVAL_SCRIPT}" "${model_path}" "${model_name}" "${n_samples}"
 
 echo ""
 echo "================================================"
