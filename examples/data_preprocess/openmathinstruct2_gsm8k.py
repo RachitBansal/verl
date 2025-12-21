@@ -1,20 +1,16 @@
 # Author: Sunny + Claude
 """
-Preprocess the nvidia/OpenMathInstruct-2 dataset to parquet format
+Preprocess the nvidia/OpenMathInstruct-2 dataset for GSM8K subset
 
-Creates three deduplicated datasets:
-1. train.parquet: All samples except validation sets (data_source: "nvidia/OpenMathInstruct-2")
-2. val_gsm8k.parquet: 1k GSM8K-related problems for validation (data_source: "OpenMathInstruct-2/gsm8k")
-3. val_math.parquet: 1k MATH-related problems for validation (data_source: "OpenMathInstruct-2/math")
-
-Note: Different data_source values for validation sets enable separate metric reporting in training logs.
+Creates two deduplicated datasets:
+1. train_gsm8k.parquet: GSM8K questions for training (all except validation)
+2. val_gsm8k.parquet: 1k GSM8K questions for validation
 
 Usage:
-     python examples/data_preprocess/openmathinstruct2.py \
-      --n_val_gsm8k 1000 \
-      --n_val_math 1000 \
+     python examples/data_preprocess/openmathinstruct2_gsm8k.py \
+      --n_val 1000 \
       --seed 42 \
-      --local_save_dir /n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2 \
+      --local_save_dir /n/netscratch/dam_lab/Lab/sqin/rl_pretrain/data/openmathinstruct2_gsm8k \
       --cache_dir /n/netscratch/dam_lab/Lab/sqin/cache/datasets
 """
 
@@ -39,10 +35,7 @@ if __name__ == "__main__":
         "--cache_dir", default=None, help="Cache directory for downloading datasets from HuggingFace."
     )
     parser.add_argument(
-        "--n_val_gsm8k", default=1000, type=int, help="Number of GSM8K samples for validation."
-    )
-    parser.add_argument(
-        "--n_val_math", default=1000, type=int, help="Number of MATH samples for validation."
+        "--n_val", default=1000, type=int, help="Number of GSM8K samples for validation."
     )
     parser.add_argument(
         "--seed", default=42, type=int, help="Random seed for sampling."
@@ -89,7 +82,7 @@ if __name__ == "__main__":
     instruction_following = "Let's think step by step and output the final answer within \\boxed{}."
 
     # Process the dataset to match the expected format
-    def process_fn(example, idx, split_name, custom_data_source=None):
+    def process_fn(example, idx, split_name):
         # Fields in OpenMathInstruct-2:
         # - problem: the math problem
         # - generated_solution: the solution text
@@ -103,11 +96,8 @@ if __name__ == "__main__":
         expected_answer = example["expected_answer"]
         problem_source = example["problem_source"]
 
-        # Use custom_data_source if provided (for validation sets), otherwise use default
-        source = custom_data_source if custom_data_source is not None else data_source
-
         data = {
-            "data_source": source,
+            "data_source": data_source,
             "prompt": [{"role": "user", "content": question}],
             "ability": "math",
             "reward_model": {"style": "rule", "ground_truth": str(expected_answer)},
@@ -121,8 +111,8 @@ if __name__ == "__main__":
         }
         return data
 
-    # === Dataset 1: Filter and create GSM8K validation set ===
-    print(f"\n=== Creating GSM8K validation set ===", flush=True)
+    # === Filter for GSM8K-related questions ===
+    print(f"\n=== Filtering for GSM8K-related questions ===", flush=True)
     gsm8k_filter_fn = lambda x: x["problem_source"] in ["gsm8k", "augmented_gsm8k"]
     gsm8k_all = train_dataset.filter(gsm8k_filter_fn)
 
@@ -133,63 +123,30 @@ if __name__ == "__main__":
     print(f"GSM8K-related dataset size after deduplication: {len(gsm8k_all)}", flush=True)
     print(f"  - gsm8k: {gsm8k_count} problems", flush=True)
     print(f"  - augmented_gsm8k: {augmented_gsm8k_count} problems", flush=True)
+    print(f"  - This represents {100 * len(gsm8k_all) / len(train_dataset):.2f}% of deduplicated dataset", flush=True)
 
-    # Shuffle and select validation samples
+    # === Dataset 2: Split GSM8K into train and validation ===
+    print(f"\n=== Splitting GSM8K into train/val ===", flush=True)
+
+    # Shuffle and split
     gsm8k_shuffled = gsm8k_all.shuffle(seed=args.seed)
-    n_val_gsm8k = min(args.n_val_gsm8k, len(gsm8k_shuffled))
+    n_val = min(args.n_val, len(gsm8k_shuffled))
 
-    val_gsm8k = gsm8k_shuffled.select(range(n_val_gsm8k))
+    # Validation: first n_val samples
+    val_gsm8k = gsm8k_shuffled.select(range(n_val))
     val_gsm8k = val_gsm8k.map(
-        function=lambda ex, idx: process_fn(ex, idx, "val_gsm8k", custom_data_source="OpenMathInstruct-2/gsm8k"),
+        function=lambda ex, idx: process_fn(ex, idx, "val_gsm8k"),
         with_indices=True
     )
     print(f"val_gsm8k size: {len(val_gsm8k)}", flush=True)
 
-    # === Dataset 2: Filter and create MATH validation set ===
-    print(f"\n=== Creating MATH validation set ===", flush=True)
-    math_filter_fn = lambda x: x["problem_source"] in ["math", "augmented_math"]
-    math_all = train_dataset.filter(math_filter_fn)
-
-    # Count breakdown by source
-    math_count = sum(1 for x in math_all if x["problem_source"] == "math")
-    augmented_math_count = sum(1 for x in math_all if x["problem_source"] == "augmented_math")
-
-    print(f"MATH-related dataset size after deduplication: {len(math_all)}", flush=True)
-    print(f"  - math: {math_count} problems", flush=True)
-    print(f"  - augmented_math: {augmented_math_count} problems", flush=True)
-
-    # Shuffle and select validation samples
-    math_shuffled = math_all.shuffle(seed=args.seed)
-    n_val_math = min(args.n_val_math, len(math_shuffled))
-
-    val_math = math_shuffled.select(range(n_val_math))
-    val_math = val_math.map(
-        function=lambda ex, idx: process_fn(ex, idx, "val_math", custom_data_source="OpenMathInstruct-2/math"),
+    # Training: remaining samples
+    train_gsm8k = gsm8k_shuffled.select(range(n_val, len(gsm8k_shuffled)))
+    train_gsm8k = train_gsm8k.map(
+        function=lambda ex, idx: process_fn(ex, idx, "train_gsm8k"),
         with_indices=True
     )
-    print(f"val_math size: {len(val_math)}", flush=True)
-
-    # === Dataset 3: Create training set (exclude validation samples) ===
-    print(f"\n=== Creating training set ===", flush=True)
-
-    # Collect all validation problem texts to exclude from training
-    val_problems = set()
-    for example in val_gsm8k:
-        val_problems.add(example["extra_info"]["problem"])
-    for example in val_math:
-        val_problems.add(example["extra_info"]["problem"])
-
-    print(f"Total validation samples to exclude: {len(val_problems)}", flush=True)
-
-    # Filter training set to exclude validation samples
-    train_filter_fn = lambda x: x["problem"] not in val_problems
-    train_data = train_dataset.filter(train_filter_fn)
-
-    train_data = train_data.map(
-        function=lambda ex, idx: process_fn(ex, idx, "train"),
-        with_indices=True
-    )
-    print(f"train size: {len(train_data)}", flush=True)
+    print(f"train_gsm8k size: {len(train_gsm8k)}", flush=True)
 
     local_save_dir = args.local_dir
     if local_save_dir is not None:
@@ -205,39 +162,22 @@ if __name__ == "__main__":
 
     print(f"\n=== Saving datasets to {local_dir} ===", flush=True)
 
-    # Save train.parquet
-    output_file = os.path.join(local_dir, "train.parquet")
-    train_data.to_parquet(output_file)
-    print(f"✓ Saved train.parquet ({len(train_data)} examples)", flush=True)
+    # Save train_gsm8k.parquet
+    output_file = os.path.join(local_dir, "train_gsm8k.parquet")
+    train_gsm8k.to_parquet(output_file)
+    print(f"✓ Saved train_gsm8k.parquet ({len(train_gsm8k)} examples)", flush=True)
 
     # Save val_gsm8k.parquet
     output_file = os.path.join(local_dir, "val_gsm8k.parquet")
     val_gsm8k.to_parquet(output_file)
     print(f"✓ Saved val_gsm8k.parquet ({len(val_gsm8k)} examples)", flush=True)
 
-    # Save val_math.parquet
-    output_file = os.path.join(local_dir, "val_math.parquet")
-    val_math.to_parquet(output_file)
-    print(f"✓ Saved val_math.parquet ({len(val_math)} examples)", flush=True)
-
     # Save example JSON files for reference
-    example = train_data[0]
-    example_file = os.path.join(local_dir, "train_example.json")
-    with open(example_file, "w") as f:
-        json.dump(example, f, indent=2)
-    print(f"✓ Saved example to train_example.json", flush=True)
-
     example = val_gsm8k[0]
     example_file = os.path.join(local_dir, "val_gsm8k_example.json")
     with open(example_file, "w") as f:
         json.dump(example, f, indent=2)
     print(f"✓ Saved example to val_gsm8k_example.json", flush=True)
-
-    example = val_math[0]
-    example_file = os.path.join(local_dir, "val_math_example.json")
-    with open(example_file, "w") as f:
-        json.dump(example, f, indent=2)
-    print(f"✓ Saved example to val_math_example.json", flush=True)
 
     if hdfs_dir is not None:
         makedirs(hdfs_dir)
@@ -245,7 +185,6 @@ if __name__ == "__main__":
 
     print(f"\n{'='*60}", flush=True)
     print(f"Preprocessing complete! All datasets saved to {local_dir}", flush=True)
-    print(f"  - train.parquet: {len(train_data)} examples", flush=True)
+    print(f"  - train_gsm8k.parquet: {len(train_gsm8k)} examples (GSM8K training)", flush=True)
     print(f"  - val_gsm8k.parquet: {len(val_gsm8k)} examples (GSM8K validation)", flush=True)
-    print(f"  - val_math.parquet: {len(val_math)} examples (MATH validation)", flush=True)
     print(f"{'='*60}", flush=True)

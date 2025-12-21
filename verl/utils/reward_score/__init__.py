@@ -103,7 +103,7 @@ def default_compute_score(
 
         res = search_r1_like_qa_em.compute_score(solution_str, ground_truth)
 
-    elif data_source in ["nvidia/OpenMathInstruct-2"]:
+    elif data_source in ["nvidia/OpenMathInstruct-2"] or "OpenMathInstruct-2" in data_source:
         from . import openmathinstruct
 
         res = openmathinstruct.compute_score(solution_str, ground_truth)

@@ -20,10 +20,9 @@ OLMO_CHECKPOINT="/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/
 N_GPUS_PER_NODE=${SLURM_GPUS_PER_NODE:-1}
 
 # Dataset (run: python3 examples/data_preprocess/openmathinstruct2.py)
-DATA_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2"
-TRAIN_FILE="${DATA_DIR}/train.parquet"
-VAL_GSM_FILE="${DATA_DIR}/val_gsm8k.parquet"
-VAL_MATH_FILE="${DATA_DIR}/val_math.parquet"
+DATA_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2_gsm8k"
+TRAIN_FILE="${DATA_DIR}/train_gsm8k.parquet"
+VAL_FILE="${DATA_DIR}/val_gsm8k.parquet"
 
 # Output directory for checkpoints
 OUTPUT_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments"
@@ -41,7 +40,7 @@ export WANDB_ENTITY="harvardml"  # Ensure all team members log to same entity
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     data.train_files=${TRAIN_FILE} \
-    data.val_files=[${VAL_GSM_FILE},${VAL_MATH_FILE}] \
+    data.val_files=${VAL_FILE} \
     data.train_batch_size=512 \
     data.max_prompt_length=1024 \
     data.max_response_length=2048 \
@@ -63,7 +62,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
-    actor_rollout_ref.rollout.n=64 \
+    actor_rollout_ref.rollout.n=5 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=16 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     algorithm.use_kl_in_reward=False \
@@ -71,12 +70,12 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger='["console","wandb"]' \
     trainer.project_name='rl_pretrain' \
-    trainer.experiment_name="olmo2_1b_step${STEP_NUM}_omi_n64" \
-    trainer.default_local_dir="${OUTPUT_DIR}/olmo2_1b_step${STEP_NUM}_omi_n64" \
+    trainer.experiment_name="olmo2_1b_step${STEP_NUM}_omigsm8k" \
+    trainer.default_local_dir="${OUTPUT_DIR}/olmo2_1b_step${STEP_NUM}_omigsm8k" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
-    trainer.save_freq=500 \
-    trainer.test_freq=10 \
+    trainer.save_freq=50 \
+    trainer.test_freq=5 \
     trainer.total_epochs=10 \
     "$@"
 
