@@ -12,9 +12,10 @@ sleep 30
 # ============================================================================
 # Configuration
 # ============================================================================
-# Model checkpoint
-STEP_NUM=22000
-OLMO_CHECKPOINT="/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step${STEP_NUM}-hf"
+# Model checkpoint (can be overridden by exporting STEP_NUM or OLMO_CHECKPOINT)
+STEP_NUM=${STEP_NUM:-22000}
+OLMO_CHECKPOINT=${OLMO_CHECKPOINT:-"/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step${STEP_NUM}-hf"}
+N_ROLLOUTS=${N_ROLLOUTS:-32}
 
 # GPU configuration (auto-detect from SLURM if available)
 N_GPUS_PER_NODE=${SLURM_GPUS_PER_NODE:-1}
@@ -34,6 +35,8 @@ FORMAT_SCORE=0.1
 # Wandb (optional)
 # export WANDB_API_KEY="your_key_here"
 export WANDB_ENTITY="harvardml"  # Ensure all team members log to same entity
+
+source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
 
 # ============================================================================
 # Training

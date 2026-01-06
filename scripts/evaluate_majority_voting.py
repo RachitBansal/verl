@@ -33,8 +33,8 @@ def extract_answer(response: str, dataset_type: str, ground_truth: str) -> float
         from verl.utils.reward_score.gsm8k import compute_score
         return compute_score(response, ground_truth, method="flexible")
     elif dataset_type == "math":
-        from verl.utils.reward_score.gsm8k import compute_score
-        return compute_score(response, ground_truth, method="flexible")
+        from verl.utils.reward_score.math_reward import compute_score
+        return compute_score(response, ground_truth)
     else:
         raise ValueError(f"Unknown dataset type: {dataset_type}")
 

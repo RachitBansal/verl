@@ -28,12 +28,12 @@ BASE_DIR="/n/netscratch/dam_lab/Lab/brachit/rl/verl"
 EVAL_SCRIPT="${BASE_DIR}/scripts/evaluate_olmo2_math.sh"
 
 # N_SAMPLES values to test
-N_SAMPLES_LIST=(128)
+N_SAMPLES_LIST=(32)
 
 # SLURM Configuration
 SLURM_PARTITION="kempner"
 SLURM_ACCOUNT="kempner_dam_lab"
-SLURM_TIME="24:00:00"
+SLURM_TIME="4:00:00"
 SLURM_NODES=1
 SLURM_GPUS_PER_NODE=1
 SLURM_CPUS_PER_TASK=24

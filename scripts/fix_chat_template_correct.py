@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """
 Fix OLMo-2 chat template.
+
+Usage:
+    python fix_chat_template_correct.py /path/to/model_dir
 """
 
+import sys
+import os
 from transformers import AutoTokenizer
 
 MODEL_PATH = '/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step22000_omigsm8k/hf_model/step800'
 
 print("=" * 100)
-print("FIXING OLMO-2 CHAT TEMPLATE (CORRECT VERSION)")
+print("FIXING OLMo-2 CHAT TEMPLATE (CORRECT VERSION)")
 print("=" * 100)
 print()
 
@@ -89,9 +94,10 @@ print("=" * 100)
 print()
 print(f"This will update the tokenizer_config.json in: {MODEL_PATH}")
 print()
-response = input("Do you want to save this change? [y/N]: ")
+# response = input("Do you want to save this change? [y/N]: ")
 
-if response.lower() == 'y':
+# if response.lower() == 'y':
+if True:
     print()
     print("Saving updated tokenizer...")
     tokenizer.save_pretrained(MODEL_PATH)

@@ -13,7 +13,7 @@ set -e  # Exit on error
 set -u  # Exit on undefined variable
 
 # # ---- Activate your prebuilt env
-# source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
+source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
 
 # # Use the env's Python explicitly everywhere:
 # PYBIN=/n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/python
@@ -22,8 +22,6 @@ set -u  # Exit on undefined variable
 #############################################
 # CONFIGURATION
 #############################################
-
-source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
 
 # Evaluation Control (defaults; can be overridden by args)
 EVAL_GSM8K_DEFAULT=true    # arg4
@@ -66,14 +64,10 @@ MATH_DIR="${DATA_DIR}/math"
 OPENMATHINSTRUCT2_DIR="${DATA_DIR}/openmathinstruct2"
 
 # Evaluation Configuration
-N_SHOT=1  # Number of few-shot examples
-TEMPERATURE=0.0  # 0.0 for greedy, >0 for sampling
+N_SHOT=0  # Number of few-shot examples
+TEMPERATURE=0.6  # 0.0 for greedy, >0 for sampling
 TOP_P=0.95
 TOP_K=-1  # -1 means no top-k filtering 
-
-if [ "${N_SAMPLES}" -gt 1 ]; then
-    TEMPERATURE=0.6
-fi
 
 # Generation Configuration
 BATCH_SIZE=256

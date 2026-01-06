@@ -26,13 +26,13 @@ EVAL_SCRIPT="${BASE_DIR}/scripts/evaluate_olmo2_math_rl.sh"
 N_SAMPLES_LIST=(1 8 32 128)
 
 # SLURM Configuration
-SLURM_PARTITION="kempner_requeue"
+SLURM_PARTITION="kempner"
 SLURM_ACCOUNT="kempner_dam_lab"
-SLURM_TIME="24:00:00"
+SLURM_TIME="4:00:00"
 SLURM_NODES=1
 SLURM_GPUS_PER_NODE=1
 SLURM_CPUS_PER_TASK=24
-SLURM_MEM="500GB"
+SLURM_MEM="200GB"
 
 # Output directories
 SBATCH_DIR="${BASE_DIR}/sbatch_jobs_sft"
@@ -72,7 +72,7 @@ while IFS= read -r -d '' experiment_dir; do
     CHECKPOINT_NAMES+=("${experiment_name}")
 
     echo "  Found: ${experiment_name} -> using latest checkpoint ${checkpoint_name}"
-done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 1 -type d -name "OLMo2-1B-step*-stage2-openmathgsm8k" -print0 | sort -z)
+done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 1 -type d -name "OLMo2-1B-step*-stage2-openmathgsm8k-5epoch" -print0 | sort -z)
 
 if [ ${#CHECKPOINT_PATHS[@]} -eq 0 ]; then
     echo "ERROR: No SFT experiment checkpoints found under ${CHECKPOINT_BASE_DIR}"
