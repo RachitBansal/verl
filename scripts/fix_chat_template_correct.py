@@ -10,7 +10,7 @@ import sys
 import os
 from transformers import AutoTokenizer
 
-MODEL_PATH = '/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step22000_omigsm8k/hf_model/step800'
+MODEL_PATH = '/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo-2-0425-1B/'
 
 print("=" * 100)
 print("FIXING OLMo-2 CHAT TEMPLATE (CORRECT VERSION)")

@@ -1,0 +1,113 @@
+#!/bin/bash
+#SBATCH --job-name=verl-adaptive-rollout
+#SBATCH --account=kempner_dam_lab
+#SBATCH --partition=kempner
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=4
+#SBATCH --cpus-per-task=16
+#SBATCH --gpus-per-node=4
+#SBATCH --mem=200G
+#SBATCH --time=24:00:00
+#SBATCH --output=logs/adaptive-rollout-%j.out
+#SBATCH --error=logs/adaptive-rollout-%j.out
+
+# ============================================================================
+# Adaptive Rollout SLURM Job Script
+# Author: Sunny + Claude
+# ============================================================================
+
+mkdir -p logs
+sh
+module purge
+module load Mambaforge
+module load cuda cudnn
+
+source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
+
+echo "============================================================"
+echo "ADAPTIVE ROLLOUT EXPERIMENT"
+echo "============================================================"
+echo "Job started at $(date)"
+echo "Running on host: $(hostname)"
+echo "SLURM_JOB_ID: $SLURM_JOB_ID"
+echo "SLURM_GPUS_PER_NODE: $SLURM_GPUS_PER_NODE"
+nvidia-smi --query-gpu=name,memory.total --format=csv
+echo "============================================================"
+
+set -x
+
+ray stop 2>/dev/null || true
+sleep 10
+
+# Configuration
+OLMO_CHECKPOINT=${OLMO_CHECKPOINT:-"/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo-2-0425-1B"}
+
+MAX_N=${MAX_N:-128}
+ROLLOUTS_PER_BATCH=${ROLLOUTS_PER_BATCH:-8}
+POSITIVE_THRESHOLD=${POSITIVE_THRESHOLD:-0.5}
+MIN_ROLLOUTS=${MIN_ROLLOUTS:-5}
+
+N_GPUS_PER_NODE=${SLURM_GPUS_PER_NODE:-1}
+
+DATA_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2"
+TRAIN_FILE="${DATA_DIR}/train.parquet"
+VAL_GSM_FILE="${DATA_DIR}/val_gsm8k.parquet"
+VAL_MATH_FILE="${DATA_DIR}/val_math.parquet"
+
+OUTPUT_DIR="/n/netscratch/dam_lab/Everyone/rl_rollouts/experiments"
+EXPERIMENT_NAME="olmo2_1b_adaptive_n${MAX_N}_${SLURM_JOB_ID}"
+
+FORMAT_SCORE=0.0
+export WANDB_ENTITY="harvardml"
+
+TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-32}
+PPO_MINI_BATCH_SIZE=${PPO_MINI_BATCH_SIZE:-32}
+
+python3 -m verl.trainer.main_ppo_adaptive \
+    algorithm.adv_estimator=grpo \
+    data.train_files=${TRAIN_FILE} \
+    data.val_files=[${VAL_GSM_FILE},${VAL_MATH_FILE}] \
+    data.train_batch_size=${TRAIN_BATCH_SIZE} \
+    data.max_prompt_length=1024 \
+    data.max_response_length=2048 \
+    data.filter_overlong_prompts=True \
+    data.truncation='error' \
+    actor_rollout_ref.model.path=$OLMO_CHECKPOINT \
+    actor_rollout_ref.actor.optim.lr=1e-6 \
+    actor_rollout_ref.model.use_remove_padding=True \
+    actor_rollout_ref.actor.ppo_mini_batch_size=${PPO_MINI_BATCH_SIZE} \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 \
+    actor_rollout_ref.actor.use_kl_loss=True \
+    actor_rollout_ref.actor.kl_loss_coef=0.001 \
+    actor_rollout_ref.actor.kl_loss_type=low_var_kl \
+    actor_rollout_ref.actor.entropy_coeff=0 \
+    actor_rollout_ref.model.enable_gradient_checkpointing=True \
+    actor_rollout_ref.actor.fsdp_config.param_offload=False \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=16 \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
+    actor_rollout_ref.rollout.name=vllm \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
+    actor_rollout_ref.rollout.n=1 \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=16 \
+    actor_rollout_ref.ref.fsdp_config.param_offload=True \
+    algorithm.use_kl_in_reward=False \
+    +reward_model.reward_kwargs.format_score=${FORMAT_SCORE} \
+    +adaptive_rollout.enable=True \
+    +adaptive_rollout.max_n=${MAX_N} \
+    +adaptive_rollout.rollouts_per_batch=${ROLLOUTS_PER_BATCH} \
+    +adaptive_rollout.positive_threshold=${POSITIVE_THRESHOLD} \
+    +adaptive_rollout.min_rollouts=${MIN_ROLLOUTS} \
+    trainer.critic_warmup=0 \
+    trainer.logger='["console","wandb"]' \
+    trainer.project_name='rl_rollouts' \
+    trainer.experiment_name="${EXPERIMENT_NAME}" \
+    trainer.default_local_dir="${OUTPUT_DIR}/${EXPERIMENT_NAME}" \
+    trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
+    trainer.nnodes=1 \
+    trainer.save_freq=100 \
+    trainer.test_freq=10 \
+    trainer.total_epochs=1 \
+    "$@"
+
+echo "Training completed at $(date)"
