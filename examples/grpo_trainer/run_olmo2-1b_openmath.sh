@@ -78,8 +78,8 @@ python3 -m verl.trainer.main_ppo \
     trainer.default_local_dir="${OUTPUT_DIR}/olmo2_1b_step${STEP_NUM}_omi_n64" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
-    trainer.save_freq=500 \
-    trainer.test_freq=10 \
+    trainer.save_freq=250 \
+    trainer.test_freq=50 \
     trainer.total_epochs=10 \
     "$@"
 
