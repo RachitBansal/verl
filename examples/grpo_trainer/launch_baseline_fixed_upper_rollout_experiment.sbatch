@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=verl-adaptive-rollout
+#SBATCH --job-name=verl-fixed-rollout
 #SBATCH --account=kempner_dam_lab
 #SBATCH --partition=kempner_h100
 #SBATCH --nodes=1
@@ -8,17 +8,17 @@
 #SBATCH --gpus-per-node=4
 #SBATCH --mem=200G
 #SBATCH --time=24:00:00
-#SBATCH --output=logs/adaptive-rollout-math5k-%j.out
-#SBATCH --error=logs/adaptive-rollout-math5k-%j.out
+#SBATCH --output=logs/fixed-rollout-math5k-%j.out
+#SBATCH --error=logs/fixed-rollout-math5k-%j.out
 
 # ============================================================================
-# Adaptive Rollout SLURM Job Script - SANITY CHECK
+# Fixed Rollout SLURM Job Script - SANITY CHECK
 # Author: Sunny + Claude
 #
 # SANITY CHECK MODE:
 # - Uses 5000 MATH examples only
-# - Adaptive rollouts (up to max_n) with early stopping on positive
-# - Logs positive rollouts per sample for comparison with fixed rollouts
+# - Fixed n=5 rollouts per sample
+# - Logs positive rollouts per sample for comparison with adaptive rollouts
 # ============================================================================
 
 mkdir -p logs
@@ -29,7 +29,7 @@ module load cuda cudnn
 source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
 
 echo "============================================================"
-echo "ADAPTIVE ROLLOUT EXPERIMENT - SANITY CHECK (5000 MATH)"
+echo "FIXED ROLLOUT EXPERIMENT - SANITY CHECK (5000 MATH, n=5)"
 echo "============================================================"
 echo "Job started at $(date)"
 echo "Running on host: $(hostname)"
@@ -46,13 +46,11 @@ sleep 10
 # Configuration
 OLMO_CHECKPOINT=${OLMO_CHECKPOINT:-"/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo-2-0425-1B"}
 
-# Adaptive rollout settings - tuned for sanity check comparison with n=5 fixed
-# NOTE: MAX_N=128 is too slow on MATH (model rarely finds positives, hits max every time)
-# Use MAX_N=16 for faster iteration, or MAX_N=32 for more thorough search
-MAX_N=${MAX_N:-16}                      # Maximum rollouts per sample
-ROLLOUTS_PER_BATCH=${ROLLOUTS_PER_BATCH:-8}   # Rollouts generated per iteration (larger = faster)
-POSITIVE_THRESHOLD=${POSITIVE_THRESHOLD:-0.5}  # Reward threshold for "positive"
-MIN_ROLLOUTS=${MIN_ROLLOUTS:-4}        # Minimum rollouts per sample
+# Sanity check: Fixed 64 rollouts per sample
+N_ROLLOUTS=${N_ROLLOUTS:-64}
+
+# Positive rollout threshold (for logging how many rollouts are correct)
+POSITIVE_THRESHOLD=${POSITIVE_THRESHOLD:-0.5}
 
 N_GPUS_PER_NODE=${SLURM_GPUS_PER_NODE:-1}
 
@@ -62,20 +60,19 @@ TRAIN_FILE="${TRAIN_FILE:-${DATA_DIR}/train_math_5000.parquet}"  # 5000 MATH exa
 VAL_MATH_FILE="${DATA_DIR}/val_math.parquet"
 
 OUTPUT_DIR="/n/netscratch/dam_lab/Everyone/rl_rollouts/experiments"
-EXPERIMENT_NAME="adaptive_max${MAX_N}_math_5000_${SLURM_JOB_ID}"
+EXPERIMENT_NAME="fixed_n${N_ROLLOUTS}_math_5000_${SLURM_JOB_ID}"
 
 FORMAT_SCORE=0.0
 export WANDB_ENTITY="harvardml"
 
 # Batch sizes optimized for H100 80GB x 4
-# Note: (ppo_mini_batch_size * n / n_gpus) must be divisible by ppo_micro_batch_size_per_gpu
-# With n=1, n_gpus=4, micro=4: 16*1/4=4, 4%4=0 ✓
-# Actual rollouts per step: 16 prompts × avg_rollouts (4 to MAX_N)
-# Conservative: 16 × 40 avg = ~640 rollouts (similar to fixed)
-TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-16}  # Number of prompts per step
-PPO_MINI_BATCH_SIZE=${PPO_MINI_BATCH_SIZE:-16}  # Must be <= TRAIN_BATCH_SIZE
+# Note: (ppo_mini_batch_size * n_rollouts / n_gpus) must be divisible by ppo_micro_batch_size_per_gpu
+# With n=64, n_gpus=4, micro=10: 10*64/4=160, 160%10=0 ✓
+# Total rollouts per step: 10 * 64 = 640
+TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-10}
+PPO_MINI_BATCH_SIZE=${PPO_MINI_BATCH_SIZE:-10}  # Must be <= TRAIN_BATCH_SIZE
 
-python3 -m verl.trainer.main_ppo_adaptive \
+python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     data.train_files=${TRAIN_FILE} \
     data.val_files=[${VAL_MATH_FILE}] \
@@ -88,8 +85,7 @@ python3 -m verl.trainer.main_ppo_adaptive \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=${PPO_MINI_BATCH_SIZE} \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
-    actor_rollout_ref.actor.loss_agg_mode='prompt-mean-token-sum' \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=10 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
@@ -101,16 +97,12 @@ python3 -m verl.trainer.main_ppo_adaptive \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
-    actor_rollout_ref.rollout.n=1 \
+    actor_rollout_ref.rollout.n=${N_ROLLOUTS} \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=16 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     algorithm.use_kl_in_reward=False \
     +reward_model.reward_kwargs.format_score=${FORMAT_SCORE} \
-    +adaptive_rollout.enable=True \
-    +adaptive_rollout.max_n=${MAX_N} \
-    +adaptive_rollout.rollouts_per_batch=${ROLLOUTS_PER_BATCH} \
-    +adaptive_rollout.positive_threshold=${POSITIVE_THRESHOLD} \
-    +adaptive_rollout.min_rollouts=${MIN_ROLLOUTS} \
+    +positive_rollout_threshold=${POSITIVE_THRESHOLD} \
     trainer.critic_warmup=0 \
     trainer.logger='["console","wandb"]' \
     trainer.project_name='rl_rollouts' \
@@ -118,8 +110,8 @@ python3 -m verl.trainer.main_ppo_adaptive \
     trainer.default_local_dir="${OUTPUT_DIR}/${EXPERIMENT_NAME}" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
-    trainer.save_freq=50 \
-    trainer.test_freq=5 \
+    trainer.save_freq=10 \
+    trainer.test_freq=1 \
     trainer.total_epochs=1 \
     "$@"
 

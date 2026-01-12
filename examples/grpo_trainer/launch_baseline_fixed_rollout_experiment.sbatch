@@ -1,23 +1,28 @@
 #!/bin/bash
 #SBATCH --job-name=verl-fixed-rollout
 #SBATCH --account=kempner_dam_lab
-#SBATCH --partition=kempner
+#SBATCH --partition=kempner_h100
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus-per-node=4
 #SBATCH --mem=200G
 #SBATCH --time=24:00:00
-#SBATCH --output=logs/fixed-rollout-%j.out
-#SBATCH --error=logs/fixed-rollout-%j.out
+#SBATCH --output=logs/fixed-rollout-math5k-%j.out
+#SBATCH --error=logs/fixed-rollout-math5k-%j.out
 
 # ============================================================================
-# Fixed Rollout SLURM Job Script
+# Fixed Rollout SLURM Job Script - SANITY CHECK
 # Author: Sunny + Claude
+#
+# SANITY CHECK MODE:
+# - Uses MATH examples
+# - Fixed n=5 rollouts per sample (configurable via N_ROLLOUTS)
+# - Total training epochs configurable via EPOCHS (default: 1)
+# - Logs positive rollouts per sample for comparison with adaptive rollouts
 # ============================================================================
 
 mkdir -p logs
-sh
 module purge
 module load Mambaforge
 module load cuda cudnn
@@ -25,7 +30,7 @@ module load cuda cudnn
 source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
 
 echo "============================================================"
-echo "FIXED ROLLOUT EXPERIMENT"
+echo "FIXED ROLLOUT EXPERIMENT - SANITY CHECK (MATH, n=${N_ROLLOUTS:-5}, epochs=${EPOCHS:-1})"
 echo "============================================================"
 echo "Job started at $(date)"
 echo "Running on host: $(hostname)"
@@ -42,28 +47,38 @@ sleep 10
 # Configuration
 OLMO_CHECKPOINT=${OLMO_CHECKPOINT:-"/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo-2-0425-1B"}
 
+# Sanity check: Fixed 5 rollouts per sample
 N_ROLLOUTS=${N_ROLLOUTS:-5}
+
+# Positive rollout threshold (for logging how many rollouts are correct)
+POSITIVE_THRESHOLD=${POSITIVE_THRESHOLD:-0.5}
 
 N_GPUS_PER_NODE=${SLURM_GPUS_PER_NODE:-1}
 
-DATA_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2"
-TRAIN_FILE="${DATA_DIR}/train.parquet"
-VAL_GSM_FILE="${DATA_DIR}/val_gsm8k.parquet"
+# Dataset: 5000 MATH examples for sanity check
+DATA_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2_math"
+TRAIN_FILE="${TRAIN_FILE:-${DATA_DIR}/train_math_5000.parquet}"  # 5000 MATH examples for sanity check
 VAL_MATH_FILE="${DATA_DIR}/val_math.parquet"
 
 OUTPUT_DIR="/n/netscratch/dam_lab/Everyone/rl_rollouts/experiments"
-EXPERIMENT_NAME="olmo2_1b_fixed_n${N_ROLLOUTS}_${SLURM_JOB_ID}"
 
 FORMAT_SCORE=0.0
 export WANDB_ENTITY="harvardml"
 
-TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-32}
-PPO_MINI_BATCH_SIZE=${PPO_MINI_BATCH_SIZE:-32}
+# Batch sizes optimized for H100 80GB x 4
+# Note: (ppo_mini_batch_size * n_rollouts / n_gpus) must be divisible by ppo_micro_batch_size_per_gpu
+# With n=5, n_gpus=4, micro=8: 128*5/4=160, 160%8=0 ✓
+# Total rollouts per step: 128 * 5 = 640
+TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-128}
+PPO_MINI_BATCH_SIZE=${PPO_MINI_BATCH_SIZE:-128}  # Must be <= TRAIN_BATCH_SIZE
+EPOCHS=${EPOCHS:-13}
+
+EXPERIMENT_NAME="fixed_n${N_ROLLOUTS}_math_5000_epochs${EPOCHS}_${SLURM_JOB_ID}"
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     data.train_files=${TRAIN_FILE} \
-    data.val_files=[${VAL_GSM_FILE},${VAL_MATH_FILE}] \
+    data.val_files=[${VAL_MATH_FILE}] \
     data.train_batch_size=${TRAIN_BATCH_SIZE} \
     data.max_prompt_length=1024 \
     data.max_response_length=2048 \
@@ -90,6 +105,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     algorithm.use_kl_in_reward=False \
     +reward_model.reward_kwargs.format_score=${FORMAT_SCORE} \
+    +positive_rollout_threshold=${POSITIVE_THRESHOLD} \
     trainer.critic_warmup=0 \
     trainer.logger='["console","wandb"]' \
     trainer.project_name='rl_rollouts' \
@@ -97,9 +113,9 @@ python3 -m verl.trainer.main_ppo \
     trainer.default_local_dir="${OUTPUT_DIR}/${EXPERIMENT_NAME}" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
-    trainer.save_freq=100 \
-    trainer.test_freq=10 \
-    trainer.total_epochs=1 \
+    trainer.save_freq=50 \
+    trainer.test_freq=5 \
+    trainer.total_epochs=${EPOCHS} \
     "$@"
 
 echo "Training completed at $(date)"

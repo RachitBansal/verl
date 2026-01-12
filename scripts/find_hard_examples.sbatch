@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=find-hard-examples
+#SBATCH --job-name=rl-filtering
 #SBATCH --account=kempner_dam_lab
-#SBATCH --partition=kempner
+#SBATCH --partition=kempner_h100
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=12
@@ -50,7 +50,7 @@ set -x
 # Configuration - can be overridden via environment variables
 # ============================================================================
 # Model (default: HuggingFace OLMo-2-0425-1B)
-MODEL_PATH="${MODEL_PATH:-allenai/OLMo-2-0425-1B}"
+MODEL_PATH="${MODEL_PATH:-"/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo-2-0425-1B"}"
 
 # Data
 DATA_PATH="${DATA_PATH:-/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2_gsm8k/train_gsm8k.parquet}"
