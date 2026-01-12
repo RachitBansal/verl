@@ -266,6 +266,79 @@ def compute_timing_metrics(batch: DataProto, timing_raw: dict[str, float]) -> di
     }
 
 
+def compute_positive_rollout_metrics(
+    batch: DataProto, 
+    positive_threshold: float = 0.5,
+    n_rollouts: int = 1,
+) -> dict[str, Any]:
+    """
+    Computes metrics about positive (correct) rollouts per sample.
+
+    This function analyzes how many rollouts per prompt/sample are "positive" 
+    (i.e., have reward >= threshold), which is useful for understanding the 
+    difficulty of examples and the effectiveness of rollout strategies.
+
+    Args:
+        batch: A DataProto object containing batch data with token_level_scores and uid.
+        positive_threshold: Reward threshold for considering a rollout "positive".
+        n_rollouts: Number of rollouts per sample (for fixed rollout mode).
+
+    Returns:
+        A dictionary of metrics including:
+            - positive_rollouts/avg_per_sample: Average number of positive rollouts per sample
+            - positive_rollouts/min_per_sample: Minimum positive rollouts for any sample
+            - positive_rollouts/max_per_sample: Maximum positive rollouts for any sample
+            - positive_rollouts/samples_with_any_positive: Number of samples with at least 1 positive
+            - positive_rollouts/samples_without_positive: Number of samples with 0 positive rollouts
+            - positive_rollouts/positive_rate: Fraction of samples with at least 1 positive
+            - positive_rollouts/total_positive: Total number of positive rollouts
+            - positive_rollouts/total_rollouts: Total number of rollouts
+            - positive_rollouts/overall_positive_rate: Fraction of all rollouts that are positive
+    """
+    # Compute sequence-level rewards (sum of token-level scores)
+    sequence_scores = batch.batch["token_level_scores"].sum(dim=-1).cpu().numpy()  # (batch_size,)
+    
+    # Get UIDs for grouping
+    uids = batch.non_tensor_batch["uid"]
+    
+    # Group rollouts by sample (uid)
+    uid_to_scores = defaultdict(list)
+    for idx, uid in enumerate(uids):
+        uid_to_scores[uid].append(sequence_scores[idx])
+    
+    # Count positive rollouts per sample
+    positive_counts = []
+    total_counts = []
+    for uid, scores in uid_to_scores.items():
+        n_positive = sum(1 for s in scores if s >= positive_threshold)
+        positive_counts.append(n_positive)
+        total_counts.append(len(scores))
+    
+    positive_counts = np.array(positive_counts)
+    total_counts = np.array(total_counts)
+    
+    num_samples = len(uid_to_scores)
+    total_rollouts = len(sequence_scores)
+    total_positive = int(positive_counts.sum())
+    samples_with_positive = int((positive_counts > 0).sum())
+    
+    metrics = {
+        "positive_rollouts/avg_per_sample": float(positive_counts.mean()),
+        "positive_rollouts/min_per_sample": int(positive_counts.min()),
+        "positive_rollouts/max_per_sample": int(positive_counts.max()),
+        "positive_rollouts/std_per_sample": float(positive_counts.std()),
+        "positive_rollouts/samples_with_any_positive": samples_with_positive,
+        "positive_rollouts/samples_without_positive": num_samples - samples_with_positive,
+        "positive_rollouts/positive_rate": samples_with_positive / num_samples if num_samples > 0 else 0.0,
+        "positive_rollouts/total_positive": total_positive,
+        "positive_rollouts/total_rollouts": total_rollouts,
+        "positive_rollouts/overall_positive_rate": total_positive / total_rollouts if total_rollouts > 0 else 0.0,
+        "positive_rollouts/avg_rollouts_per_sample": float(total_counts.mean()),
+    }
+    
+    return metrics
+
+
 def compute_throughout_metrics(batch: DataProto, timing_raw: dict[str, float], n_gpus: int) -> dict[str, Any]:
     """
     Computes throughput metrics for PPO training.

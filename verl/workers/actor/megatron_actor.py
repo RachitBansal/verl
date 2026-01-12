@@ -454,6 +454,10 @@ class MegatronPPOActor(BasePPOActor):
                 # Extract pre-computed rollout correction weights if present
                 # Weights are computed centrally in trainer and added when algorithm.rollout_is=True
                 rollout_is_weights = data.get("rollout_is_weights", None)
+                
+                # Extract per-prompt normalization weights for adaptive rollouts
+                prompt_norm_weights = data.get("prompt_norm_weights", None)
+                
                 pg_loss, pg_metrics = policy_loss_fn(
                     old_log_prob=old_log_prob,
                     log_prob=log_prob,
@@ -462,6 +466,7 @@ class MegatronPPOActor(BasePPOActor):
                     loss_agg_mode=loss_agg_mode,
                     config=self.config,
                     rollout_is_weights=rollout_is_weights,
+                    prompt_norm_weights=prompt_norm_weights,
                 )
                 stats.update(pg_metrics)
 

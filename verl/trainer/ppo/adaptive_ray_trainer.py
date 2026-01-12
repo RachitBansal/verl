@@ -97,6 +97,7 @@ class AdaptiveRayPPOTrainer(RayPPOTrainer):
         uid_to_original_idx = {uid: i for i, uid in enumerate(sample_uids)}
         sample_has_positive = {uid: False for uid in sample_uids}
         sample_rollout_count = {uid: 0 for uid in sample_uids}
+        sample_positive_count = {uid: 0 for uid in sample_uids}  # Count of positive rollouts per sample
 
         # Storage for all rollouts: uid -> list of rollout data
         all_rollout_data: dict[str, list[dict]] = {uid: [] for uid in sample_uids}
@@ -197,6 +198,7 @@ class AdaptiveRayPPOTrainer(RayPPOTrainer):
 
                     if reward >= self.adaptive_positive_threshold:
                         sample_has_positive[uid] = True
+                        sample_positive_count[uid] += 1
 
             iteration += 1
 
@@ -207,7 +209,9 @@ class AdaptiveRayPPOTrainer(RayPPOTrainer):
 
         # Compute metrics
         rollout_counts = list(sample_rollout_count.values())
+        positive_counts = list(sample_positive_count.values())
         total_rollouts = sum(rollout_counts)
+        total_positive = sum(positive_counts)
         num_with_positive = sum(1 for v in sample_has_positive.values() if v)
 
         adaptive_metrics = {
@@ -223,6 +227,18 @@ class AdaptiveRayPPOTrainer(RayPPOTrainer):
             "adaptive_rollout/efficiency": num_samples / total_rollouts,
             "adaptive_rollout/gen_time": total_gen_time,
             "adaptive_rollout/reward_time": total_reward_time,
+            # Detailed positive rollout metrics (matching fixed rollout format)
+            "positive_rollouts/avg_per_sample": float(np.mean(positive_counts)),
+            "positive_rollouts/min_per_sample": int(np.min(positive_counts)),
+            "positive_rollouts/max_per_sample": int(np.max(positive_counts)),
+            "positive_rollouts/std_per_sample": float(np.std(positive_counts)),
+            "positive_rollouts/samples_with_any_positive": num_with_positive,
+            "positive_rollouts/samples_without_positive": num_samples - num_with_positive,
+            "positive_rollouts/positive_rate": num_with_positive / num_samples if num_samples > 0 else 0.0,
+            "positive_rollouts/total_positive": total_positive,
+            "positive_rollouts/total_rollouts": total_rollouts,
+            "positive_rollouts/overall_positive_rate": total_positive / total_rollouts if total_rollouts > 0 else 0.0,
+            "positive_rollouts/avg_rollouts_per_sample": float(np.mean(rollout_counts)),
         }
 
         # Add timing to output metadata
@@ -238,20 +254,32 @@ class AdaptiveRayPPOTrainer(RayPPOTrainer):
         all_rollout_data: dict[str, list[dict]],
         sample_uids: np.ndarray,
     ) -> tuple[DataProto, DataProto]:
-        """Assemble all rollouts into final batch format."""
+        """Assemble all rollouts into final batch format.
+        
+        Also computes per-prompt normalization weights for the loss function.
+        Each rollout i belonging to prompt x gets weight = 1/T(x) where T(x)
+        is the number of rollouts for prompt x. This ensures each prompt
+        contributes equally to the loss regardless of rollout count.
+        """
         batch_items = []
         gen_items = []
         final_uids = []
+        prompt_norm_weights = []  # Per-rollout normalization weights
 
         for uid in sample_uids:
             rollouts = all_rollout_data[uid]
             # Sort by generation order
             rollouts.sort(key=lambda x: (x["iteration"], x["rollout_idx"]))
+            
+            # Weight for each rollout of this prompt = 1/T(x)
+            num_rollouts = len(rollouts)
+            weight = 1.0 / num_rollouts
 
             for rollout in rollouts:
                 batch_items.append(rollout["batch_item"])
                 gen_items.append(rollout["gen_output"])
                 final_uids.append(uid)
+                prompt_norm_weights.append(weight)
 
         # Concatenate all
         if batch_items:
@@ -260,6 +288,12 @@ class AdaptiveRayPPOTrainer(RayPPOTrainer):
 
             # Ensure uids are preserved for GRPO grouping
             final_batch.non_tensor_batch["uid"] = np.array(final_uids, dtype=object)
+            
+            # Add per-prompt normalization weights for loss computation
+            # Shape: (total_rollouts,) - weight[i] = 1/T(x_i)
+            final_batch.batch["prompt_norm_weights"] = torch.tensor(
+                prompt_norm_weights, dtype=torch.float32
+            )
         else:
             raise ValueError("No rollouts generated!")
 

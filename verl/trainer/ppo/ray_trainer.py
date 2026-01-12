@@ -45,6 +45,7 @@ from verl.trainer.ppo import core_algos
 from verl.trainer.ppo.core_algos import AdvantageEstimator, agg_loss
 from verl.trainer.ppo.metric_utils import (
     compute_data_metrics,
+    compute_positive_rollout_metrics,
     compute_throughout_metrics,
     compute_timing_metrics,
     process_validation_metrics,
@@ -1160,6 +1161,15 @@ class RayPPOTrainer:
 
                         if reward_extra_infos_dict:
                             batch.non_tensor_batch.update({k: np.array(v) for k, v in reward_extra_infos_dict.items()})
+
+                        # Compute positive rollout metrics for logging
+                        positive_threshold = self.config.get("positive_rollout_threshold", 0.5)
+                        positive_rollout_metrics = compute_positive_rollout_metrics(
+                            batch=batch,
+                            positive_threshold=positive_threshold,
+                            n_rollouts=self.config.actor_rollout_ref.rollout.n,
+                        )
+                        metrics.update(positive_rollout_metrics)
 
                         # compute rewards. apply_kl_penalty if available
                         if self.config.algorithm.use_kl_in_reward:

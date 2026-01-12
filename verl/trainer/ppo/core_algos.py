@@ -769,7 +769,12 @@ def compute_rewards(token_level_scores, old_log_prob, ref_log_prob, kl_ratio):
     return token_level_scores - kl * kl_ratio
 
 
-def agg_loss(loss_mat: torch.Tensor, loss_mask: torch.Tensor, loss_agg_mode: str):
+def agg_loss(
+    loss_mat: torch.Tensor,
+    loss_mask: torch.Tensor,
+    loss_agg_mode: str,
+    prompt_norm_weights: Optional[torch.Tensor] = None,
+):
     """
     Aggregate the loss matrix into a scalar.
 
@@ -780,6 +785,12 @@ def agg_loss(loss_mat: torch.Tensor, loss_mask: torch.Tensor, loss_agg_mode: str
             shape: (bs, response_length)
         loss_agg_mode: (str) choices:
             method to aggregate the loss matrix into a scalar.
+        prompt_norm_weights: `(torch.Tensor, optional)`:
+            shape: (bs,) - per-sequence weights for prompt normalization.
+            For adaptive rollouts: weight[i] = 1/T(x_i) where T(x_i) is the
+            number of rollouts for the prompt that sequence i belongs to.
+            This ensures each prompt contributes equally regardless of
+            how many rollouts it has.
     Returns:
         loss: `a scalar torch.Tensor`
             aggregated loss
@@ -802,6 +813,28 @@ def agg_loss(loss_mat: torch.Tensor, loss_mask: torch.Tensor, loss_agg_mode: str
         # throughout training to well-replicate the DrGRPO paper.
         # TODO: Perhaps add user-defined normalizer argument to
         # agg_loss to ensure divisor stays constant throughout.
+    elif loss_agg_mode == "prompt-mean-token-sum":
+        # Per-prompt normalized loss for adaptive rollouts
+        # L = (1/B) * sum_{prompts x} [ (1/T(x)) * sum_{rollouts in x} loss ]
+        #   = (1/B) * sum_{all rollouts i} [ (1/T(x_i)) * loss_i ]
+        #   = sum_{all rollouts i} [ weight_i * loss_i ] where weight_i = 1/(B*T(x_i))
+        # The prompt_norm_weights should be pre-computed as 1/T(x_i)
+        if prompt_norm_weights is None:
+            raise ValueError("prompt-mean-token-sum requires prompt_norm_weights")
+        seq_losses = torch.sum(loss_mat * loss_mask, dim=-1)  # (bs,) token-sum per sequence
+        # Apply per-sequence weights (normalized by 1/T(x) for each rollout)
+        weighted_seq_losses = seq_losses * prompt_norm_weights
+        # Average over prompts (sum of weighted losses, weights sum to num_prompts)
+        loss = weighted_seq_losses.mean()
+    elif loss_agg_mode == "prompt-mean-token-mean":
+        # Same as prompt-mean-token-sum but with token-mean first
+        if prompt_norm_weights is None:
+            raise ValueError("prompt-mean-token-mean requires prompt_norm_weights")
+        token_count = torch.sum(loss_mask, dim=-1)  # (bs,)
+        seq_losses = torch.sum(loss_mat * loss_mask, dim=-1) / (token_count + 1e-8)  # token-mean
+        # Apply per-sequence weights
+        weighted_seq_losses = seq_losses * prompt_norm_weights
+        loss = weighted_seq_losses.mean()
     else:
         raise ValueError(f"Invalid loss_agg_mode: {loss_agg_mode}")
 
@@ -893,6 +926,7 @@ def compute_policy_loss_vanilla(
     loss_agg_mode: str = "token-mean",
     config: Optional[DictConfig | AlgoConfig] = None,
     rollout_is_weights: torch.Tensor | None = None,
+    prompt_norm_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, Any]]:
     """
     Compute the clipped policy objective and related metrics for PPO.
@@ -913,8 +947,12 @@ def compute_policy_loss_vanilla(
             Aggregation mode for `agg_loss`. Defaults to "token-mean".
         config: `(verl.trainer.config.ActorConfig)`:
             config for the actor.
-        rollout_log_probs: `(torch.Tensor)`:
-            log probabilities of actions under the rollout policy, shape (batch_size, response_length).
+        rollout_is_weights: `(torch.Tensor, optional)`:
+            Per-token importance sampling weights, shape (batch_size, response_length).
+        prompt_norm_weights: `(torch.Tensor, optional)`:
+            Per-sequence prompt normalization weights, shape (batch_size,).
+            For adaptive rollouts: weight[i] = 1/T(x_i) where T(x_i) is the
+            number of rollouts for the prompt that sequence i belongs to.
     """
 
     assert config is not None
@@ -966,7 +1004,12 @@ def compute_policy_loss_vanilla(
     if rollout_is_weights is not None:
         pg_losses = pg_losses * rollout_is_weights
 
-    pg_loss = agg_loss(loss_mat=pg_losses, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+    pg_loss = agg_loss(
+        loss_mat=pg_losses,
+        loss_mask=response_mask,
+        loss_agg_mode=loss_agg_mode,
+        prompt_norm_weights=prompt_norm_weights,
+    )
 
     pg_metrics = {
         "actor/pg_clipfrac": pg_clipfrac.detach().item(),
@@ -985,6 +1028,7 @@ def compute_policy_loss_gspo(
     loss_agg_mode: str = "seq-mean-token-mean",
     config: Optional[DictConfig | ActorConfig] = None,
     rollout_is_weights: torch.Tensor | None = None,
+    prompt_norm_weights: torch.Tensor | None = None,  # Not used, for API compatibility
 ) -> tuple[torch.Tensor, dict[str, Any]]:
     """
     Compute the clipped policy objective and related metrics for GSPO.
@@ -1059,6 +1103,7 @@ def compute_policy_loss_gpg(
     loss_agg_mode: str = "token-mean",
     config: Optional[DictConfig | AlgoConfig] = None,
     rollout_is_weights: torch.Tensor | None = None,
+    prompt_norm_weights: torch.Tensor | None = None,  # Not used, for API compatibility
 ) -> tuple[torch.Tensor, dict[str, Any]]:
     """Adapted from
     https://github.com/AMAP-ML/GPG/blob/main/VisualThinker-R1-Zero/src/open-r1-multimodal/src/open_r1/trainer/grpo_trainer.py#L495
@@ -1092,6 +1137,7 @@ def compute_policy_loss_clip_cov(
     loss_agg_mode: str = "token-mean",
     config: Optional[DictConfig | AlgoConfig] = None,
     rollout_is_weights: torch.Tensor | None = None,
+    prompt_norm_weights: torch.Tensor | None = None,  # Not used, for API compatibility
 ) -> tuple[torch.Tensor, dict[str, Any]]:
     """
     Compute the clipped policy objective and related metrics for Clip-Cov.
@@ -1195,6 +1241,7 @@ def compute_policy_loss_kl_cov(
     loss_agg_mode: str = "token-mean",
     config: Optional[DictConfig | AlgoConfig] = None,
     rollout_is_weights: torch.Tensor | None = None,
+    prompt_norm_weights: torch.Tensor | None = None,  # Not used, for API compatibility
 ) -> tuple[torch.Tensor, dict[str, Any]]:
     """
     Compute the clipped policy objective and related metrics for Clip-Cov.
@@ -1273,6 +1320,7 @@ def compute_policy_loss_geo_mean(
     loss_agg_mode: str = "token-mean",
     config: Optional[DictConfig | AlgoConfig] = None,
     rollout_is_weights: torch.Tensor | None = None,
+    prompt_norm_weights: torch.Tensor | None = None,  # Not used, for API compatibility
 ) -> tuple[torch.Tensor, dict[str, Any]]:
     """
     Compute the clipped policy objective and related metrics for GMPO.
@@ -1698,6 +1746,7 @@ def compute_policy_loss_rollout_correction_wrapper(
     loss_agg_mode: str = "token-mean",
     config: Optional[DictConfig | AlgoConfig] = None,
     rollout_is_weights: torch.Tensor | None = None,
+    prompt_norm_weights: torch.Tensor | None = None,  # Not used, for API compatibility
 ) -> tuple[torch.Tensor, dict[str, Any]]:
     """Wrapper for compute_policy_loss_with_rollout_correction to match PolicyLossFn interface.
 

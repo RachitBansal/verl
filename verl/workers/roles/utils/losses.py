@@ -72,6 +72,9 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
 
     loss_mode = config.policy_loss.get("loss_mode", "vanilla")
 
+    # Extract per-prompt normalization weights for adaptive rollouts
+    prompt_norm_weights = data.get("prompt_norm_weights", None)
+
     policy_loss_fn = get_policy_loss_fn(loss_mode)
     pg_loss, pg_metrics = policy_loss_fn(
         old_log_prob=old_log_prob,
@@ -80,6 +83,7 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
         response_mask=response_mask,
         loss_agg_mode=loss_agg_mode,
         config=config,
+        prompt_norm_weights=prompt_norm_weights,
     )
     metrics.update(pg_metrics)
     metrics["actor/pg_loss"] = pg_loss.detach().item()
