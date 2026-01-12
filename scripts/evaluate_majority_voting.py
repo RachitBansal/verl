@@ -23,6 +23,7 @@ from collections import Counter
 
 import numpy as np
 import pandas as pd
+from scipy.special import comb
 from tqdm import tqdm
 
 
@@ -39,15 +40,34 @@ def extract_answer(response: str, dataset_type: str, ground_truth: str) -> float
         raise ValueError(f"Unknown dataset type: {dataset_type}")
 
 
+def compute_pass_at_k(n: int, c: int, k: int) -> float:
+    """
+    Compute pass@k using the analytical unbiased estimator.
+
+    pass@k = 1 - C(n-c, k) / C(n, k)
+
+    Args:
+        n: total number of samples
+        c: number of correct samples
+        k: k value for pass@k
+
+    Returns:
+        pass@k score
+    """
+    if n - c < k:
+        return 1.0
+    return 1.0 - float(comb(n - c, k, exact=True) / comb(n, k, exact=True))
+
+
 def majority_vote(responses: list, dataset_type: str, ground_truth: str) -> tuple:
     """
     Evaluate responses using majority voting.
-    
+
     Args:
         responses: List of response strings
         dataset_type: 'gsm8k' or 'math'
         ground_truth: Ground truth answer
-    
+
     Returns:
         (majority_vote_correct, any_correct, num_correct)
     """
@@ -55,20 +75,20 @@ def majority_vote(responses: list, dataset_type: str, ground_truth: str) -> tupl
     for response in responses:
         score = extract_answer(response, dataset_type, ground_truth)
         scores.append(score)
-    
+
     # Any correct (pass@k)
     any_correct = float(max(scores))
-    
+
     # Number correct
     num_correct = sum(scores)
-    
+
     # Majority voting: most common prediction
     # If there's a tie, we consider it incorrect
     if num_correct > len(responses) / 2:
         majority_vote_correct = 1.0
     else:
         majority_vote_correct = 0.0
-    
+
     return majority_vote_correct, any_correct, num_correct
 
 
@@ -107,21 +127,24 @@ def main():
         pass_at_k_scores.append(any_correct)
         num_correct_list.append(num_correct)
     
-    # Compute metrics
-    # majority_vote_acc = np.mean(majority_scores)
-    pass_at_k = np.mean(pass_at_k_scores)
+    # Compute pass@k for all powers of 2 up to n_samples
+    k_values = []
+    k = 1
+    while k <= n_samples:
+        k_values.append(k)
+        k *= 2
+
+    # Compute pass@k for each k value using analytical estimator
+    pass_at_k_results = {}
+    for k in k_values:
+        pass_at_k_scores_for_k = []
+        for num_correct in num_correct_list:
+            pass_at_k_score = compute_pass_at_k(n_samples, int(num_correct), k)
+            pass_at_k_scores_for_k.append(pass_at_k_score)
+        pass_at_k_results[k] = np.mean(pass_at_k_scores_for_k)
+
     avg_correct = np.mean(num_correct_list)
-    
-    # Also compute single sample accuracy (first response)
-    single_sample_scores = []
-    for idx, row in df.iterrows():
-        responses = row["responses"]
-        ground_truth = row["reward_model"]["ground_truth"]
-        score = extract_answer(responses[0], args.dataset_type, ground_truth)
-        single_sample_scores.append(score)
-    
-    single_sample_acc = np.mean(single_sample_scores)
-    
+
     print("")
     print("=" * 60)
     print("RESULTS")
@@ -129,10 +152,12 @@ def main():
     print(f"Dataset: {args.dataset_type}")
     print(f"Number of samples per prompt: {n_samples}")
     print("")
-    print(f"Single Sample Accuracy:           {single_sample_acc:.4f} ({single_sample_acc*100:.2f}%)")
-    # print(f"Majority Voting Accuracy:         {majority_vote_acc:.4f} ({majority_vote_acc*100:.2f}%)")
-    print(f"Pass@{n_samples} (Any Correct):            {pass_at_k:.4f} ({pass_at_k*100:.2f}%)")
-    print(f"Average # Correct per Example:    {avg_correct:.2f} / {n_samples}")
+    print("Pass@k Metrics (Analytical Estimator):")
+    for k in k_values:
+        pass_at_k_val = pass_at_k_results[k]
+        print(f"  Pass@{k:<2}: {pass_at_k_val:.4f} ({pass_at_k_val*100:.2f}%)")
+    print("")
+    print(f"Average # Correct per Example: {avg_correct:.2f} / {n_samples}")
     print("=" * 60)
     print("")
     
