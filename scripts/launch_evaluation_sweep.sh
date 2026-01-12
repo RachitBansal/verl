@@ -32,7 +32,7 @@ N_SAMPLES_LIST=(32)
 
 # SLURM Configuration
 SLURM_PARTITION="kempner"
-SLURM_ACCOUNT="kempner_dam_lab"
+SLURM_ACCOUNT="kempner_gradsß"
 SLURM_TIME="4:00:00"
 SLURM_NODES=1
 SLURM_GPUS_PER_NODE=1
