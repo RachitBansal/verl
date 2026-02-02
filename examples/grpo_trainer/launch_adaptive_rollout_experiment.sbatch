@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=verl-adaptive-rollout
-#SBATCH --account=kempner_dam_lab
+#SBATCH --account=kempner_grads
 #SBATCH --partition=kempner_h100
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus-per-node=4
 #SBATCH --mem=200G
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --output=logs/adaptive-rollout-math5k-%j.out
 #SBATCH --error=logs/adaptive-rollout-math5k-%j.out
 
@@ -46,25 +46,27 @@ sleep 10
 # Configuration
 OLMO_CHECKPOINT=${OLMO_CHECKPOINT:-"/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo-2-0425-1B"}
 
-# Adaptive rollout settings - tuned for sanity check comparison with n=5 fixed
-# NOTE: MAX_N=128 is too slow on MATH (model rarely finds positives, hits max every time)
-# Use MAX_N=16 for faster iteration, or MAX_N=32 for more thorough search
-MAX_N=${MAX_N:-16}                      # Maximum rollouts per sample
-ROLLOUTS_PER_BATCH=${ROLLOUTS_PER_BATCH:-8}   # Rollouts generated per iteration (larger = faster)
+# Adaptive rollout settings - optimized for parallel generation
+# The adaptive rollout now generates large batches in parallel via vLLM,
+# then simulates early stopping in post-processing. This is much faster
+# than the original sequential approach.
+#
+# With ROLLOUTS_PER_BATCH=64 and MAX_N=128, we only need 2 vLLM calls max
+# instead of 32 calls with ROLLOUTS_PER_BATCH=4.
+MAX_N=${MAX_N:-128}                     # Maximum rollouts per sample
+ROLLOUTS_PER_BATCH=${ROLLOUTS_PER_BATCH:-64}  # Rollouts generated per iteration (larger = faster, leverages vLLM parallelism)
 POSITIVE_THRESHOLD=${POSITIVE_THRESHOLD:-0.5}  # Reward threshold for "positive"
 MIN_ROLLOUTS=${MIN_ROLLOUTS:-4}        # Minimum rollouts per sample
 
+# Per-prompt normalization: ensures each prompt contributes equally to loss
+# regardless of how many rollouts it took. Set to true to enable.
+USE_PROMPT_NORMALIZATION=${USE_PROMPT_NORMALIZATION:-true}
+
 N_GPUS_PER_NODE=${SLURM_GPUS_PER_NODE:-1}
 
-# Dataset: 5000 MATH examples for sanity check
-DATA_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2_math"
-TRAIN_FILE="${TRAIN_FILE:-${DATA_DIR}/train_math_5000.parquet}"  # 5000 MATH examples for sanity check
-VAL_MATH_FILE="${DATA_DIR}/val_math.parquet"
+BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_rollouts"
+OUTPUT_DIR="${BASE_DIR}/experiments"
 
-OUTPUT_DIR="/n/netscratch/dam_lab/Everyone/rl_rollouts/experiments"
-EXPERIMENT_NAME="adaptive_max${MAX_N}_math_5000_${SLURM_JOB_ID}"
-
-FORMAT_SCORE=0.0
 export WANDB_ENTITY="harvardml"
 
 # Batch sizes optimized for H100 80GB x 4
@@ -72,13 +74,63 @@ export WANDB_ENTITY="harvardml"
 # With n=1, n_gpus=4, micro=4: 16*1/4=4, 4%4=0 ✓
 # Actual rollouts per step: 16 prompts × avg_rollouts (4 to MAX_N)
 # Conservative: 16 × 40 avg = ~640 rollouts (similar to fixed)
-TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-16}  # Number of prompts per step
-PPO_MINI_BATCH_SIZE=${PPO_MINI_BATCH_SIZE:-16}  # Must be <= TRAIN_BATCH_SIZE
+TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-128}  # Number of prompts per step
+PPO_MINI_BATCH_SIZE=${PPO_MINI_BATCH_SIZE:-128}  # Must be <= TRAIN_BATCH_SIZE
+EPOCHS=${EPOCHS:-1}
+
+DATASET="gsm8k"
+DATA_TYPE="easy"  # usual, balanced, hard, medium, easy
+
+if [ "$DATA_TYPE" = "usual" ]; then
+    echo "Usual data type"
+    DATA_DIR="${BASE_DIR}/data/openmathinstruct2_${DATASET}"
+    TRAIN_FILE="${TRAIN_FILE:-${DATA_DIR}/train_${DATASET}.parquet}"
+    VAL_FILE="${DATA_DIR}/val_${DATASET}.parquet"
+elif [ "$DATA_TYPE" = "balanced" ]; then
+    echo "Balanced data type"
+    DATA_DIR="${BASE_DIR}/splits/1B-0425/${DATASET}/balanced"
+    TRAIN_FILE="${TRAIN_FILE:-${DATA_DIR}/train.parquet}"
+    VAL_FILE="${BASE_DIR}/data/openmathinstruct2_${DATASET}/val_${DATASET}.parquet"
+    EPOCHS=13
+elif [ "$DATA_TYPE" = "hard" ]; then
+    echo "Hard data type"
+    DATA_DIR="${BASE_DIR}/splits/1B-0425/${DATASET}/balanced"
+    TRAIN_FILE="${TRAIN_FILE:-${DATA_DIR}/hard_only.parquet}"
+    VAL_FILE="${BASE_DIR}/data/openmathinstruct2_${DATASET}/val_${DATASET}.parquet"
+    EPOCHS=36
+elif [ "$DATA_TYPE" = "medium" ]; then
+    echo "Medium data type"
+    DATA_DIR="${BASE_DIR}/splits/1B-0425/${DATASET}/balanced"
+    TRAIN_FILE="${TRAIN_FILE:-${DATA_DIR}/medium_only.parquet}"
+    VAL_FILE="${BASE_DIR}/data/openmathinstruct2_${DATASET}/val_${DATASET}.parquet"
+    EPOCHS=36
+elif [ "$DATA_TYPE" = "easy" ]; then
+    echo "Easy data type"
+    DATA_DIR="${BASE_DIR}/splits/1B-0425/${DATASET}/balanced"
+    TRAIN_FILE="${TRAIN_FILE:-${DATA_DIR}/easy_only.parquet}"
+    VAL_FILE="${BASE_DIR}/data/openmathinstruct2_${DATASET}/val_${DATASET}.parquet"
+    EPOCHS=36
+fi
+
+EXPERIMENT_NAME="adaptive_max${MAX_N}_${DATASET}_${DATA_TYPE}_epochs${EPOCHS}_${SLURM_JOB_ID}"
+if $USE_PROMPT_NORMALIZATION; then
+    EXPERIMENT_NAME="adaptive_norm_max${MAX_N}_${DATASET}_${DATA_TYPE}_epochs${EPOCHS}_${SLURM_JOB_ID}"
+fi
+FORMAT_SCORE=0.0
+
+# Build loss_agg_mode argument conditionally
+if [ "$USE_PROMPT_NORMALIZATION" = "true" ]; then
+    LOSS_AGG_MODE_ARG="actor_rollout_ref.actor.loss_agg_mode=prompt-mean-token-sum"
+    echo "Per-prompt normalization ENABLED (loss_agg_mode=prompt-mean-token-sum)"
+else
+    LOSS_AGG_MODE_ARG=""
+    echo "Per-prompt normalization DISABLED (using default loss_agg_mode)"
+fi
 
 python3 -m verl.trainer.main_ppo_adaptive \
     algorithm.adv_estimator=grpo \
     data.train_files=${TRAIN_FILE} \
-    data.val_files=[${VAL_MATH_FILE}] \
+    data.val_files=[${VAL_FILE}] \
     data.train_batch_size=${TRAIN_BATCH_SIZE} \
     data.max_prompt_length=1024 \
     data.max_response_length=2048 \
@@ -88,8 +140,7 @@ python3 -m verl.trainer.main_ppo_adaptive \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=${PPO_MINI_BATCH_SIZE} \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
-    actor_rollout_ref.actor.loss_agg_mode='prompt-mean-token-sum' \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
@@ -118,9 +169,10 @@ python3 -m verl.trainer.main_ppo_adaptive \
     trainer.default_local_dir="${OUTPUT_DIR}/${EXPERIMENT_NAME}" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
-    trainer.save_freq=50 \
+    trainer.save_freq=10 \
     trainer.test_freq=5 \
-    trainer.total_epochs=1 \
+    trainer.total_epochs=${EPOCHS} \
+    ${LOSS_AGG_MODE_ARG:+$LOSS_AGG_MODE_ARG} \
     "$@"
 
 echo "Training completed at $(date)"
