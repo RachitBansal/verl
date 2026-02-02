@@ -15,15 +15,24 @@ set -u  # Exit on undefined variable
 # CONFIGURATION
 #############################################
 
-# Base checkpoint directory (expects .../experiments/<exp>/hf_model/step*/ )
-CHECKPOINT_BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments"
+# Manually specify experiment checkpoint directories (each should contain hf_model/step* subdirs)
+# Format: path/to/experiment (the script will look for hf_model/step* inside each)
+EXPERIMENT_DIRS=(
+    "/n/netscratch/dam_lab/Everyone/rl_rollouts/experiments/fixed_n5_easy_epochs5_57501168"
+    "/n/netscratch/dam_lab/Everyone/rl_rollouts/experiments/fixed_n5_balanced_epochs5_57501214"
+    "/n/netscratch/dam_lab/Everyone/rl_rollouts/experiments/fixed_n5_hard_epochs5_57501117"
+    "/n/netscratch/dam_lab/Everyone/rl_rollouts/experiments/fixed_n64_balanced_epochs5_57501202"
+    "/n/netscratch/dam_lab/Everyone/rl_rollouts/experiments/fixed_n64_easy_epochs5_57501190"
+    "/n/netscratch/dam_lab/Everyone/rl_rollouts/experiments/fixed_n64_hard_epochs5_57501197"
+    "/n/netscratch/dam_lab/Everyone/rl_rollouts/experiments/fixed_n64_balanced_epochs5_57501202"
+)
 
 # Base directory for verl
-BASE_DIR="/n/netscratch/dam_lab/Lab/brachit/rl/verl"
+BASE_DIR="/n/netscratch/dam_lab/Lab/brachit/rollouts/verl"
 EVAL_SCRIPT="${BASE_DIR}/scripts/evaluate_olmo2_math_rl.sh"
 
 # N_SAMPLES values to test (used as top-k generations per prompt)
-N_SAMPLES_LIST=(1 8 32)
+N_SAMPLES_LIST=(8)
 
 # SLURM Configuration
 SLURM_PARTITION="kempner"
@@ -33,8 +42,6 @@ SLURM_NODES=1
 SLURM_GPUS_PER_NODE=1
 SLURM_CPUS_PER_TASK=24
 SLURM_MEM="200GB"
-
-NUM_ROLLOUTS=5
 
 # Output directories
 SBATCH_DIR="${BASE_DIR}/sbatch_jobs_rl"
@@ -49,27 +56,37 @@ mkdir -p "${LOGS_DIR}"
 echo "================================================"
 echo "OLMo-2 RL Evaluation Sweep Launcher"
 echo "================================================"
-echo "Checkpoint directory: ${CHECKPOINT_BASE_DIR}"
+echo "Experiment directories to process: ${#EXPERIMENT_DIRS[@]}"
 echo ""
 
 CHECKPOINT_PATHS=()
 CHECKPOINT_NAMES=()
 CHECKPOINT_STEPS=()
 
-echo "Discovering checkpoints..."
-while IFS= read -r -d '' checkpoint; do
-    # experiments/<exp>/hf_model/step800 -> extract <exp>
-    experiment_name=$(basename "$(dirname "$(dirname "${checkpoint}")")")
-    checkpoint_step_dir=$(basename "${checkpoint}")
-    checkpoint_step=${checkpoint_step_dir#step}
-    CHECKPOINT_PATHS+=("${checkpoint}")
-    CHECKPOINT_NAMES+=("${experiment_name}")
-    CHECKPOINT_STEPS+=("${checkpoint_step}")
-    echo "  Found: ${experiment_name} (${checkpoint_step_dir}) -> ${checkpoint}"
-done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 3 -type d -path "${CHECKPOINT_BASE_DIR}/*_omi_n${NUM_ROLLOUTS}/hf_model/step*" -print0 | sort -z)
+echo "Discovering checkpoints in specified directories..."
+for exp_dir in "${EXPERIMENT_DIRS[@]}"; do
+    experiment_name=$(basename "${exp_dir}")
+    hf_model_dir="${exp_dir}/hf_model"
+
+    if [ ! -d "${hf_model_dir}" ]; then
+        echo "  WARNING: No hf_model directory found in ${exp_dir}, skipping..."
+        continue
+    fi
+
+    # Find all step* directories within hf_model/
+    while IFS= read -r -d '' checkpoint; do
+        checkpoint_step_dir=$(basename "${checkpoint}")
+        checkpoint_step=${checkpoint_step_dir#step}
+        CHECKPOINT_PATHS+=("${checkpoint}")
+        CHECKPOINT_NAMES+=("${experiment_name}")
+        CHECKPOINT_STEPS+=("${checkpoint_step}")
+        echo "  Found: ${experiment_name} (${checkpoint_step_dir}) -> ${checkpoint}"
+    done < <(find "${hf_model_dir}" -maxdepth 1 -type d -name "step*" -print0 | sort -z)
+done
 
 if [ ${#CHECKPOINT_PATHS[@]} -eq 0 ]; then
-    echo "ERROR: No checkpoints found at ${CHECKPOINT_BASE_DIR}/*_n${NUM_ROLLOUTS}/hf_model/step*"
+    echo "ERROR: No checkpoints found in any of the specified experiment directories"
+    echo "Expected structure: <experiment_dir>/hf_model/step*"
     exit 1
 fi
 
@@ -130,7 +147,7 @@ echo ""
 cd "${BASE_DIR}"
 
 # Run RL evaluation with explicit positional arguments expected by the script
-bash "${EVAL_SCRIPT}" "${model_path}" "${model_name}" "${n_samples}"
+bash "${EVAL_SCRIPT}" "${model_path}" "${model_name}" "${n_samples}" true false
 
 echo ""
 echo "================================================"

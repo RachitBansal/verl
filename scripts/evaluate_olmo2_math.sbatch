@@ -2,11 +2,11 @@
 #SBATCH --job-name=eval-olmo2-math
 #SBATCH --output=logs/eval-olmo2-math-%j.out
 #SBATCH --error=logs/eval-olmo2-math-%j.err
-#SBATCH --time=4:00:00
+#SBATCH --time=72:00:00
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=4
-#SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-task=16
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node=1
+#SBATCH --cpus-per-task=4
 #SBATCH --mem=64GB
 #SBATCH --partition=kempner_h100
 #SBATCH --account=kempner_dam_lab
@@ -37,14 +37,14 @@ source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
 # Evaluation Control (defaults; can be overridden by args)
 EVAL_GSM8K_DEFAULT=false    # arg4
 EVAL_MATH_DEFAULT=true    # arg5
-OPENMATHINSTRUCT2=false    # Keep disabled unless manually toggled
+EVAL_OPENMATHINSTRUCT2_DEFAULT=false    # Keep disabled unless manually toggled
 
 # Hard Examples Filtering (set to true when running pass@128 to find hard examples)
 # When enabled, generates on train subset to find hard training examples
-FILTER_HARD_EXAMPLES_DEFAULT=true  # arg6
+FILTER_HARD_EXAMPLES_DEFAULT=false  # arg6
 HARD_EXAMPLES_TARGET_ACCURACY=0.015625  # 1/64
 HARD_EXAMPLES_TOLERANCE=0.01
-HARD_EXAMPLES_TRAIN_SUBSET_SIZE=10000  # Number of train examples to scan for hard examples
+HARD_EXAMPLES_TRAIN_SUBSET_SIZE=50000  # Number of train examples to scan for hard examples
 
 # Dataset Preparation Control
 OPENMATHINSTRUCT2_N_SAMPLES=5000  # Number of samples to randomly select
@@ -52,7 +52,8 @@ OPENMATHINSTRUCT2_N_SAMPLES=5000  # Number of samples to randomly select
 # Model Configuration defaults (can be overridden by args)
 MODEL_PATH_DEFAULT=/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo-2-0425-1B
 MODEL_NAME_DEFAULT="1B-0425"  # arg2
-N_SAMPLES_DEFAULT=1  # arg3
+N_SAMPLES_DEFAULT=128  # arg3
+SEED_DEFAULT=0  # arg8
 
 # Positional arguments from launcher:
 #   $1 = MODEL_PATH
@@ -61,12 +62,15 @@ N_SAMPLES_DEFAULT=1  # arg3
 #   $4 = EVAL_GSM8K (true/false)
 #   $5 = EVAL_MATH (true/false)
 #   $6 = FILTER_HARD_EXAMPLES (true/false)
+#   $8 = SEED (int)
 MODEL_PATH="${1:-${MODEL_PATH_DEFAULT}}"
 MODEL_NAME="${2:-${MODEL_NAME_DEFAULT}}"
 N_SAMPLES="${3:-${N_SAMPLES_DEFAULT}}"
 EVAL_GSM8K="${4:-${EVAL_GSM8K_DEFAULT}}"
 EVAL_MATH="${5:-${EVAL_MATH_DEFAULT}}"
-FILTER_HARD_EXAMPLES="${6:-${FILTER_HARD_EXAMPLES_DEFAULT}}"
+OPENMATHINSTRUCT2="${6:-${EVAL_OPENMATHINSTRUCT2_DEFAULT}}"
+FILTER_HARD_EXAMPLES="${7:-${FILTER_HARD_EXAMPLES_DEFAULT}}"
+SEED="${8:-${SEED_DEFAULT}}"
 
 
 # Hardware Configuration
@@ -76,26 +80,26 @@ TENSOR_PARALLEL_SIZE=1  # Increase if model doesn't fit in single GPU
 GPU_MEMORY_UTIL=0.85
 
 # Dataset Configuration
-BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain"
+BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_rollouts"
 DATA_DIR="${BASE_DIR}/data"
-CACHE_DIR="/n/netscratch/dam_lab/Lab/sqin/cache"  # HuggingFace datasets cache - change it per user 
+CACHE_DIR="/n/netscratch/dam_lab/Lab/brachit/cache"  # HuggingFace datasets cache - change it per user 
 GSM8K_DIR="${DATA_DIR}/gsm8k"
 MATH_DIR="${DATA_DIR}/math"
-OPENMATHINSTRUCT2_DIR="${DATA_DIR}/openmathinstruct2"
+OPENMATHINSTRUCT2_DIR="${DATA_DIR}/openmathinstruct2_gsm8k"
 
 # Evaluation Configuration
 N_SHOT=0  # Number of few-shot examples
-TEMPERATURE=1  # 0.0 for greedy, >0 for sampling
+TEMPERATURE=0.6  # 0.0 for greedy, >0 for sampling
 TOP_P=0.95
 TOP_K=-1  # -1 means no top-k filtering 
 
 # Generation Configuration
-BATCH_SIZE=256
+BATCH_SIZE=1024
 MAX_PROMPT_LENGTH=2048  # Increased to accommodate 8-shot examples (~750-850 tokens)
 MAX_RESPONSE_LENGTH=1024
 
 # Output Configuration
-OUTPUT_DIR="${BASE_DIR}/eval_results/${MODEL_NAME}-${N_SHOT}shot-${N_SAMPLES}samples-temp${TEMPERATURE}"
+OUTPUT_DIR="${BASE_DIR}/eval_results/${MODEL_NAME}-${N_SHOT}shot-${N_SAMPLES}samples-temp${TEMPERATURE}-seed${SEED}"
 mkdir -p "${OUTPUT_DIR}"
 
 # Set HuggingFace cache directory
@@ -110,7 +114,7 @@ exec > >(tee -a "${LOG_FILE}") 2>&1
 # Wandb Configuration
 WANDB_PROJECT="interleaved-rl"
 WANDB_ENTITY="harvardml"
-WANDB_RUN_NAME="${MODEL_NAME}_${N_SHOT}shot_${N_SAMPLES}samples_temp${TEMPERATURE}"
+WANDB_RUN_NAME="${MODEL_NAME}_${N_SHOT}shot_${N_SAMPLES}samples_temp${TEMPERATURE}_seed${SEED}"
 
 echo "================================================"
 echo "OLMo-2 Math Evaluation Script"
@@ -207,6 +211,26 @@ if [ "${EVAL_MATH}" = true ]; then
     else
         echo "✓ MATH dataset already exists"
     fi
+    
+    # Prepare train subset for hard examples filtering
+    if [ "${FILTER_HARD_EXAMPLES}" = true ]; then
+        MATH_TRAIN_SUBSET="${MATH_DIR}/train_subset_${HARD_EXAMPLES_TRAIN_SUBSET_SIZE}.parquet"
+        if [ ! -f "${MATH_TRAIN_SUBSET}" ]; then
+            echo "Creating MATH train subset (${HARD_EXAMPLES_TRAIN_SUBSET_SIZE} examples)..."
+            python3 -c "
+import pandas as pd
+df = pd.read_parquet('${MATH_DIR}/train.parquet')
+print(f'Loaded {len(df)} train examples')
+subset = df.sample(n=min(${HARD_EXAMPLES_TRAIN_SUBSET_SIZE}, len(df)), random_state=42)
+print(f'Sampled {len(subset)} examples')
+subset.to_parquet('${MATH_TRAIN_SUBSET}', index=False)
+print(f'Created train subset with {len(subset)} examples')
+"
+            echo "✓ MATH train subset created: ${MATH_TRAIN_SUBSET}"
+        else
+            echo "✓ MATH train subset already exists: ${MATH_TRAIN_SUBSET}"
+        fi
+    fi
 else
     echo "⊘ MATH evaluation disabled"
 fi
@@ -225,6 +249,26 @@ if [ "${OPENMATHINSTRUCT2}" = true ]; then
         echo "✓ OpenMathInstruct-2 dataset prepared"
     else
         echo "✓ OpenMathInstruct-2 dataset already exists"
+    fi
+    
+    # Prepare train subset for hard examples filtering
+    if [ "${FILTER_HARD_EXAMPLES}" = true ]; then
+        OPENMATHINSTRUCT2_TRAIN_SUBSET="${OPENMATHINSTRUCT2_DIR}/train_subset_${HARD_EXAMPLES_TRAIN_SUBSET_SIZE}.parquet"
+        if [ ! -f "${OPENMATHINSTRUCT2_TRAIN_SUBSET}" ]; then
+            echo "Creating OpenMathInstruct-2 train subset (${HARD_EXAMPLES_TRAIN_SUBSET_SIZE} examples)..."
+            python3 -c "
+import pandas as pd
+df = pd.read_parquet('${OPENMATHINSTRUCT2_DIR}/train_gsm8k.parquet')
+print(f'Loaded {len(df)} train examples')
+subset = df.sample(n=min(${HARD_EXAMPLES_TRAIN_SUBSET_SIZE}, len(df)), random_state=42)
+print(f'Sampled {len(subset)} examples')
+subset.to_parquet('${OPENMATHINSTRUCT2_TRAIN_SUBSET}', index=False)
+print(f'Created train subset with {len(subset)} examples')
+"
+            echo "✓ OpenMathInstruct-2 train subset created: ${OPENMATHINSTRUCT2_TRAIN_SUBSET}"
+        else
+            echo "✓ OpenMathInstruct-2 train subset already exists: ${OPENMATHINSTRUCT2_TRAIN_SUBSET}"
+        fi
     fi
 else
     echo "⊘ OpenMathInstruct-2 preparation disabled"
@@ -325,6 +369,80 @@ if [ "${FILTER_HARD_EXAMPLES}" = true ] && [ "${EVAL_GSM8K}" = true ]; then
         echo "✓ GSM-8K train subset responses generated: ${GSM8K_TRAIN_OUTPUT}"
     else
         echo "✓ GSM-8K train subset responses already exist: ${GSM8K_TRAIN_OUTPUT}"
+    fi
+    echo ""
+fi
+
+if [ "${FILTER_HARD_EXAMPLES}" = true ] && [ "${EVAL_MATH}" = true ]; then
+    echo "[Step 2.5] Generating responses on MATH train subset for hard examples..."
+    
+    MATH_TRAIN_OUTPUT="${OUTPUT_DIR}/math_train_predictions.parquet"
+    
+    if [ ! -f "${MATH_TRAIN_OUTPUT}" ]; then
+        python3 -m verl.trainer.main_generation \
+            trainer.nnodes="${NNODES}" \
+            trainer.n_gpus_per_node="${N_GPUS_PER_NODE}" \
+            trainer.device=cuda \
+            data.path="${MATH_TRAIN_SUBSET}" \
+            data.prompt_key=prompt \
+            data.n_samples="${N_SAMPLES}" \
+            data.output_path="${MATH_TRAIN_OUTPUT}" \
+            data.batch_size="${BATCH_SIZE}" \
+            model.path="${MODEL_PATH}" \
+            +model.trust_remote_code=True \
+            rollout.name=vllm \
+            rollout.temperature="${TEMPERATURE}" \
+            rollout.top_k="${TOP_K}" \
+            rollout.top_p="${TOP_P}" \
+            rollout.prompt_length="${MAX_PROMPT_LENGTH}" \
+            rollout.response_length="${MAX_RESPONSE_LENGTH}" \
+            rollout.tensor_model_parallel_size="${TENSOR_PARALLEL_SIZE}" \
+            +rollout.pipeline_model_parallel_size=1 \
+            rollout.gpu_memory_utilization="${GPU_MEMORY_UTIL}" \
+            rollout.dtype=bfloat16 \
+            rollout.enforce_eager=True \
+            ray_kwargs.ray_init.num_cpus=16
+        
+        echo "✓ MATH train subset responses generated: ${MATH_TRAIN_OUTPUT}"
+    else
+        echo "✓ MATH train subset responses already exist: ${MATH_TRAIN_OUTPUT}"
+    fi
+    echo ""
+fi
+
+if [ "${FILTER_HARD_EXAMPLES}" = true ] && [ "${OPENMATHINSTRUCT2}" = true ]; then
+    echo "[Step 2.5] Generating responses on OpenMathInstruct-2 train subset for hard examples..."
+    
+    OPENMATHINSTRUCT2_TRAIN_OUTPUT="${OUTPUT_DIR}/openmathinstruct2_train_predictions.parquet"
+    
+    if [ ! -f "${OPENMATHINSTRUCT2_TRAIN_OUTPUT}" ]; then
+        python3 -m verl.trainer.main_generation \
+            trainer.nnodes="${NNODES}" \
+            trainer.n_gpus_per_node="${N_GPUS_PER_NODE}" \
+            trainer.device=cuda \
+            data.path="${OPENMATHINSTRUCT2_TRAIN_SUBSET}" \
+            data.prompt_key=prompt \
+            data.n_samples="${N_SAMPLES}" \
+            data.output_path="${OPENMATHINSTRUCT2_TRAIN_OUTPUT}" \
+            data.batch_size="${BATCH_SIZE}" \
+            model.path="${MODEL_PATH}" \
+            +model.trust_remote_code=True \
+            rollout.name=vllm \
+            rollout.temperature="${TEMPERATURE}" \
+            rollout.top_k="${TOP_K}" \
+            rollout.top_p="${TOP_P}" \
+            rollout.prompt_length="${MAX_PROMPT_LENGTH}" \
+            rollout.response_length="${MAX_RESPONSE_LENGTH}" \
+            rollout.tensor_model_parallel_size="${TENSOR_PARALLEL_SIZE}" \
+            +rollout.pipeline_model_parallel_size=1 \
+            rollout.gpu_memory_utilization="${GPU_MEMORY_UTIL}" \
+            rollout.dtype=bfloat16 \
+            rollout.enforce_eager=True \
+            ray_kwargs.ray_init.num_cpus=16
+        
+        echo "✓ OpenMathInstruct-2 train subset responses generated: ${OPENMATHINSTRUCT2_TRAIN_OUTPUT}"
+    else
+        echo "✓ OpenMathInstruct-2 train subset responses already exist: ${OPENMATHINSTRUCT2_TRAIN_OUTPUT}"
     fi
     echo ""
 fi
@@ -571,18 +689,32 @@ if [ "${FILTER_HARD_EXAMPLES}" = true ]; then
         echo "✓ GSM-8K hard examples (from train) saved to: ${GSM8K_HARD_DIR}"
     fi
     
-    if [ "${EVAL_MATH}" = true ] && [ -f "${MATH_OUTPUT}" ]; then
+    if [ "${EVAL_MATH}" = true ] && [ -f "${MATH_TRAIN_OUTPUT}" ]; then
         echo ""
-        echo "--- Filtering MATH Hard Examples ---"
+        echo "--- Filtering MATH Hard Examples from Train Split ---"
         MATH_HARD_DIR="${HARD_EXAMPLES_DIR}/math"
         python3 scripts/filter_hard_examples.py \
-            --input_file "${MATH_OUTPUT}" \
+            --input_file "${MATH_TRAIN_OUTPUT}" \
             --output_dir "${MATH_HARD_DIR}" \
             --target_accuracy "${HARD_EXAMPLES_TARGET_ACCURACY}" \
             --tolerance "${HARD_EXAMPLES_TOLERANCE}" \
-            --original_dataset "${MATH_TEST_FILE}" \
+            --original_dataset "${MATH_TRAIN_SUBSET}" \
             --save_all_scores | tee "${OUTPUT_DIR}/math_hard_examples.txt"
-        echo "✓ MATH hard examples saved to: ${MATH_HARD_DIR}"
+        echo "✓ MATH hard examples (from train) saved to: ${MATH_HARD_DIR}"
+    fi
+    
+    if [ "${OPENMATHINSTRUCT2}" = true ] && [ -f "${OPENMATHINSTRUCT2_TRAIN_OUTPUT}" ]; then
+        echo ""
+        echo "--- Filtering OpenMathInstruct-2 Hard Examples from Train Split ---"
+        OPENMATHINSTRUCT2_HARD_DIR="${HARD_EXAMPLES_DIR}/openmathinstruct2"
+        python3 scripts/filter_hard_examples.py \
+            --input_file "${OPENMATHINSTRUCT2_TRAIN_OUTPUT}" \
+            --output_dir "${OPENMATHINSTRUCT2_HARD_DIR}" \
+            --target_accuracy "${HARD_EXAMPLES_TARGET_ACCURACY}" \
+            --tolerance "${HARD_EXAMPLES_TOLERANCE}" \
+            --original_dataset "${OPENMATHINSTRUCT2_TRAIN_SUBSET}" \
+            --save_all_scores | tee "${OUTPUT_DIR}/openmathinstruct2_hard_examples.txt"
+        echo "✓ OpenMathInstruct-2 hard examples (from train) saved to: ${OPENMATHINSTRUCT2_HARD_DIR}"
     fi
 else
     echo ""
@@ -631,7 +763,12 @@ if [ "${FILTER_HARD_EXAMPLES}" = true ]; then
         echo "  GSM-8K hard examples (from train): ${HARD_EXAMPLES_DIR}/gsm8k/"
     fi
     if [ "${EVAL_MATH}" = true ]; then
-        echo "  MATH hard examples: ${HARD_EXAMPLES_DIR}/math/"
+        echo "  MATH train predictions: ${MATH_TRAIN_OUTPUT}"
+        echo "  MATH hard examples (from train): ${HARD_EXAMPLES_DIR}/math/"
+    fi
+    if [ "${OPENMATHINSTRUCT2}" = true ]; then
+        echo "  OpenMathInstruct-2 train predictions: ${OPENMATHINSTRUCT2_TRAIN_OUTPUT}"
+        echo "  OpenMathInstruct-2 hard examples (from train): ${HARD_EXAMPLES_DIR}/openmathinstruct2/"
     fi
 fi
 echo ""

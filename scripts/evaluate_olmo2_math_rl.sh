@@ -15,6 +15,9 @@ set -u  # Exit on undefined variable
 # ---- Activate your prebuilt env
 source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
 
+# Add verl project root to PYTHONPATH so imports work from any directory
+export PYTHONPATH="/n/netscratch/dam_lab/Lab/brachit/rollouts/verl:${PYTHONPATH:-}"
+
 #############################################
 # CONFIGURATION
 #############################################
@@ -51,9 +54,9 @@ TENSOR_PARALLEL_SIZE=1  # Increase if model doesn't fit in single GPU
 GPU_MEMORY_UTIL=0.85
 
 # Dataset Configuration
-BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain"
+BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_rollouts"
 DATA_DIR="${BASE_DIR}/data"
-CACHE_DIR="/n/netscratch/dam_lab/Lab/sqin/cache"  # HuggingFace datasets cache - change it per user
+CACHE_DIR="/n/netscratch/dam_lab/Lab/brachit/cache"  # HuggingFace datasets cache - change it per user
 GSM8K_DIR="${DATA_DIR}/gsm8k"
 MATH_DIR="${DATA_DIR}/math"
 
@@ -95,7 +98,7 @@ LOG_FILE="${OUTPUT_DIR}/evaluation.log"
 exec > >(tee -a "${LOG_FILE}") 2>&1
 
 # Wandb Configuration
-WANDB_PROJECT="interleaved-rl"
+WANDB_PROJECT="rl_rollouts"
 WANDB_ENTITY="harvardml"
 WANDB_RUN_NAME="${MODEL_NAME}_${N_SHOT}shot_${N_SAMPLES}samples_temp${TEMPERATURE}"
 
