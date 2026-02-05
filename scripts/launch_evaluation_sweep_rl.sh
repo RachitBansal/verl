@@ -19,6 +19,7 @@ set -u  # Exit on undefined variable
 CHECKPOINT_BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments"
 
 # Base directory for verl
+<<<<<<< Updated upstream
 BASE_DIR="/n/home05/sqin/rl_pretrain/verl/"
 EVAL_SCRIPT="${BASE_DIR}/scripts/evaluate_olmo2_math_rl.sh"
 
@@ -29,6 +30,18 @@ N_SAMPLES_LIST=(32)
 SLURM_PARTITION="kempner"
 SLURM_ACCOUNT="kempner_dam_lab"
 SLURM_TIME="8:00:00"
+=======
+BASE_DIR="$HOME/team_verl"
+EVAL_SCRIPT="${BASE_DIR}/scripts/evaluate_olmo2_math_rl.sh"
+
+# N_SAMPLES values to test (used as top-k generations per prompt)
+N_SAMPLES_LIST=(5) # (1 8 32)  
+
+# SLURM Configuration
+SLURM_PARTITION="kempner"
+SLURM_ACCOUNT="kempner_sham_lab"
+SLURM_TIME="4:00:00"
+>>>>>>> Stashed changes
 SLURM_NODES=1
 SLURM_GPUS_PER_NODE=1
 SLURM_CPUS_PER_TASK=24
@@ -66,7 +79,11 @@ while IFS= read -r -d '' checkpoint; do
     CHECKPOINT_NAMES+=("${experiment_name}")
     CHECKPOINT_STEPS+=("${checkpoint_step}")
     echo "  Found: ${experiment_name} (${checkpoint_step_dir}) -> ${checkpoint}"
+<<<<<<< Updated upstream
 done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 3 -type d -path "${CHECKPOINT_BASE_DIR}/*_omi_n${NUM_ROLLOUTS}_sunny_tmp/hf_model/step*" -print0 | sort -z)
+=======
+done < <({ find "${CHECKPOINT_BASE_DIR}" -maxdepth 3 -type d -path "${CHECKPOINT_BASE_DIR}/*_omi_n${NUM_ROLLOUTS}/hf_model/step*" -print0; find "${CHECKPOINT_BASE_DIR}" -maxdepth 3 -type d -path "${CHECKPOINT_BASE_DIR}/*_omi_n${NUM_ROLLOUTS}_sunny_tmp/hf_model/step*" -print0; } | sort -z)
+>>>>>>> Stashed changes
 
 if [ ${#CHECKPOINT_PATHS[@]} -eq 0 ]; then
     echo "ERROR: No checkpoints found at ${CHECKPOINT_BASE_DIR}/*_n${NUM_ROLLOUTS}/hf_model/step*"

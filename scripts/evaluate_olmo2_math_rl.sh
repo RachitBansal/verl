@@ -51,9 +51,9 @@ TENSOR_PARALLEL_SIZE=1  # Increase if model doesn't fit in single GPU
 GPU_MEMORY_UTIL=0.85
 
 # Dataset Configuration
-BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain"
+BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_rollouts"
 DATA_DIR="${BASE_DIR}/data"
-CACHE_DIR="/n/netscratch/dam_lab/Lab/sqin/cache"  # HuggingFace datasets cache - change it per user
+CACHE_DIR="/n/netscratch/sham_lab/Lab/cmohri/cache"  # HuggingFace datasets cache - change it per user
 GSM8K_DIR="${DATA_DIR}/gsm8k"
 MATH_DIR="${DATA_DIR}/math"
 
@@ -83,7 +83,7 @@ mkdir -p "${CACHE_DIR}"
 
 # Ray / tmp directories (avoid /tmp permission issues on shared nodes)
 # Use a very short path to avoid UNIX socket length limits (<108 chars).
-JOB_TMP_BASE="/n/home08/brachit/tmp"
+JOB_TMP_BASE="/n/home03/cmohri/tmp"
 JOB_ID="${SLURM_JOB_ID:-$$}"
 export TMPDIR="${JOB_TMP_BASE}/job_${JOB_ID}"
 export RAY_TMPDIR="${TMPDIR}/ray"
@@ -115,6 +115,24 @@ echo "  Entity: ${WANDB_ENTITY}"
 echo "  Run Name: ${WANDB_RUN_NAME}"
 echo "================================================"
 echo ""
+
+
+echo "HOSTNAME=$(hostname)"
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES-<unset>}"
+which nvidia-smi || true
+nvidia-smi || true
+
+python3 - <<'PY'
+import torch, os
+print("torch", torch.__version__)
+print("cuda available", torch.cuda.is_available())
+print("device count", torch.cuda.device_count())
+print("CUDA_VISIBLE_DEVICES", os.environ.get("CUDA_VISIBLE_DEVICES"))
+if torch.cuda.is_available():
+    print("current device", torch.cuda.current_device())
+    print("device name", torch.cuda.get_device_name(0))
+PY
+
 
 #############################################
 # STEP 0: Verify Model Exists

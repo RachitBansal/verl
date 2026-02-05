@@ -13,7 +13,8 @@ sleep 30
 # Configuration
 # ============================================================================
 # Model checkpoint
-STEP_NUM=22000
+STEP_NUM=${STEP_NUM:-22000}
+
 OLMO_CHECKPOINT="/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step${STEP_NUM}-hf"
 
 # GPU configuration (auto-detect from SLURM if available)
@@ -33,6 +34,8 @@ FORMAT_SCORE=0.1
 # Wandb (optional)
 # export WANDB_API_KEY="your_key_here"
 export WANDB_ENTITY="harvardml"  # Ensure all team members log to same entity
+
+source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
 
 # ============================================================================
 # Training
@@ -62,7 +65,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
-    actor_rollout_ref.rollout.n=5 \
+    actor_rollout_ref.rollout.n=32 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=16 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     algorithm.use_kl_in_reward=False \
@@ -70,12 +73,12 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger='["console","wandb"]' \
     trainer.project_name='rl_pretrain' \
-    trainer.experiment_name="olmo2_1b_step${STEP_NUM}_omigsm8k" \
-    trainer.default_local_dir="${OUTPUT_DIR}/olmo2_1b_step${STEP_NUM}_omigsm8k" \
+    trainer.experiment_name="olmo2_1b_step${STEP_NUM}_omigsm8k_n32_v4" \
+    trainer.default_local_dir="${OUTPUT_DIR}/olmo2_1b_step${STEP_NUM}_omigsm8k_n32_v4" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
-    trainer.save_freq=50 \
-    trainer.test_freq=5 \
+    trainer.save_freq=200 \
+    trainer.test_freq=20 \
     trainer.total_epochs=10 \
     "$@"
 
