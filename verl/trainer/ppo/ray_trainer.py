@@ -1213,6 +1213,27 @@ class RayPPOTrainer:
                         with marked_timer("update_actor", timing_raw, color="red"):
                             batch.meta_info["multi_turn"] = self.config.actor_rollout_ref.rollout.multi_turn.enable
                             actor_output = self.actor_rollout_wg.update_actor(batch)
+                        # Gradient noise measurement for CBS study:
+                        # Extract per-mini-batch grad norms BEFORE reduce_metrics averages them.
+                        grad_noise_freq = self.config.trainer.get("grad_noise_measure_freq", 0)
+                        if grad_noise_freq > 0 and self.global_steps % grad_noise_freq == 0:
+                            raw_actor_metrics = actor_output.meta_info["metrics"]
+                            grad_norms = raw_actor_metrics.get("actor/grad_norm", [])
+                            if isinstance(grad_norms, list) and len(grad_norms) >= 2:
+                                import numpy as _np
+                                gn = _np.array(grad_norms)
+                                gn_sq = gn ** 2
+                                mean_gn_sq = _np.mean(gn_sq)
+                                approx_full_gn_sq = _np.mean(gn) ** 2
+                                mini_bs = self.config.actor_rollout_ref.actor.ppo_mini_batch_size
+                                if approx_full_gn_sq > 1e-12:
+                                    b_noise = float(mini_bs * (mean_gn_sq / approx_full_gn_sq - 1))
+                                    metrics["grad_noise/B_noise_estimate"] = max(b_noise, 0.0)
+                                metrics["grad_noise/grad_norm_mean"] = float(_np.mean(gn))
+                                metrics["grad_noise/grad_norm_std"] = float(_np.std(gn))
+                                metrics["grad_noise/grad_norm_cv"] = float(_np.std(gn) / _np.mean(gn))
+                                metrics["grad_noise/n_mini_batches"] = len(grad_norms)
+
                         actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
                         metrics.update(actor_output_metrics)
 
