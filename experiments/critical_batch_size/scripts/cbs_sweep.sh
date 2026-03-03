@@ -10,6 +10,10 @@ set -euo pipefail
 # ============================================================================
 N_PROMPTS=128
 N_ROLLOUTS=8
+PPO_EPOCHS=1
+CLIP_RATIO=0.2
+MINI_BATCH_SIZE=256
+ADV_ESTIMATOR="grpo"
 PHASE="p1"
 MODEL_PATH="/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo-2-0425-1B"
 DATA_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2"
@@ -31,18 +35,22 @@ EXTRA_ARGS=""
 # ============================================================================
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --n_prompts)     N_PROMPTS="$2"; shift 2 ;;
-        --n_rollouts)    N_ROLLOUTS="$2"; shift 2 ;;
-        --phase)         PHASE="$2"; shift 2 ;;
-        --model_path)    MODEL_PATH="$2"; shift 2 ;;
-        --data_dir)      DATA_DIR="$2"; shift 2 ;;
-        --lr)            LR="$2"; shift 2 ;;
-        --total_epochs)  TOTAL_EPOCHS="$2"; shift 2 ;;
-        --test_freq)     TEST_FREQ="$2"; shift 2 ;;
-        --save_freq)     SAVE_FREQ="$2"; shift 2 ;;
-        --seed)          SEED="$2"; shift 2 ;;
-        --n_gpus)        N_GPUS_PER_NODE="$2"; shift 2 ;;
-        --extra_args)    EXTRA_ARGS="$2"; shift 2 ;;
+        --n_prompts)      N_PROMPTS="$2"; shift 2 ;;
+        --n_rollouts)     N_ROLLOUTS="$2"; shift 2 ;;
+        --ppo_epochs)     PPO_EPOCHS="$2"; shift 2 ;;
+        --clip_ratio)     CLIP_RATIO="$2"; shift 2 ;;
+        --mini_batch_size) MINI_BATCH_SIZE="$2"; shift 2 ;;
+        --adv_estimator)  ADV_ESTIMATOR="$2"; shift 2 ;;
+        --phase)          PHASE="$2"; shift 2 ;;
+        --model_path)     MODEL_PATH="$2"; shift 2 ;;
+        --data_dir)       DATA_DIR="$2"; shift 2 ;;
+        --lr)             LR="$2"; shift 2 ;;
+        --total_epochs)   TOTAL_EPOCHS="$2"; shift 2 ;;
+        --test_freq)      TEST_FREQ="$2"; shift 2 ;;
+        --save_freq)      SAVE_FREQ="$2"; shift 2 ;;
+        --seed)           SEED="$2"; shift 2 ;;
+        --n_gpus)         N_GPUS_PER_NODE="$2"; shift 2 ;;
+        --extra_args)     EXTRA_ARGS="$2"; shift 2 ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
@@ -69,25 +77,26 @@ fi
 # ============================================================================
 TOTAL_BATCH=$((N_PROMPTS * N_ROLLOUTS))
 
-# mini-batch size: use the total batch or 256, whichever is smaller,
-# to keep gradient accumulation steps reasonable
-if [ "$TOTAL_BATCH" -le 256 ]; then
-    MINI_BATCH_SIZE=$TOTAL_BATCH
-else
-    MINI_BATCH_SIZE=256
-fi
-
 # micro-batch (per-GPU forward pass) size: fit within GPU memory
 # For 1B model with 2048 response length on H100, 16 per GPU is safe
 MICRO_BATCH_PER_GPU=16
 
-EXPERIMENT_NAME="cbs_${PHASE}_np${N_PROMPTS}_nr${N_ROLLOUTS}_lr${LR}"
+# Append _ep{N} suffix to experiment name when ppo_epochs > 1.
+# Omitting suffix for ep=1 preserves backward-compatible run names.
+if [ "${PPO_EPOCHS}" -gt 1 ]; then
+    EP_SUFFIX="_ep${PPO_EPOCHS}"
+else
+    EP_SUFFIX=""
+fi
+
+EXPERIMENT_NAME="cbs_${PHASE}_np${N_PROMPTS}_nr${N_ROLLOUTS}${EP_SUFFIX}_lr${LR}_mbs${MINI_BATCH_SIZE}_cr${CLIP_RATIO}"
 OUTPUT_DIR="${OUTPUT_BASE}/${EXPERIMENT_NAME}"
 
 echo "============================================================"
 echo "CBS Sweep: ${EXPERIMENT_NAME}"
-echo "  n_prompts=${N_PROMPTS}, n_rollouts=${N_ROLLOUTS}"
-echo "  total_batch=${TOTAL_BATCH}, mini_batch=${MINI_BATCH_SIZE}"
+echo "  n_prompts=${N_PROMPTS}, n_rollouts=${N_ROLLOUTS}, ppo_epochs=${PPO_EPOCHS}"
+echo "  total_batch=${TOTAL_BATCH}, mini_batch=${MINI_BATCH_SIZE}, clip_ratio=${CLIP_RATIO}"
+echo "  adv_estimator=${ADV_ESTIMATOR}"
 echo "  model=${MODEL_PATH}"
 echo "  output=${OUTPUT_DIR}"
 echo "============================================================"
@@ -104,7 +113,7 @@ export WANDB_ENTITY="harvardml"
 # Training
 # ============================================================================
 python3 -m verl.trainer.main_ppo \
-    algorithm.adv_estimator=grpo \
+    algorithm.adv_estimator=${ADV_ESTIMATOR} \
     data.train_files="${TRAIN_FILE}" \
     data.val_files="[${VAL_FILES}]" \
     data.train_batch_size=${N_PROMPTS} \
@@ -118,7 +127,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=${MINI_BATCH_SIZE} \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=${MICRO_BATCH_PER_GPU} \
-    actor_rollout_ref.actor.ppo_epochs=1 \
+    actor_rollout_ref.actor.ppo_epochs=${PPO_EPOCHS} \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
@@ -134,6 +143,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.temperature=1.0 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=${MICRO_BATCH_PER_GPU} \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
+    actor_rollout_ref.actor.clip_ratio=${CLIP_RATIO} \
     algorithm.use_kl_in_reward=False \
     +reward_model.reward_kwargs.format_score=${FORMAT_SCORE} \
     trainer.critic_warmup=0 \
