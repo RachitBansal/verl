@@ -139,6 +139,11 @@ class RLHFDataset(Dataset):
         self.shuffle = config.get("shuffle", False)
         self.seed = config.get("seed")
 
+        # SFT support: load ground-truth responses for mixed SFT+RL training
+        self.load_ground_truth = config.get("load_ground_truth", False)
+        self.response_field_name = config.get("response_field_name", "response")
+        self.max_response_length = config.get("max_response_length", 2048)
+
         self._download()
         self._read_files_and_tokenize()
 
@@ -450,6 +455,24 @@ class RLHFDataset(Dataset):
         row_dict["index"] = index
         row_dict["tools_kwargs"] = tools_kwargs
         row_dict["interaction_kwargs"] = interaction_kwargs
+
+        # Load ground-truth responses if enabled
+        if self.load_ground_truth and self.response_field_name in self.dataframe.column_names:
+            response_text = self.dataframe[item][self.response_field_name]
+            if response_text:
+                response_inputs = self.tokenizer(
+                    response_text, return_tensors="pt", add_special_tokens=False, truncation=True,
+                    max_length=self.max_response_length,
+                    padding="max_length",         
+                )
+                gt_input_ids = response_inputs["input_ids"][0]
+                gt_attention_mask = response_inputs["attention_mask"][0]
+                gt_response_mask = gt_attention_mask.clone()
+
+                row_dict["gt_input_ids"] = gt_input_ids
+                row_dict["gt_attention_mask"] = gt_attention_mask
+                row_dict["gt_response_mask"] = gt_response_mask
+
         return row_dict
 
     def __getstate__(self):

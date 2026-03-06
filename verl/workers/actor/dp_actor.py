@@ -396,6 +396,8 @@ class DataParallelPPOActor(BasePPOActor):
 
         has_multi_modal_inputs = "multi_modal_inputs" in data.non_tensor_batch.keys()
         non_tensor_select_keys = ["multi_modal_inputs"] if has_multi_modal_inputs else []
+    
+        is_sft = data.meta_info.get("is_sft", False)
 
         data = data.select(batch_keys=select_keys, non_tensor_batch_keys=non_tensor_select_keys)
 
@@ -403,9 +405,19 @@ class DataParallelPPOActor(BasePPOActor):
         # See PPO paper for details. https://arxiv.org/abs/1707.06347
         mini_batches = data.split(self.config.ppo_mini_batch_size)
 
-        on_policy = len(mini_batches) == 1 and self.config.ppo_epochs == 1
+        on_policy = len(mini_batches) == 1 and self.config.ppo_epochs == 1 # or in SFT mode 
 
         metrics = {}
+        
+        # Adjust learning rate for SFT mode
+        original_lrs = None
+        if is_sft:
+            sft_lr_scale = self.config.sft_lr_scale
+            original_lrs = []
+            for param_group in self.actor_optimizer.param_groups:
+                original_lrs.append(param_group['lr'])
+                param_group['lr'] = param_group['lr'] * sft_lr_scale
+        
         for _ in range(self.config.ppo_epochs):
             for batch_idx, mini_batch in enumerate(mini_batches):
                 if self.config.use_dynamic_bsz:
@@ -459,20 +471,29 @@ class DataParallelPPOActor(BasePPOActor):
                     # Weights are computed centrally in trainer and added when algorithm.rollout_is=True
                     rollout_is_weights = model_inputs.get("rollout_is_weights", None)
 
-                    # gpg -> verl.trainer.ppo.core_algos.compute_policy_loss_gpg
-                    # clip_cov -> verl.trainer.ppo.core_algos.compute_policy_loss_clip_cov
-                    policy_loss_fn = get_policy_loss_fn(loss_mode)
+                    # Check if this is an SFT step - if so, compute pure NLL instead of PPO loss
+                    # is_sft = model_inputs.get("is_sft", False)
+                    if is_sft:
+                        # SFT mode: compute standard NLL (negative log likelihood)
+                        nll_loss = agg_loss(loss_mat=-log_prob, loss_mask=response_mask, loss_agg_mode="token-sum")
+                        pg_loss = nll_loss
+                        pg_metrics = {"actor/nll_loss": nll_loss.detach().item()}
+                    else:
+                        # RL mode: normal PPO policy loss computation
+                        # gpg -> verl.trainer.ppo.core_algos.compute_policy_loss_gpg
+                        # clip_cov -> verl.trainer.ppo.core_algos.compute_policy_loss_clip_cov
+                        policy_loss_fn = get_policy_loss_fn(loss_mode)
 
-                    # Compute policy loss (any function is expected to return 2 values)
-                    pg_loss, pg_metrics = policy_loss_fn(
-                        old_log_prob=old_log_prob,
-                        log_prob=log_prob,
-                        advantages=advantages,
-                        response_mask=response_mask,
-                        loss_agg_mode=loss_agg_mode,
-                        config=self.config,
-                        rollout_is_weights=rollout_is_weights,
-                    )
+                        # Compute policy loss (any function is expected to return 2 values)
+                        pg_loss, pg_metrics = policy_loss_fn(
+                            old_log_prob=old_log_prob,
+                            log_prob=log_prob,
+                            advantages=advantages,
+                            response_mask=response_mask,
+                            loss_agg_mode=loss_agg_mode,
+                            config=self.config,
+                            rollout_is_weights=rollout_is_weights,
+                        )
                     micro_batch_metrics.update(pg_metrics)
 
                     # Skip if using pure rollout correction mode (metrics already in pg_metrics)
@@ -490,7 +511,7 @@ class DataParallelPPOActor(BasePPOActor):
                         micro_batch_metrics.update(rollout_corr_metrics)
 
                     if entropy_coeff != 0:
-                        entropy_loss = agg_loss(loss_mat=entropy, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+                        entropy_loss = agg_loss(loss_mat=entropy, loss_mask=response_mask, loss_agg_mode="token-sum")
 
                         # compute policy loss
                         policy_loss = pg_loss - entropy_loss * entropy_coeff
@@ -524,6 +545,13 @@ class DataParallelPPOActor(BasePPOActor):
 
                 grad_norm = self._optimizer_step()
                 mini_batch_metrics = {"actor/grad_norm": grad_norm.detach().item()}
+                
                 append_to_dict(metrics, mini_batch_metrics)
         self.actor_optimizer.zero_grad()
+        
+        # Restore original learning rate if it was adjusted for SFT
+        if original_lrs is not None:
+            for param_group, original_lr in zip(self.actor_optimizer.param_groups, original_lrs):
+                param_group['lr'] = original_lr
+        
         return metrics

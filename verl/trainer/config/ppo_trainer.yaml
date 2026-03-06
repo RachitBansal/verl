@@ -208,6 +208,24 @@ trainer:
   #  mode: "auto", "enable", or "disable"
   use_legacy_worker_impl: auto
 
+# SFT configuration for mixed SFT+RL training
+sft_config:
+
+  # Whether to enable mixed SFT+RL training
+  enabled: False
+
+  # Whether to load ground-truth responses from dataset
+  load_ground_truth: False
+
+  # Alternation frequency: switch between SFT and RL every N steps
+  alternate_steps: 2
+
+  # Whether SFT steps are on-policy (should always be True)
+  on_policy: True
+
+  # KL coefficient for SFT steps (should be 0.0 to disable KL penalty)
+  beta_for_sft: 0.0
+
 # profiler configs
 global_profiler:
 

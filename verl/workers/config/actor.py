@@ -221,7 +221,9 @@ class FSDPActorConfig(ActorConfig):
             with chunking for memory efficiency.
         entropy_checkpointing (bool): Whether to use gradient checkpointing for entropy computation.
         fsdp_config (dict[str, Any]): Configuration for FSDP settings.
-        use_remove_padding (bool): Whether to remove padding tokens in inputs during training
+        use_remove_padding (bool): Whether to remove padding tokens in inputs during training.
+        sft_lr_scale (float): Learning rate scaling factor for SFT training mode. Multiplied with
+            the base learning rate when is_sft=True. Default 1.0 means no scaling.
     """
 
     strategy: str = "fsdp"
@@ -233,6 +235,7 @@ class FSDPActorConfig(ActorConfig):
     use_remove_padding: bool = False
     profiler: ProfilerConfig = field(default_factory=ProfilerConfig)
     use_rollout_log_probs: bool = False
+    sft_lr_scale: float = 1.0
 
     def __post_init__(self):
         """Validate FSDP actor configuration parameters."""

@@ -1006,10 +1006,23 @@ class RayPPOTrainer:
         )
         next_step_profile = False
 
+        # Initialize SFT configuration
+        sft_config = self.config.get("sft_config", {})
+        sft_enabled = sft_config.get("enabled", False)
+        sft_alternate_steps = sft_config.get("alternate_steps", 2)
+        sft_step_counter = 0
+
         for epoch in range(self.config.trainer.total_epochs):
             for batch_dict in self.train_dataloader:
                 metrics = {}
                 timing_raw = {}
+
+                # Determine if this is an SFT step based on alternation pattern
+                is_sft_mode = False
+                if sft_enabled:
+                    # Determine mode: first sft_alternate_steps steps are SFT, next sft_alternate_steps are RL
+                    is_sft_mode = (sft_step_counter // sft_alternate_steps) % 2 == 0
+                    sft_step_counter += 1
 
                 with marked_timer("start_profile", timing_raw):
                     self._start_profiling(
@@ -1028,21 +1041,51 @@ class RayPPOTrainer:
 
                 # pass global_steps to trace
                 gen_batch.meta_info["global_steps"] = self.global_steps
-                gen_batch_output = gen_batch.repeat(
-                    repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True
-                )
 
                 is_last_step = self.global_steps >= self.total_training_steps
                 with marked_timer("step", timing_raw):
                     # generate a batch
                     with marked_timer("gen", timing_raw, color="red"):
-                        if not self.async_rollout_mode:
-                            gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch_output)
-                        else:
-                            gen_batch_output = self.async_rollout_manager.generate_sequences(gen_batch_output)
+                        if is_sft_mode:
+                            if "gt_input_ids" not in batch.batch:
+                                raise ValueError(
+                                    "SFT mode enabled but ground-truth responses not found in batch. "
+                                    "Ensure load_ground_truth=True in data config."
+                                )
+                            # Build full input_ids = prompt + GT response
+                            prompt_ids = gen_batch.batch["input_ids"]             # (B, prompt_len)
+                            response_ids = batch.batch["gt_input_ids"]            # (B, response_len)
+                            prompt_mask = gen_batch.batch["attention_mask"]       # (B, prompt_len)
+                            response_mask = batch.batch["gt_attention_mask"]      # (B, response_len)
 
-                        timing_raw.update(gen_batch_output.meta_info["timing"])
-                        gen_batch_output.meta_info.pop("timing", None)
+                            # Extend position_ids to cover response tokens
+                            position_ids = gen_batch.batch["position_ids"]        # (B, prompt_len)
+                            last_pos = position_ids[:, -1:]
+                            response_len = response_ids.shape[1]
+                            response_pos = last_pos + torch.arange(
+                                1, response_len + 1, device=last_pos.device
+                            ).unsqueeze(0)
+
+                            gen_batch.batch["input_ids"] = torch.cat([prompt_ids, response_ids], dim=1)
+                            gen_batch.batch["attention_mask"] = torch.cat([prompt_mask, response_mask], dim=1)
+                            gen_batch.batch["position_ids"] = torch.cat([position_ids, response_pos], dim=1)
+                            gen_batch.batch["responses"] = response_ids
+                            gen_batch.batch["response_mask"] = batch.batch["gt_response_mask"]
+
+                            gen_batch_output = gen_batch
+                        else:
+                            # RL step: generate sequences normally
+                            gen_batch_output = gen_batch.repeat(
+                                repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True
+                            )
+                            if not self.async_rollout_mode:
+                                gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch_output)
+                            else:
+                                gen_batch_output = self.async_rollout_manager.generate_sequences(gen_batch_output)
+
+                        if "timing" in gen_batch_output.meta_info:
+                            timing_raw.update(gen_batch_output.meta_info["timing"])
+                            gen_batch_output.meta_info.pop("timing", None)
 
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         if self.reward_fn is None:
@@ -1073,8 +1116,16 @@ class RayPPOTrainer:
 
                             del rm_scores, gen_baseline_batch, gen_baseline_output
                     # repeat to align with repeated responses in rollout
-                    batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
+                    # should be 1 for SFT 
+                    if not is_sft_mode:
+                        batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
+                    
                     batch = batch.union(gen_batch_output)
+                    
+                    if is_sft_mode:
+                        batch.batch.del_("gt_input_ids")
+                        batch.batch.del_("gt_attention_mask") 
+                        batch.batch.del_("gt_response_mask")
 
                     if "response_mask" not in batch.batch.keys():
                         batch.batch["response_mask"] = compute_response_mask(batch)
@@ -1088,18 +1139,20 @@ class RayPPOTrainer:
                     # compute global_valid tokens
                     batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
 
-                    with marked_timer("reward", timing_raw, color="yellow"):
-                        # compute reward model score
-                        if self.use_rm and "rm_scores" not in batch.batch.keys():
-                            reward_tensor = self.rm_wg.compute_rm_score(batch)
-                            batch = batch.union(reward_tensor)
+                    reward_extra_infos_dict = {}
+                    if not is_sft_mode:
+                        with marked_timer("reward", timing_raw, color="yellow"):
+                            # compute reward model score
+                            if self.use_rm and "rm_scores" not in batch.batch.keys():
+                                reward_tensor = self.rm_wg.compute_rm_score(batch)
+                                batch = batch.union(reward_tensor)
 
-                        if self.config.reward_model.launch_reward_fn_async:
-                            future_reward = compute_reward_async.remote(
-                                data=batch, config=self.config, tokenizer=self.tokenizer
-                            )
-                        else:
-                            reward_tensor, reward_extra_infos_dict = compute_reward(batch, self.reward_fn)
+                            if self.config.reward_model.launch_reward_fn_async:
+                                future_reward = compute_reward_async.remote(
+                                    data=batch, config=self.config, tokenizer=self.tokenizer
+                                )
+                            else:
+                                reward_tensor, reward_extra_infos_dict = compute_reward(batch, self.reward_fn)
 
                     # Operating Mode Selection:
                     # - Bypass mode: Sets old_log_probs = rollout_log_probs (2 policies: π_rollout, π_θ)
@@ -1128,6 +1181,11 @@ class RayPPOTrainer:
                             metrics.update(old_log_prob_metrics)
                             old_log_prob.batch.pop("entropys")
                             batch = batch.union(old_log_prob)
+
+                            # For SFT steps: set old_log_probs = new log_probs so PPO loss becomes standard NLL
+                            if is_sft_mode:
+                                batch.batch["old_log_probs"] = batch.batch["old_log_probs"].clone()
+
                             if "rollout_log_probs" in batch.batch.keys():
                                 # TODO: we may want to add diff of probs too.
                                 from verl.utils.debug.metrics import calculate_debug_metrics
@@ -1146,62 +1204,72 @@ class RayPPOTrainer:
                             batch = batch.union(ref_log_prob)
 
                     # compute values
-                    if self.use_critic:
+                    if self.use_critic and not is_sft_mode:
                         with marked_timer("values", timing_raw, color="cyan"):
                             values = self.critic_wg.compute_values(batch)
                             batch = batch.union(values)
 
                     with marked_timer("adv", timing_raw, color="brown"):
-                        # we combine with rule-based rm
-                        reward_extra_infos_dict: dict[str, list]
-                        if self.config.reward_model.launch_reward_fn_async:
-                            reward_tensor, reward_extra_infos_dict = ray.get(future_reward)
-                        batch.batch["token_level_scores"] = reward_tensor
-
-                        if reward_extra_infos_dict:
-                            batch.non_tensor_batch.update({k: np.array(v) for k, v in reward_extra_infos_dict.items()})
-
-                        # compute rewards. apply_kl_penalty if available
-                        if self.config.algorithm.use_kl_in_reward:
-                            batch, kl_metrics = apply_kl_penalty(
-                                batch, kl_ctrl=self.kl_ctrl_in_reward, kl_penalty=self.config.algorithm.kl_penalty
-                            )
-                            metrics.update(kl_metrics)
+                        if is_sft_mode:
+                            batch.batch["token_level_rewards"] = torch.ones_like(batch.batch["response_mask"], dtype=torch.float32)
+                            batch.batch["advantages"] = torch.ones_like(batch.batch["response_mask"], dtype=torch.float32)
+                            batch.batch["returns"] = torch.zeros_like(batch.batch["response_mask"], dtype=torch.float32)
+                            # dummy scores so compute_data_metrics doesn't crash
+                            batch.batch["token_level_scores"] = torch.zeros_like(batch.batch["response_mask"], dtype=torch.float32)
+                            batch.meta_info["is_sft"] = True
                         else:
-                            batch.batch["token_level_rewards"] = batch.batch["token_level_scores"]
+                            # RL step: normal reward and advantage computation
+                            # we combine with rule-based rm
+                            reward_extra_infos_dict: dict[str, list]
+                            if self.config.reward_model.launch_reward_fn_async:
+                                reward_tensor, reward_extra_infos_dict = ray.get(future_reward)
+                            batch.batch["token_level_scores"] = reward_tensor
 
-                        # Compute rollout correction: IS weights, rejection sampling, and metrics
-                        # Only runs in decoupled mode (computes once per batch using stable π_old)
-                        # In bypass mode, this is skipped - actor computes metrics from evolving π_θ vs π_rollout
-                        if (
-                            rollout_corr_config is not None
-                            and "rollout_log_probs" in batch.batch
-                            and not bypass_recomputing_logprobs  # Only in decoupled mode
-                        ):
-                            from verl.trainer.ppo.rollout_corr_helper import compute_rollout_correction_and_add_to_batch
+                            if reward_extra_infos_dict:
+                                batch.non_tensor_batch.update({k: np.array(v) for k, v in reward_extra_infos_dict.items()})
 
-                            # Compute IS weights, apply rejection sampling, compute metrics
-                            batch, is_metrics = compute_rollout_correction_and_add_to_batch(batch, rollout_corr_config)
-                            # IS and off-policy metrics already have rollout_corr/ prefix
-                            metrics.update(is_metrics)
+                            # compute rewards. apply_kl_penalty if available
+                            if self.config.algorithm.use_kl_in_reward:
+                                batch, kl_metrics = apply_kl_penalty(
+                                    batch, kl_ctrl=self.kl_ctrl_in_reward, kl_penalty=self.config.algorithm.kl_penalty
+                                )
+                                metrics.update(kl_metrics)
+                            else:
+                                batch.batch["token_level_rewards"] = batch.batch["token_level_scores"]
 
-                        # compute advantages, executed on the driver process
-                        norm_adv_by_std_in_grpo = self.config.algorithm.get(
-                            "norm_adv_by_std_in_grpo", True
-                        )  # GRPO adv normalization factor
+                            # Compute rollout correction: IS weights, rejection sampling, and metrics
+                            # Only runs in decoupled mode (computes once per batch using stable π_old)
+                            # In bypass mode, this is skipped - actor computes metrics from evolving π_θ vs π_rollout
+                            if (
+                                rollout_corr_config is not None
+                                and "rollout_log_probs" in batch.batch
+                                and not bypass_recomputing_logprobs  # Only in decoupled mode
+                            ):
+                                from verl.trainer.ppo.rollout_corr_helper import compute_rollout_correction_and_add_to_batch
 
-                        batch = compute_advantage(
-                            batch,
-                            adv_estimator=self.config.algorithm.adv_estimator,
-                            gamma=self.config.algorithm.gamma,
-                            lam=self.config.algorithm.lam,
-                            num_repeat=self.config.actor_rollout_ref.rollout.n,
-                            norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
-                            config=self.config.algorithm,
-                        )
+                                # Compute IS weights, apply rejection sampling, compute metrics
+                                batch, is_metrics = compute_rollout_correction_and_add_to_batch(batch, rollout_corr_config)
+                                # IS and off-policy metrics already have rollout_corr/ prefix
+                                metrics.update(is_metrics)
+
+                            # compute advantages, executed on the driver process
+                            norm_adv_by_std_in_grpo = self.config.algorithm.get(
+                                "norm_adv_by_std_in_grpo", True
+                            )  # GRPO adv normalization factor
+
+                            batch = compute_advantage(
+                                batch,
+                                adv_estimator=self.config.algorithm.adv_estimator,
+                                gamma=self.config.algorithm.gamma,
+                                lam=self.config.algorithm.lam,
+                                num_repeat=self.config.actor_rollout_ref.rollout.n,
+                                norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
+                                config=self.config.algorithm,
+                            )
+                            batch.meta_info["is_sft"] = False
 
                     # update critic
-                    if self.use_critic:
+                    if self.use_critic and not is_sft_mode:
                         with marked_timer("update_critic", timing_raw, color="pink"):
                             critic_output = self.critic_wg.update_critic(batch)
                         critic_output_metrics = reduce_metrics(critic_output.meta_info["metrics"])
@@ -1218,7 +1286,7 @@ class RayPPOTrainer:
 
                     # Log rollout generations if enabled
                     rollout_data_dir = self.config.trainer.get("rollout_data_dir", None)
-                    if rollout_data_dir:
+                    if rollout_data_dir and not is_sft_mode:
                         self._log_rollout_data(batch, reward_extra_infos_dict, timing_raw, rollout_data_dir)
 
                 # validate

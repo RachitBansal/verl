@@ -322,7 +322,7 @@ def compute_grpo_outcome_advantage(
             if norm_adv_by_std_in_grpo:
                 scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)
             else:
-                scores[i] = scores[i] - id2mean[index[i]]
+                scores[i] = (scores[i] - id2mean[index[i]]) / (id2mean[index[i]] + epsilon)
         scores = scores.unsqueeze(-1) * response_mask
 
     return scores, scores
@@ -786,6 +786,10 @@ def agg_loss(loss_mat: torch.Tensor, loss_mask: torch.Tensor, loss_agg_mode: str
     """
     if loss_agg_mode == "token-mean":
         loss = verl_F.masked_mean(loss_mat, loss_mask)
+    elif loss_agg_mode == "token-sum":
+        # Sum loss across all tokens in batch (no normalization)
+        # Longer sequences contribute more to gradient, useful for SFT
+        loss = torch.sum(loss_mat * loss_mask)
     elif loss_agg_mode == "seq-mean-token-sum":
         seq_losses = torch.sum(loss_mat * loss_mask, dim=-1)  # token-sum
         seq_mask = (torch.sum(loss_mask, dim=-1) > 0).float()  # exclude fully masked sequences
@@ -972,6 +976,8 @@ def compute_policy_loss_vanilla(
         "actor/pg_clipfrac": pg_clipfrac.detach().item(),
         "actor/ppo_kl": ppo_kl.detach().item(),
         "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
+        "actor/importance_ratio_mean": ratio.detach().mean().item(),
+        "actor/importance_ratio_std": ratio.detach().std().item(),
     }
     return pg_loss, pg_metrics
 

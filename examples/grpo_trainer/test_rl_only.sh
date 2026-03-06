@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# GRPO training with OLMo2-1B on OpenMathInstruct-2 GSM8K subset
-# Author: Sunny + Claude
+# Test RL-only training (never use SFT mode)
+# This tests that the implementation doesn't interfere with normal GRPO training
+# Author: Claude
 
 set -x
 
@@ -15,13 +16,12 @@ sleep 30
 # Model checkpoint
 STEP_NUM=${STEP_NUM:-22000}
 
-# OLMO_CHECKPOINT="/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step${STEP_NUM}-hf"
-OLMO_CHECKPOINT="/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/OLMo2-1B-RL5k-stage1-50B-nooptim-lr/step${STEP_NUM}-hf"
+OLMO_CHECKPOINT=/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step${STEP_NUM}-hf
 
 # GPU configuration (auto-detect from SLURM if available)
 N_GPUS_PER_NODE=${SLURM_GPUS_PER_NODE:-1}
-
-# Dataset (run: python3 examples/data_preprocess/openmathinstruct2.py)
+   
+# Dataset
 DATA_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2_gsm8k"
 TRAIN_FILE="${DATA_DIR}/train_gsm8k.parquet"
 VAL_FILE="${DATA_DIR}/val_gsm8k.parquet"
@@ -33,13 +33,12 @@ OUTPUT_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments"
 FORMAT_SCORE=0.1
 
 # Wandb (optional)
-# export WANDB_API_KEY="your_key_here"
-export WANDB_ENTITY="harvardml"  # Ensure all team members log to same entity
+export WANDB_ENTITY="harvardml"
 
 source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
 
 # ============================================================================
-# Training
+# Training - Pure RL mode (SFT disabled)
 # ============================================================================
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
@@ -74,12 +73,11 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger='["console","wandb"]' \
     trainer.project_name='rl_pretrain' \
-    trainer.experiment_name="OLMo2-1B-RL5k-stage1-50B-nooptim-lr_step${STEP_NUM}_omigsm8k_n32" \
-    trainer.default_local_dir="${OUTPUT_DIR}/OLMo2-1B-RL5k-stage1-50B-nooptim-lr_step${STEP_NUM}_omigsm8k_n32" \
+    trainer.experiment_name="OLMo2-1B_step${STEP_NUM}_rl_only_test" \
+    trainer.default_local_dir="${OUTPUT_DIR}/OLMo2-1B_step${STEP_NUM}_rl_only_test" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
     trainer.save_freq=200 \
     trainer.test_freq=20 \
-    trainer.total_epochs=10 \
-    "$@"
-
+    trainer.total_epochs=2 \
+    sft_config.enabled=False
