@@ -217,8 +217,11 @@ sft_config:
   # Whether to load ground-truth responses from dataset
   load_ground_truth: False
 
-  # Alternation frequency: switch between SFT and RL every N steps
-  alternate_steps: 2
+  # Number of SFT steps to do at a time before switching to PPO
+  num_sft_steps: 2
+
+  # Number of PPO steps to do at a time before switching back to SFT
+  num_ppo_steps: 5
 
   # Whether SFT steps are on-policy (should always be True)
   on_policy: True

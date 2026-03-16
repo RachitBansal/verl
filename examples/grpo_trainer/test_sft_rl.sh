@@ -32,6 +32,8 @@ OUTPUT_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments"
 # Wandb (optional)
 export WANDB_ENTITY="harvardml"
 LR_SCALE=${LR_SCALE:-1.0}  # Scale factor for SFT learning rate (e.g., 0.1 to reduce LR during SFT)
+num_sft_steps=${num_sft_steps:-10}  # Number of SFT steps to run before switching to PPO (set high for pure SFT)
+num_ppo_steps=${num_ppo_steps:-10}  # Number of PPO steps to
 
 source /n/home03/cmohri/venvs/verl_env/bin/activate
 
@@ -66,9 +68,9 @@ python3 -m verl.trainer.main_ppo \
     +data.load_ground_truth=True \
     +data.response_field_name='generated_solution' \
     actor_rollout_ref.model.path=$OLMO_CHECKPOINT \
-    actor_rollout_ref.actor.optim.lr=1e-6 \
+    actor_rollout_ref.actor.optim.lr=4e-5 \
     actor_rollout_ref.model.use_remove_padding=True \
-    actor_rollout_ref.actor.ppo_mini_batch_size=128 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=512 \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=16 \
     actor_rollout_ref.actor.use_kl_loss=False \
     actor_rollout_ref.actor.entropy_coeff=0 \
@@ -80,7 +82,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
-    actor_rollout_ref.rollout.n=16 \
+    actor_rollout_ref.rollout.n=1 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=16 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     +actor_rollout_ref.actor.sft_lr_scale=${LR_SCALE} \
@@ -88,8 +90,8 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger='["console","wandb"]' \
     trainer.project_name='rl_pretrain' \
-    trainer.experiment_name="OLMo2-1B_step${STEP_NUM}_sft_rl_lrscale${LR_SCALE}" \
-    trainer.default_local_dir="${OUTPUT_DIR}/OLMo2-1B_step${STEP_NUM}_sft_rl_lrscale${LR_SCALE}" \
+    trainer.experiment_name="OLMo2-1B_step${STEP_NUM}_sft_rl_n32_sft_${num_sft_steps}_ppo_${num_ppo_steps}_lrscale${LR_SCALE}_v3" \
+    trainer.default_local_dir="${OUTPUT_DIR}/OLMo2-1B_step${STEP_NUM}_sft_rl_n32_sft_${num_sft_steps}_ppo_${num_ppo_steps}_lrscale${LR_SCALE}_v3" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
     trainer.save_freq=200 \
@@ -97,5 +99,6 @@ python3 -m verl.trainer.main_ppo \
     trainer.total_epochs=100 \
     sft_config.enabled=True \
     sft_config.load_ground_truth=True \
-    sft_config.alternate_steps=1 
+    sft_config.num_sft_steps=${num_sft_steps} \
+    sft_config.num_ppo_steps=${num_ppo_steps} 
 

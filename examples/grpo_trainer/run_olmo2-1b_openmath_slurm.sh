@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --gpus-per-node=2
 #SBATCH --mem=200G
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
 
@@ -19,6 +19,8 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --step_num) STEP_NUM="$2"; export STEP_NUM; shift 2 ;;
     --lr_scale) LR_SCALE="$2"; export LR_SCALE; shift 2 ;;
+    --num_sft_steps) num_sft_steps="$2"; export num_sft_steps; shift 2 ;;
+    --num_ppo_steps) num_ppo_steps="$2"; export num_ppo_steps; shift 2 ;;
     *) break ;;
   esac
 done

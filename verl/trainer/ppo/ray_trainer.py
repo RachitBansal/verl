@@ -1006,23 +1006,31 @@ class RayPPOTrainer:
         )
         next_step_profile = False
 
-        # Initialize SFT configuration
+        # Initialize SFT/PPO cycle configuration
         sft_config = self.config.get("sft_config", {})
         sft_enabled = sft_config.get("enabled", False)
-        sft_alternate_steps = sft_config.get("alternate_steps", 2)
-        sft_step_counter = 0
+        num_sft_steps = sft_config.get("num_sft_steps", 2)
+        num_ppo_steps = sft_config.get("num_ppo_steps", 5)
+        
+        # Track position in SFT/PPO cycle
+        # 0 to num_sft_steps-1: SFT steps
+        # num_sft_steps to num_sft_steps + num_ppo_steps-1: PPO steps
+        cycle_step = 0
+        cycle_length = num_sft_steps + num_ppo_steps
 
         for epoch in range(self.config.trainer.total_epochs):
             for batch_dict in self.train_dataloader:
                 metrics = {}
                 timing_raw = {}
 
-                # Determine if this is an SFT step based on alternation pattern
+                # Determine if this is an SFT step based on the SFT/PPO cycle
+                # 0 to num_sft_steps-1: SFT steps
+                # num_sft_steps to cycle_length-1: PPO steps
                 is_sft_mode = False
                 if sft_enabled:
-                    # Determine mode: first sft_alternate_steps steps are SFT, next sft_alternate_steps are RL
-                    is_sft_mode = (sft_step_counter // sft_alternate_steps) % 2 == 0
-                    sft_step_counter += 1
+                    position_in_cycle = cycle_step % cycle_length
+                    is_sft_mode = position_in_cycle < num_sft_steps
+                    cycle_step += 1
 
                 with marked_timer("start_profile", timing_raw):
                     self._start_profiling(
