@@ -208,6 +208,21 @@ trainer:
   #  mode: "auto", "enable", or "disable"
   use_legacy_worker_impl: auto
 
+# Data configuration overrides for the SFT dataloader.
+# When sft_config.enabled=True, these settings are merged on top of the base `data` config
+# to create a separate dataloader used exclusively during SFT steps.
+# Only fields that differ from `data` need to be specified here.
+sft_data:
+
+  # Path(s) to SFT training parquet files (must contain a pre-written response column).
+  train_files: null
+
+  # Whether to load ground-truth responses from the SFT dataset.
+  load_ground_truth: True
+
+  # Column name in the parquet that holds the pre-written response.
+  response_field_name: generated_solution
+
 # SFT configuration for mixed SFT+RL training
 sft_config:
 
@@ -222,6 +237,13 @@ sft_config:
 
   # Number of PPO steps to do at a time before switching back to SFT
   num_ppo_steps: 5
+
+  # Training mode: "interleaved" (alternates SFT/RL steps) or "combined" (both losses every step)
+  mode: interleaved
+
+  # Loss weights used in combined mode (ignored in interleaved mode)
+  rl_loss_weight: 1.0
+  sft_loss_weight: 1.0
 
   # Whether SFT steps are on-policy (should always be True)
   on_policy: True

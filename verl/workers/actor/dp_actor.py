@@ -369,7 +369,7 @@ class DataParallelPPOActor(BasePPOActor):
         return log_probs, entropys
 
     @GPUMemoryLogger(role="dp actor", logger=logger)
-    def update_policy(self, data: DataProto):
+    def update_policy(self, data: DataProto, sft_data: DataProto = None):
         # make sure we are in training mode
         self.actor_module.train()
 
@@ -405,10 +405,17 @@ class DataParallelPPOActor(BasePPOActor):
         # See PPO paper for details. https://arxiv.org/abs/1707.06347
         mini_batches = data.split(self.config.ppo_mini_batch_size)
 
-        on_policy = len(mini_batches) == 1 and self.config.ppo_epochs == 1 # or in SFT mode 
+        on_policy = len(mini_batches) == 1 and self.config.ppo_epochs == 1 # or in SFT mode
+
+        # Combined mode: compute both RL and SFT losses at every step
+        is_combined = sft_data is not None
+        if is_combined:
+            rl_loss_weight  = self.config.get("rl_loss_weight",  1.0)
+            sft_loss_weight = self.config.get("sft_loss_weight", 1.0)
+            sft_mini_batches = sft_data.split(self.config.ppo_mini_batch_size)
 
         metrics = {}
-        
+
         # Adjust learning rate for SFT mode
         original_lrs = None
         if is_sft:
@@ -417,21 +424,30 @@ class DataParallelPPOActor(BasePPOActor):
             for param_group in self.actor_optimizer.param_groups:
                 original_lrs.append(param_group['lr'])
                 param_group['lr'] = param_group['lr'] * sft_lr_scale
-        
+
         for _ in range(self.config.ppo_epochs):
+            sft_mini_batch_iter = iter(sft_mini_batches) if is_combined else None
             for batch_idx, mini_batch in enumerate(mini_batches):
+                sft_mini_batch = next(sft_mini_batch_iter) if is_combined else None
                 if self.config.use_dynamic_bsz:
                     max_token_len = self.config.ppo_max_token_len_per_gpu * self.ulysses_sequence_parallel_size
                     micro_batches, _ = prepare_dynamic_batch(mini_batch, max_token_len=max_token_len)
+                    if is_combined:
+                        # Split SFT mini-batch into the same number of chunks as RL micro-batches
+                        sft_micro_batches = sft_mini_batch.split(max(1, len(sft_mini_batch) // len(micro_batches)))
                 else:
                     self.gradient_accumulation = (
                         self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
                     )
                     micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
+                    if is_combined:
+                        sft_micro_batches = sft_mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
 
                 self.actor_optimizer.zero_grad()
 
+                sft_micro_batch_iter = iter(sft_micro_batches) if is_combined else None
                 for micro_batch in micro_batches:
+                    sft_micro_batch = next(sft_micro_batch_iter) if is_combined else None
                     micro_batch = micro_batch.to(get_device_id())
                     micro_batch_metrics = {}
                     model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
@@ -530,9 +546,20 @@ class DataParallelPPOActor(BasePPOActor):
                         micro_batch_metrics["actor/kl_loss"] = kl_loss.detach().item() * loss_scale_factor
                         micro_batch_metrics["actor/kl_coef"] = self.config.kl_loss_coef
 
-                    if self.config.use_dynamic_bsz:
-                        # relative to the dynamic bsz
-                        loss = policy_loss * loss_scale_factor
+                    if is_combined:
+                        # SFT NLL loss on the paired SFT micro-batch
+                        sft_micro_batch = sft_micro_batch.to(get_device_id())
+                        sft_model_inputs = {**sft_micro_batch.batch, **sft_micro_batch.non_tensor_batch}
+                        _, sft_log_prob = self._forward_micro_batch(
+                            sft_model_inputs, temperature=temperature, calculate_entropy=False
+                        )
+                        nll_loss = agg_loss(
+                            loss_mat=-sft_log_prob,
+                            loss_mask=sft_model_inputs["response_mask"],
+                            loss_agg_mode="token-sum",
+                        )
+                        loss = (rl_loss_weight * policy_loss + sft_loss_weight * nll_loss) * loss_scale_factor
+                        micro_batch_metrics["actor/sft_nll_loss"] = nll_loss.detach().item() * loss_scale_factor
                     else:
                         loss = policy_loss * loss_scale_factor
                     if self.scaler is not None:

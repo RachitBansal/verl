@@ -407,6 +407,40 @@ class RayPPOTrainer:
             f"{len(self.val_dataloader)}"
         )
 
+        # Create a separate SFT dataloader when sft_config is enabled and sft_data.train_files is set.
+        # The SFT dataset is built by merging sft_data overrides on top of the base data config so
+        # shared settings (prompt_key, max_prompt_length, tokenizer flags, etc.) are inherited.
+        self.sft_dataloader = None
+        self._sft_iter = None
+        sft_config_check = self.config.get("sft_config", {})
+        sft_data_override = self.config.get("sft_data", None)
+        if (
+            sft_config_check.get("enabled", False)
+            and sft_data_override is not None
+            and sft_data_override.get("train_files", None) is not None
+        ):
+            from omegaconf import OmegaConf
+
+            sft_data_config = OmegaConf.merge(self.config.data, sft_data_override)
+            sft_dataset = create_rl_dataset(
+                sft_data_config.train_files,
+                sft_data_config,
+                self.tokenizer,
+                self.processor,
+                max_samples=sft_data_config.get("train_max_samples", -1),
+            )
+            self.sft_dataset = sft_dataset
+            sft_batch_size = sft_data_config.get("gen_batch_size", sft_data_config.train_batch_size)
+            self.sft_dataloader = StatefulDataLoader(
+                dataset=sft_dataset,
+                batch_size=sft_batch_size,
+                num_workers=num_workers,
+                drop_last=True,
+                collate_fn=collate_fn,
+            )
+            self._sft_iter = iter(self.sft_dataloader)
+            print(f"Size of SFT dataloader: {len(self.sft_dataloader)}")
+
         total_training_steps = len(self.train_dataloader) * self.config.trainer.total_epochs
 
         if self.config.trainer.total_training_steps is not None:
@@ -508,6 +542,14 @@ class RayPPOTrainer:
 
         # Log to each configured logger
         self.validation_generations_logger.log(self.config.trainer.logger, samples, self.global_steps)
+
+    def _next_sft_batch(self):
+        """Return the next batch from the SFT dataloader, cycling when exhausted."""
+        try:
+            return next(self._sft_iter)
+        except StopIteration:
+            self._sft_iter = iter(self.sft_dataloader)
+            return next(self._sft_iter)
 
     def _get_gen_batch(self, batch: DataProto) -> DataProto:
         reward_model_keys = set({"data_source", "reward_model", "extra_info", "uid"}) & batch.non_tensor_batch.keys()
@@ -821,11 +863,14 @@ class RayPPOTrainer:
                 critic_local_path, critic_remote_path, self.global_steps, max_ckpt_to_keep=max_critic_ckpt_to_keep
             )
 
-        # save dataloader
+        # save dataloader(s)
         local_mkdir_safe(local_global_step_folder)
         dataloader_local_path = os.path.join(local_global_step_folder, "data.pt")
         dataloader_state_dict = self.train_dataloader.state_dict()
         torch.save(dataloader_state_dict, dataloader_local_path)
+        if self.sft_dataloader is not None:
+            sft_dataloader_local_path = os.path.join(local_global_step_folder, "sft_data.pt")
+            torch.save(self.sft_dataloader.state_dict(), sft_dataloader_local_path)
 
         # latest checkpointed iteration tracker (for atomic usage)
         local_latest_checkpointed_iteration = os.path.join(
@@ -885,7 +930,7 @@ class RayPPOTrainer:
                 critic_path, del_local_after_load=self.config.trainer.del_local_ckpt_after_load
             )
 
-        # load dataloader,
+        # load dataloader(s),
         # TODO: from remote not implemented yet
         dataloader_local_path = os.path.join(global_step_folder, "data.pt")
         if os.path.exists(dataloader_local_path):
@@ -893,6 +938,15 @@ class RayPPOTrainer:
             self.train_dataloader.load_state_dict(dataloader_state_dict)
         else:
             print(f"Warning: No dataloader state found at {dataloader_local_path}, will start from scratch")
+        if self.sft_dataloader is not None:
+            sft_dataloader_local_path = os.path.join(global_step_folder, "sft_data.pt")
+            if os.path.exists(sft_dataloader_local_path):
+                self.sft_dataloader.load_state_dict(
+                    torch.load(sft_dataloader_local_path, weights_only=False)
+                )
+                self._sft_iter = iter(self.sft_dataloader)
+            else:
+                print(f"Warning: No SFT dataloader state found at {sft_dataloader_local_path}, will start from scratch")
 
     def _start_profiling(self, do_profile: bool) -> None:
         """Start profiling for all worker groups if profiling is enabled."""
@@ -1009,6 +1063,8 @@ class RayPPOTrainer:
         # Initialize SFT/PPO cycle configuration
         sft_config = self.config.get("sft_config", {})
         sft_enabled = sft_config.get("enabled", False)
+        sft_mode = sft_config.get("mode", "interleaved")
+        is_combined_mode = sft_enabled and (sft_mode == "combined")
         num_sft_steps = sft_config.get("num_sft_steps", 2)
         num_ppo_steps = sft_config.get("num_ppo_steps", 5)
         
@@ -1018,8 +1074,11 @@ class RayPPOTrainer:
         cycle_step = 0
         cycle_length = num_sft_steps + num_ppo_steps
 
-        for epoch in range(self.config.trainer.total_epochs):
-            for batch_dict in self.train_dataloader:
+        # RL iterator drives epoch counting; SFT iterator cycles independently.
+        rl_iter = iter(self.train_dataloader)
+        epoch = 0
+
+        while True:
                 metrics = {}
                 timing_raw = {}
 
@@ -1031,6 +1090,28 @@ class RayPPOTrainer:
                     position_in_cycle = cycle_step % cycle_length
                     is_sft_mode = position_in_cycle < num_sft_steps
                     cycle_step += 1
+
+                # Fetch from the appropriate dataloader(s).
+                # combined mode: fetch from both RL and SFT dataloaders every step.
+                # interleaved SFT steps: pull from the SFT dataloader (cycles freely).
+                # RL steps: advance the RL iterator; exhausting it increments epoch.
+                if is_combined_mode:
+                    try:
+                        batch_dict = next(rl_iter)
+                    except StopIteration:
+                        epoch += 1
+                        rl_iter = iter(self.train_dataloader)
+                        batch_dict = next(rl_iter)
+                    sft_batch_dict = self._next_sft_batch()
+                elif is_sft_mode and self.sft_dataloader is not None:
+                    batch_dict = self._next_sft_batch()
+                else:
+                    try:
+                        batch_dict = next(rl_iter)
+                    except StopIteration:
+                        epoch += 1
+                        rl_iter = iter(self.train_dataloader)
+                        batch_dict = next(rl_iter)
 
                 with marked_timer("start_profile", timing_raw):
                     self._start_profiling(
@@ -1054,7 +1135,40 @@ class RayPPOTrainer:
                 with marked_timer("step", timing_raw):
                     # generate a batch
                     with marked_timer("gen", timing_raw, color="red"):
-                        if is_sft_mode:
+                        if is_combined_mode:
+                            # RL side: generate sequences normally
+                            gen_batch_output = gen_batch.repeat(
+                                repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True
+                            )
+                            if not self.async_rollout_mode:
+                                gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch_output)
+                            else:
+                                gen_batch_output = self.async_rollout_manager.generate_sequences(gen_batch_output)
+
+                            # SFT side: build prompt + GT response sequence (no generation needed)
+                            sft_batch = DataProto.from_single_dict(sft_batch_dict)
+                            if "gt_input_ids" not in sft_batch.batch:
+                                raise ValueError(
+                                    "combined mode requires ground-truth responses in SFT batch. "
+                                    "Ensure load_ground_truth=True in sft_data config."
+                                )
+                            sft_gen_batch = self._get_gen_batch(sft_batch)
+                            sft_prompt_ids = sft_gen_batch.batch["input_ids"]
+                            sft_response_ids = sft_batch.batch["gt_input_ids"]
+                            sft_prompt_mask = sft_gen_batch.batch["attention_mask"]
+                            sft_response_mask = sft_batch.batch["gt_attention_mask"]
+                            sft_position_ids = sft_gen_batch.batch["position_ids"]
+                            sft_last_pos = sft_position_ids[:, -1:]
+                            sft_response_len = sft_response_ids.shape[1]
+                            sft_response_pos = sft_last_pos + torch.arange(
+                                1, sft_response_len + 1, device=sft_last_pos.device
+                            ).unsqueeze(0)
+                            sft_gen_batch.batch["input_ids"] = torch.cat([sft_prompt_ids, sft_response_ids], dim=1)
+                            sft_gen_batch.batch["attention_mask"] = torch.cat([sft_prompt_mask, sft_response_mask], dim=1)
+                            sft_gen_batch.batch["position_ids"] = torch.cat([sft_position_ids, sft_response_pos], dim=1)
+                            sft_gen_batch.batch["responses"] = sft_response_ids
+                            sft_gen_batch.batch["response_mask"] = sft_batch.batch["gt_response_mask"]
+                        elif is_sft_mode:
                             if "gt_input_ids" not in batch.batch:
                                 raise ValueError(
                                     "SFT mode enabled but ground-truth responses not found in batch. "
@@ -1288,7 +1402,11 @@ class RayPPOTrainer:
                         # update actor
                         with marked_timer("update_actor", timing_raw, color="red"):
                             batch.meta_info["multi_turn"] = self.config.actor_rollout_ref.rollout.multi_turn.enable
-                            actor_output = self.actor_rollout_wg.update_actor(batch)
+                            if is_combined_mode:
+                                sft_gen_batch.meta_info["multi_turn"] = self.config.actor_rollout_ref.rollout.multi_turn.enable
+                                actor_output = self.actor_rollout_wg.update_actor(batch, sft_data=sft_gen_batch)
+                            else:
+                                actor_output = self.actor_rollout_wg.update_actor(batch)
                         actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
                         metrics.update(actor_output_metrics)
 
