@@ -4,17 +4,10 @@
 #SBATCH --partition=kempner_h100
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-<<<<<<< Updated upstream
 #SBATCH --cpus-per-task=32
 #SBATCH --gpus-per-node=4
 #SBATCH --mem=200G
 #SBATCH --time=72:00:00
-=======
-#SBATCH --cpus-per-task=64
-#SBATCH --gpus-per-node=4
-#SBATCH --mem=400G
-#SBATCH --time=48:00:00
->>>>>>> Stashed changes
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
 
@@ -30,7 +23,7 @@ while [[ $# -gt 0 ]]; do
       ENV_VAR_VALUE="$2"
       shift 2
       ;;
-    --stepnum)
+    --step_num)
       STEP_NUM="$2"
       shift 2
       ;;
