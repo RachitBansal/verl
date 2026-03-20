@@ -82,7 +82,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
-    actor_rollout_ref.rollout.n=1 \
+    actor_rollout_ref.rollout.n=32 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=16 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     +actor_rollout_ref.actor.sft_lr_scale=${LR_SCALE} \
@@ -90,8 +90,8 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger='["console","wandb"]' \
     trainer.project_name='rl_pretrain' \
-    trainer.experiment_name="OLMo2-1B_step${STEP_NUM}_sft_rl_n32_sft_${num_sft_steps}_ppo_${num_ppo_steps}_lrscale${LR_SCALE}_v3" \
-    trainer.default_local_dir="${OUTPUT_DIR}/OLMo2-1B_step${STEP_NUM}_sft_rl_n32_sft_${num_sft_steps}_ppo_${num_ppo_steps}_lrscale${LR_SCALE}_v3" \
+    trainer.experiment_name="OLMo2-1B_step${STEP_NUM}_sft_rl_n32_sft_${num_sft_steps}_ppo_${num_ppo_steps}_sanity_separate_data" \
+    trainer.default_local_dir="${OUTPUT_DIR}/OLMo2-1B_step${STEP_NUM}_sft_rl_n32_sft_${num_sft_steps}_ppo_${num_ppo_steps}_sanity_separate_data" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
     trainer.save_freq=200 \
@@ -100,5 +100,6 @@ python3 -m verl.trainer.main_ppo \
     sft_config.enabled=True \
     sft_config.load_ground_truth=True \
     sft_config.num_sft_steps=${num_sft_steps} \
-    sft_config.num_ppo_steps=${num_ppo_steps} 
+    sft_config.num_ppo_steps=${num_ppo_steps} \
+    sft_data.train_files=${TRAIN_FILE} 
 
