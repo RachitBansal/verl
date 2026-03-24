@@ -1086,7 +1086,7 @@ class RayPPOTrainer:
                 # 0 to num_sft_steps-1: SFT steps
                 # num_sft_steps to cycle_length-1: PPO steps
                 is_sft_mode = False
-                if sft_enabled:
+                if sft_enabled and not is_combined_mode:
                     position_in_cycle = cycle_step % cycle_length
                     is_sft_mode = position_in_cycle < num_sft_steps
                     cycle_step += 1
