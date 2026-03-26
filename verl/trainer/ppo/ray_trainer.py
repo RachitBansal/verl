@@ -431,6 +431,10 @@ class RayPPOTrainer:
             )
             self.sft_dataset = sft_dataset
             sft_batch_size = sft_data_config.get("gen_batch_size", sft_data_config.train_batch_size)
+            if sft_config_check.get("mode", "") == "combined":
+                # In combined mode, SFT needs train_batch_size * rollout.n samples per step
+                # so the mini-batch count matches the RL batch (which is expanded by rollout.n).
+                sft_batch_size = sft_batch_size * self.config.actor_rollout_ref.rollout.n
             self.sft_dataloader = StatefulDataLoader(
                 dataset=sft_dataset,
                 batch_size=sft_batch_size,
