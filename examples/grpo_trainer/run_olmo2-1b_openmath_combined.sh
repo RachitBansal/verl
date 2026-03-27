@@ -92,6 +92,6 @@ python3 -m verl.trainer.main_ppo \
     trainer.default_local_dir="${OUTPUT_DIR}/OLMo2-1B_step${STEP_NUM}_combined_twoloader_n32_rl${RL_LOSS_WEIGHT}_sft${SFT_LOSS_WEIGHT}" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
-    trainer.save_freq=1000 \
-    trainer.test_freq=50 \
+    trainer.save_freq=20 \
+    trainer.test_freq=20 \
     trainer.total_epochs=100
