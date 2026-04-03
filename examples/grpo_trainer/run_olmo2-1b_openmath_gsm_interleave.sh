@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Interleaved SFT+RL training on OLMo2-1B with OpenMathInstruct2/GSM8K
 # RL data:  openmathinstruct2_gsm8k          (rollout-based)
-# SFT data: openmathinstruct2_gsm8k_duplicated (ground-truth responses)
+# SFT data: configurable via SFT_DATA_DIR env var
+#   - openmathinstruct2_gsm8k (de-duplicated)
+#   - openmathinstruct2_gsm8k_duplicated (duplicated)
 
 set -x
 
@@ -15,8 +17,8 @@ sleep 30
 # ============================================================================
 STEP_NUM=${STEP_NUM:-1000}
 
-OLMO_CHECKPOINT=/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step${STEP_NUM}-hf
-# OLMO_CHECKPOINT=/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/OLMo2-1B_step${STEP_NUM}_interleave_twoloader_n32_sft_20000_ppo_1/hf_model/step11000
+CHECKPOINT_DIR=${CHECKPOINT_DIR:-"/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B"}
+OLMO_CHECKPOINT=${CHECKPOINT_DIR}/step${STEP_NUM}-hf
 
 # GPU configuration (auto-detect from SLURM if available)
 N_GPUS_PER_NODE=${SLURM_GPUS_PER_NODE:-1}
@@ -26,12 +28,15 @@ RL_DATA_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2_g
 TRAIN_FILE="${RL_DATA_DIR}/train_gsm8k.parquet"
 VAL_FILE="${RL_DATA_DIR}/val_gsm8k.parquet"
 
-# SFT dataset (pre-written ground-truth responses)
-SFT_DATA_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2_gsm8k_duplicated"
+# SFT dataset (configurable via env var, defaults to duplicated)
+SFT_DATA_DIR=${SFT_DATA_DIR:-"/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2_gsm8k_duplicated"}
 SFT_TRAIN_FILE="${SFT_DATA_DIR}/train_gsm8k.parquet"
 
 # Output directory for checkpoints
 OUTPUT_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments"
+
+# Experiment name suffix (configurable via env var)
+EXP_SUFFIX=${EXP_SUFFIX:-"interleave_twoloader_n32_sft_${NUM_SFT_STEPS}_ppo_${NUM_PPO_STEPS}"}
 
 # Wandb (optional)
 export WANDB_ENTITY="harvardml"
@@ -40,7 +45,7 @@ LR_SCALE=${LR_SCALE:-1.0}
 NUM_SFT_STEPS=${NUM_SFT_STEPS:-10}
 NUM_PPO_STEPS=${NUM_PPO_STEPS:-10}
 
-source /n/holylabs/dam_lab/Lab/brachit/envs/bin/activate
+source ${CONDA_ENV}
 
 
 # ============================================================================
@@ -87,10 +92,10 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger='["console","wandb"]' \
     trainer.project_name='rl_pretrain' \
-    trainer.experiment_name="OLMo2-1B_step${STEP_NUM}_interleave_twoloader_n32_sft_${NUM_SFT_STEPS}_ppo_${NUM_PPO_STEPS}_eos" \
-    trainer.default_local_dir="${OUTPUT_DIR}/OLMo2-1B_step${STEP_NUM}_interleave_twoloader_n32_sft_${NUM_SFT_STEPS}_ppo_${NUM_PPO_STEPS}_eos" \
+    trainer.experiment_name="OLMo2-1B_step${STEP_NUM}_${EXP_SUFFIX}" \
+    trainer.default_local_dir="${OUTPUT_DIR}/OLMo2-1B_step${STEP_NUM}_${EXP_SUFFIX}" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
-    trainer.save_freq=50 \
-    trainer.test_freq=50 \
+    trainer.save_freq=500 \
+    trainer.test_freq=100 \
     trainer.total_epochs=100

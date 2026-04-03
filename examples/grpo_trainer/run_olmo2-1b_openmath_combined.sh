@@ -51,8 +51,8 @@ python3 -m verl.trainer.main_ppo \
     data.train_files=${TRAIN_FILE} \
     data.val_files=${VAL_FILE} \
     data.train_batch_size=512 \
-    data.max_prompt_length=2048 \
-    data.max_response_length=2048 \
+    data.max_prompt_length=512 \
+    data.max_response_length=512 \
     data.filter_overlong_prompts=False \
     data.truncation='error' \
     +data.load_ground_truth=False \
@@ -87,8 +87,8 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger='["console","wandb"]' \
     trainer.project_name='rl_pretrain' \
-    trainer.experiment_name="OLMo2-1B_step${STEP_NUM}_combined_twoloader_n32_rl${RL_LOSS_WEIGHT}_sft${SFT_LOSS_WEIGHT}" \
-    trainer.default_local_dir="${OUTPUT_DIR}/OLMo2-1B_step${STEP_NUM}_combined_twoloader_n32_rl${RL_LOSS_WEIGHT}_sft${SFT_LOSS_WEIGHT}" \
+    trainer.experiment_name="OLMo2-1B_step${STEP_NUM}_combined_twoloader_n32_rl${RL_LOSS_WEIGHT}_sft${SFT_LOSS_WEIGHT}_eos" \
+    trainer.default_local_dir="${OUTPUT_DIR}/OLMo2-1B_step${STEP_NUM}_combined_twoloader_n32_rl${RL_LOSS_WEIGHT}_sft${SFT_LOSS_WEIGHT}_eos" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
     trainer.save_freq=20 \

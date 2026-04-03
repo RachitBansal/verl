@@ -460,8 +460,9 @@ class RLHFDataset(Dataset):
         if self.load_ground_truth and self.response_field_name in self.dataframe.column_names:
             response_text = self.dataframe[item][self.response_field_name]
             if response_text:
+                response_text_with_eos = response_text + self.tokenizer.eos_token
                 response_inputs = self.tokenizer(
-                    response_text, return_tensors="pt", add_special_tokens=False, truncation=True,
+                    response_text_with_eos, return_tensors="pt", add_special_tokens=False, truncation=True,
                     max_length=self.max_response_length,
                     padding="max_length",         
                 )
