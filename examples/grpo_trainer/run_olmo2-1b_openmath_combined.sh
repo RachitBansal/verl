@@ -6,10 +6,11 @@
 
 set -x
 
-# Clean up any existing Ray processes
+# Clean up any existing Ray processes and stale state
 echo "Cleaning up existing Ray processes..."
-ray stop 2>/dev/null || true
-sleep 30
+ray stop --force 2>/dev/null || true
+rm -rf /tmp/ray/ 2>/dev/null || true
+sleep 5
 
 # ============================================================================
 # Configuration
