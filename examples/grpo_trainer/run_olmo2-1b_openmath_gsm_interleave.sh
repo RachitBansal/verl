@@ -18,7 +18,7 @@ sleep 30
 STEP_NUM=${STEP_NUM:-1000}
 
 CHECKPOINT_DIR=${CHECKPOINT_DIR:-"/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B"}
-OLMO_CHECKPOINT=${CHECKPOINT_DIR}/step${STEP_NUM}-hf
+OLMO_CHECKPOINT=${OLMO_CHECKPOINT:-${CHECKPOINT_DIR}/step${STEP_NUM}-hf}
 
 # GPU configuration (auto-detect from SLURM if available)
 N_GPUS_PER_NODE=${SLURM_GPUS_PER_NODE:-1}
@@ -36,6 +36,8 @@ SFT_TRAIN_FILE="${SFT_DATA_DIR}/train_gsm8k.parquet"
 OUTPUT_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments"
 
 # Experiment name suffix (configurable via env var)
+# EXP_TAG: insert between step number and suffix (e.g. "sfted" -> step1000sfted_...)
+EXP_TAG=${EXP_TAG:-""}
 EXP_SUFFIX=${EXP_SUFFIX:-"interleave_twoloader_n32_sft_${NUM_SFT_STEPS}_ppo_${NUM_PPO_STEPS}"}
 
 # Wandb (optional)
@@ -92,10 +94,10 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger='["console","wandb"]' \
     trainer.project_name='rl_pretrain' \
-    trainer.experiment_name="OLMo2-1B_step${STEP_NUM}_${EXP_SUFFIX}" \
-    trainer.default_local_dir="${OUTPUT_DIR}/OLMo2-1B_step${STEP_NUM}_${EXP_SUFFIX}" \
+    trainer.experiment_name="OLMo2-1B_step${STEP_NUM}${EXP_TAG}_${EXP_SUFFIX}" \
+    trainer.default_local_dir="${OUTPUT_DIR}/OLMo2-1B_step${STEP_NUM}${EXP_TAG}_${EXP_SUFFIX}" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
-    trainer.save_freq=500 \
+    trainer.save_freq=100 \
     trainer.test_freq=100 \
     trainer.total_epochs=100
