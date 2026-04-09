@@ -126,3 +126,12 @@ logs
 log
 outputs
 .history
+
+
+# other irrelevant local files 
+.claude/
+scripts/eval_breakdown*
+scripts/run_breakdown_analysis.sh
+scripts/convert_parquet_to_text.py
+verl/utils/reward_score/gsm8k_original.py
+requirement.txt

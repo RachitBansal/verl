@@ -21,23 +21,28 @@ set -u  # Exit on undefined variable
 #############################################
 
 # Base checkpoint directory
-CHECKPOINT_BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B"
+CHECKPOINT_BASE_DIR="/n/netscratch/barak_lab/Everyone/sqin/olmo/checkpoints/OLMo2-1B-stage1-60B"
+MODEL_NAME="1B-MATH60B"
 
 # Base directory for verl
-BASE_DIR="/n/netscratch/dam_lab/Lab/brachit/rl/verl"
+BASE_DIR="/n/home05/sqin/rl_pretrain/verl/"
 EVAL_SCRIPT="${BASE_DIR}/scripts/evaluate_olmo2_math.sh"
 
 # N_SAMPLES values to test
 N_SAMPLES_LIST=(32)
 
 # SLURM Configuration
-SLURM_PARTITION="kempner"
-SLURM_ACCOUNT="kempner_dam_lab"
-SLURM_TIME="4:00:00"
+SLURM_PARTITION="kempner_h100"
+SLURM_ACCOUNT="kempner_barak_lab"
+SLURM_TIME="16:00:00"
 SLURM_NODES=1
 SLURM_GPUS_PER_NODE=1
 SLURM_CPUS_PER_TASK=24
-SLURM_MEM="200GB"
+SLURM_MEM="250GB"
+
+# Evaluation flags (baked into each sbatch job at submission time)
+EVAL_GSM8K=true
+EVAL_MATH=true
 
 # Output directory for generated sbatch scripts
 SBATCH_DIR="${BASE_DIR}/sbatch_jobs"
@@ -64,7 +69,7 @@ while IFS= read -r -d '' checkpoint; do
     checkpoint_name=$(basename "${checkpoint}")
     CHECKPOINTS+=("${checkpoint_name}")
     echo "  Found: ${checkpoint_name}"
-done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 1 -type d -name "*-hf" -print0 | sort -z)
+done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 1 -type d \( -name "step17000-hf" -o -name "step22000-hf" -o -name "step28000-hf" \) -print0 | sort -z)
 
 if [ ${#CHECKPOINTS[@]} -eq 0 ]; then
     echo "ERROR: No -hf checkpoints found in ${CHECKPOINT_BASE_DIR}"
@@ -89,7 +94,7 @@ JOB_COUNT=0
 for checkpoint in "${CHECKPOINTS[@]}"; do
     # Extract step number from checkpoint name (e.g., "step22000-hf" -> "step22000")
     step_name="${checkpoint%-hf}"
-    model_name="1B-${step_name}"
+    model_name="${MODEL_NAME}-${step_name}"
     model_path="${CHECKPOINT_BASE_DIR}/${checkpoint}"
     
     for n_samples in "${N_SAMPLES_LIST[@]}"; do
@@ -113,9 +118,10 @@ for checkpoint in "${CHECKPOINTS[@]}"; do
 #SBATCH --mem=${SLURM_MEM}
 #SBATCH --partition=${SLURM_PARTITION}
 #SBATCH --account=${SLURM_ACCOUNT}
+#SBATCH --exclude=holygpu8a19102
 
-set -e  # Exit on error
-set -u  # Exit on undefined variable
+set -e
+set -u
 
 echo "================================================"
 echo "Job: ${job_name}"
@@ -126,11 +132,10 @@ echo "Started at: \$(date)"
 echo "================================================"
 echo ""
 
-# Change to base directory
 cd "${BASE_DIR}"
 
-# Run evaluation for both GSM-8K and MATH
-bash "${EVAL_SCRIPT}" "${model_path}" "${model_name}" "${n_samples}" "true" "false"
+# Run evaluation with explicit positional arguments expected by the script
+bash "${EVAL_SCRIPT}" "${model_path}" "${model_name}" "${n_samples}" "${EVAL_GSM8K}" "${EVAL_MATH}"
 
 echo ""
 echo "================================================"
@@ -202,9 +207,3 @@ else
         done
     done
 fi
-
-
-
-
-
-

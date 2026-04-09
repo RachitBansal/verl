@@ -19,11 +19,11 @@ set -u  # Exit on undefined variable
 CHECKPOINT_BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments"
 
 # Base directory for verl
-BASE_DIR="/n/netscratch/dam_lab/Lab/brachit/rl/verl"
+BASE_DIR="/n/home05/sqin/rl_pretrain/verl/"
 EVAL_SCRIPT="${BASE_DIR}/scripts/evaluate_olmo2_math_rl.sh"
 
 # N_SAMPLES values to test (top-k generations per prompt)
-N_SAMPLES_LIST=(1 8 32 128)
+N_SAMPLES_LIST=(32)
 
 # SLURM Configuration
 SLURM_PARTITION="kempner"
@@ -50,29 +50,21 @@ echo "================================================"
 echo "Experiment base directory: ${CHECKPOINT_BASE_DIR}"
 echo ""
 
-EXPERIMENT_DIRS=()
 CHECKPOINT_PATHS=()
 CHECKPOINT_NAMES=()
+CHECKPOINT_STEPS=()
 
-echo "Discovering SFT experiments..."
-while IFS= read -r -d '' experiment_dir; do
-    experiment_name=$(basename "${experiment_dir}")
-
-    # Find the latest -hf checkpoint inside this experiment directory
-    latest_ckpt=$(find "${experiment_dir}" -maxdepth 1 -type d -name "*-hf" -print | sort -V | tail -n 1 || true)
-
-    if [ -z "${latest_ckpt}" ]; then
-        echo "  WARNING: No -hf checkpoints found in ${experiment_name}; skipping"
-        continue
-    fi
-
-    checkpoint_name=$(basename "${latest_ckpt}")
-    EXPERIMENT_DIRS+=("${experiment_dir}")
-    CHECKPOINT_PATHS+=("${latest_ckpt}")
+echo "Discovering SFT checkpoints..."
+while IFS= read -r -d '' checkpoint; do
+    experiment_name=$(basename "$(dirname "${checkpoint}")")
+    checkpoint_step_dir=$(basename "${checkpoint}")
+    checkpoint_step=${checkpoint_step_dir%-hf}
+    checkpoint_step=${checkpoint_step#step}
+    CHECKPOINT_PATHS+=("${checkpoint}")
     CHECKPOINT_NAMES+=("${experiment_name}")
-
-    echo "  Found: ${experiment_name} -> using latest checkpoint ${checkpoint_name}"
-done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 1 -type d -name "OLMo2-1B-step*-stage2-openmathgsm8k-5epoch" -print0 | sort -z)
+    CHECKPOINT_STEPS+=("${checkpoint_step}")
+    echo "  Found: ${experiment_name} (${checkpoint_step_dir}) -> ${checkpoint}"
+done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 2 -type d -name "step*-hf" -path "*/OLMo2-1B-step1000-stage2*/*" -print0 | sort -z)
 
 if [ ${#CHECKPOINT_PATHS[@]} -eq 0 ]; then
     echo "ERROR: No SFT experiment checkpoints found under ${CHECKPOINT_BASE_DIR}"
@@ -97,19 +89,20 @@ JOB_COUNT=0
 for idx in "${!CHECKPOINT_PATHS[@]}"; do
     checkpoint="${CHECKPOINT_PATHS[$idx]}"
     experiment="${CHECKPOINT_NAMES[$idx]}"
+    checkpoint_step="${CHECKPOINT_STEPS[$idx]}"
 
-    checkpoint_basename=$(basename "${checkpoint}")
-    model_name="${experiment}-${checkpoint_basename}"
+    model_name="${experiment}-step${checkpoint_step}-sft"
     model_path="${checkpoint}"
 
     for n_samples in "${N_SAMPLES_LIST[@]}"; do
         JOB_COUNT=$((JOB_COUNT + 1))
 
-        job_name="sft-eval-${experiment}-${n_samples}samples"
+        job_name="sft-eval-${experiment}-step${checkpoint_step}-${n_samples}samples"
         sbatch_file="${SBATCH_DIR}/${job_name}.sbatch"
 
         cat > "${sbatch_file}" <<EOF
 #!/bin/bash
+
 #SBATCH --job-name=${job_name}
 #SBATCH --output=${LOGS_DIR}/${job_name}.out
 #SBATCH --error=${LOGS_DIR}/${job_name}.err
@@ -166,15 +159,17 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
 
     for idx in "${!CHECKPOINT_PATHS[@]}"; do
         experiment="${CHECKPOINT_NAMES[$idx]}"
+        checkpoint_step="${CHECKPOINT_STEPS[$idx]}"
 
         for n_samples in "${N_SAMPLES_LIST[@]}"; do
-            job_name="sft-eval-${experiment}-${n_samples}samples"
+            job_name="sft-eval-${experiment}-step${checkpoint_step}-${n_samples}samples"
             sbatch_file="${SBATCH_DIR}/${job_name}.sbatch"
 
             job_id=$(sbatch "${sbatch_file}" | grep -oP '\d+')
             JOB_IDS+=("${job_id}")
 
             echo "  Submitted: ${job_name} (Job ID: ${job_id})"
+            sleep 2
         done
     done
 
@@ -202,8 +197,9 @@ else
     echo "Or submit individually:"
     for idx in "${!CHECKPOINT_PATHS[@]}"; do
         experiment="${CHECKPOINT_NAMES[$idx]}"
+        checkpoint_step="${CHECKPOINT_STEPS[$idx]}"
         for n_samples in "${N_SAMPLES_LIST[@]}"; do
-            job_name="sft-eval-${experiment}-${n_samples}samples"
+            job_name="sft-eval-${experiment}-step${checkpoint_step}-${n_samples}samples"
             echo "  sbatch ${SBATCH_DIR}/${job_name}.sbatch"
         done
     done

@@ -13,18 +13,14 @@ set -e  # Exit on error
 set -u  # Exit on undefined variable
 
 # ---- Activate your prebuilt env
-source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
+source /n/holylabs/dam_lab/Lab/brachit/envs/bin/activate
 
 #############################################
 # CONFIGURATION
 #############################################
 # Evaluation Control (defaults; can be overridden by args)
 EVAL_GSM8K_DEFAULT=true    # arg4
-EVAL_MATH_DEFAULT=true    # arg5
-OPENMATHINSTRUCT2=false    # Keep disabled unless manually toggled
-
-# Dataset Preparation Control
-OPENMATHINSTRUCT2_N_SAMPLES=5000  # Number of samples to randomly select
+EVAL_MATH_DEFAULT=false    # arg5
 
 # Model Configuration defaults (can be overridden by args)
 MODEL_PATH_DEFAULT=/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step5000-hf  # arg1
@@ -64,15 +60,17 @@ TOP_P=0.95
 TOP_K=-1  # -1 means no top-k filtering
 
 # Generation Configuration
-BATCH_SIZE=256
+BATCH_SIZE=128
 MAX_PROMPT_LENGTH=2048  # Increased to accommodate 8-shot examples (~750-850 tokens)
 MAX_RESPONSE_LENGTH=1024
 
 # Output Configuration
+# Using temporary directory to avoid permission conflicts
+EVAL_BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/eval_results_sunny"
 if [ "${N_SHOT}" -eq 0 ]; then
-    OUTPUT_DIR="${BASE_DIR}/eval_results/${MODEL_NAME}-${N_SHOT}shot-boxed-${N_SAMPLES}samples-temp${TEMPERATURE}"
+    OUTPUT_DIR="${EVAL_BASE_DIR}/${MODEL_NAME}-${N_SHOT}shot-boxed-${N_SAMPLES}samples-temp${TEMPERATURE}"
 else
-    OUTPUT_DIR="${BASE_DIR}/eval_results/${MODEL_NAME}-${N_SHOT}shot-${N_SAMPLES}samples-temp${TEMPERATURE}"
+    OUTPUT_DIR="${EVAL_BASE_DIR}/${MODEL_NAME}-${N_SHOT}shot-${N_SAMPLES}samples-temp${TEMPERATURE}"
 fi
 mkdir -p "${OUTPUT_DIR}"
 
@@ -83,7 +81,7 @@ mkdir -p "${CACHE_DIR}"
 
 # Ray / tmp directories (avoid /tmp permission issues on shared nodes)
 # Use a very short path to avoid UNIX socket length limits (<108 chars).
-JOB_TMP_BASE="/n/home08/brachit/tmp"
+JOB_TMP_BASE="/n/home05/sqin/tmp"
 JOB_ID="${SLURM_JOB_ID:-$$}"
 export TMPDIR="${JOB_TMP_BASE}/job_${JOB_ID}"
 export RAY_TMPDIR="${TMPDIR}/ray"
@@ -277,6 +275,16 @@ if [ "${EVAL_GSM8K}" = true ]; then
 else
     echo "[Step 3/6] Skipping GSM-8K generation (disabled)"
     echo ""
+fi
+
+#############################################
+# Cleanup Ray/vLLM between generation steps
+#############################################
+if [ "${EVAL_GSM8K}" = true ] && [ "${EVAL_MATH}" = true ]; then
+    echo "Shutting down Ray between generation steps to release GPU memory..."
+    ray stop --force 2>/dev/null || true
+    sleep 5
+    echo "✓ Ray stopped"
 fi
 
 #############################################

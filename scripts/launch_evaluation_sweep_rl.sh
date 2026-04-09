@@ -26,18 +26,22 @@ EVAL_SCRIPT="${BASE_DIR}/scripts/evaluate_olmo2_math_rl.sh"
 N_SAMPLES_LIST=(32)
 
 # SLURM Configuration
-SLURM_PARTITION="kempner"
-SLURM_ACCOUNT="kempner_dam_lab"
-SLURM_TIME="8:00:00"
+SLURM_PARTITION="kempner_h100"
+SLURM_ACCOUNT="kempner_barak_lab"
+SLURM_TIME="16:00:00"
 SLURM_NODES=1
 SLURM_GPUS_PER_NODE=1
 SLURM_CPUS_PER_TASK=24
-SLURM_MEM="200GB"
+SLURM_MEM="250GB"
 
-NUM_ROLLOUTS=5
+NUM_ROLLOUTS=32
+
+# Evaluation flags (baked into each sbatch job at submission time)
+EVAL_GSM8K=true
+EVAL_MATH=true
 
 # Output directories
-SBATCH_DIR="${BASE_DIR}/sbatch_jobs_rl_kempner"
+SBATCH_DIR="${BASE_DIR}/sbatch_jobs_rl"
 LOGS_DIR="${BASE_DIR}/logs"
 mkdir -p "${SBATCH_DIR}"
 mkdir -p "${LOGS_DIR}"
@@ -58,7 +62,7 @@ CHECKPOINT_STEPS=()
 
 echo "Discovering checkpoints..."
 while IFS= read -r -d '' checkpoint; do
-    # experiments/<exp>/hf_model/step800 -> extract <exp>
+    # experiments/<exp>/hf_model/step* -> extract <exp>
     experiment_name=$(basename "$(dirname "$(dirname "${checkpoint}")")")
     checkpoint_step_dir=$(basename "${checkpoint}")
     checkpoint_step=${checkpoint_step_dir#step}
@@ -66,10 +70,10 @@ while IFS= read -r -d '' checkpoint; do
     CHECKPOINT_NAMES+=("${experiment_name}")
     CHECKPOINT_STEPS+=("${checkpoint_step}")
     echo "  Found: ${experiment_name} (${checkpoint_step_dir}) -> ${checkpoint}"
-done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 3 -type d -path "${CHECKPOINT_BASE_DIR}/*_omi_n${NUM_ROLLOUTS}_sunny_tmp/hf_model/step*" -print0 | sort -z)
+done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 3 -type d -path "${CHECKPOINT_BASE_DIR}/OLMo2-1B_step*_interleave_twoloader_n32_sft_50000_ppo_0_*math/hf_model/step*" -print0 | sort -z)
 
 if [ ${#CHECKPOINT_PATHS[@]} -eq 0 ]; then
-    echo "ERROR: No checkpoints found at ${CHECKPOINT_BASE_DIR}/*_n${NUM_ROLLOUTS}/hf_model/step*"
+    echo "ERROR: No checkpoints found at ${CHECKPOINT_BASE_DIR}/OLMo2-1B_step*_interleave_twoloader_n32_sft_50000_ppo_0_*math/hf_model/step*"
     exit 1
 fi
 
@@ -115,6 +119,7 @@ for idx in "${!CHECKPOINT_PATHS[@]}"; do
 #SBATCH --mem=${SLURM_MEM}
 #SBATCH --partition=${SLURM_PARTITION}
 #SBATCH --account=${SLURM_ACCOUNT}
+#SBATCH --exclude=holygpu8a19102
 
 set -e
 set -u
@@ -130,7 +135,7 @@ echo ""
 cd "${BASE_DIR}"
 
 # Run RL evaluation with explicit positional arguments expected by the script
-bash "${EVAL_SCRIPT}" "${model_path}" "${model_name}" "${n_samples}"
+bash "${EVAL_SCRIPT}" "${model_path}" "${model_name}" "${n_samples}" "${EVAL_GSM8K}" "${EVAL_MATH}"
 
 echo ""
 echo "================================================"
@@ -169,6 +174,7 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
             JOB_IDS+=("${job_id}")
 
             echo "  Submitted: ${job_name} (Job ID: ${job_id})"
+            sleep 2
         done
     done
 

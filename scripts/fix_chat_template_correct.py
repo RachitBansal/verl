@@ -10,7 +10,10 @@ import sys
 import os
 from transformers import AutoTokenizer
 
-MODEL_PATH = '/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step22000_omigsm8k/hf_model/step800'
+if len(sys.argv) > 1:
+    MODEL_PATH = sys.argv[1]
+else:
+    MODEL_PATH = '/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/OLMo2-1B-RL5k-stage1-50B-nooptim-lrsmall/step5006-hf'
 
 print("=" * 100)
 print("FIXING OLMo-2 CHAT TEMPLATE (CORRECT VERSION)")
