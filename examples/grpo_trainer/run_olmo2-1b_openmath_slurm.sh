@@ -1,6 +1,11 @@
 #!/bin/bash
+<<<<<<< HEAD
 #SBATCH --job-name=rl-22k
 #SBATCH --account=kempner_barak_lab
+=======
+#SBATCH --job-name=verl-grpo-olmo2-openmath
+#SBATCH --account=kempner_sham_lab
+>>>>>>> 35595c96bbe3bf82d7775e4b7be1b43d7525d1dc
 #SBATCH --partition=kempner_h100
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -9,13 +14,51 @@
 #SBATCH --mem=200G
 #SBATCH --time=72:00:00
 #SBATCH --output=logs/slurm-%j.out
-#SBATCH --error=logs/slurm-%j.out
-#SBATCH --constraint=h100
+#SBATCH --error=logs/slurm-%j.err
 
-module purge
-module load Mambaforge
-module load cuda cudnn
-mamba activate openrlhf
+# Parse command line arguments for environment variables
+ENV_VAR_NAME=""
+ENV_VAR_VALUE=""
+STEP_NUM=""
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --exp_num)
+      ENV_VAR_NAME="exp_num"
+      ENV_VAR_VALUE="$2"
+      shift 2
+      ;;
+    --step_num)
+      STEP_NUM="$2"
+      shift 2
+      ;;
+    *)
+      # Pass through other arguments
+      break
+      ;;
+  esac
+done
+
+# Set the environment variable if specified
+if [[ -n "$ENV_VAR_NAME" ]]; then
+  export $ENV_VAR_NAME="$ENV_VAR_VALUE"
+  echo "Set environment variable: $ENV_VAR_NAME=$ENV_VAR_VALUE"
+else
+  # Default exp_num to 1 if not specified
+  export exp_num=1
+  echo "Set default exp_num=1"
+fi
+
+# Export STEP_NUM if specified
+if [[ -n "$STEP_NUM" ]]; then
+  export STEP_NUM="$STEP_NUM"
+  echo "Set STEP_NUM: $STEP_NUM"
+fi
+
+# module purge
+# module load Mambaforge
+# module load cuda cudnn
+# mamba activate openrlhf
 
 # Print job info
 echo "Job started at $(date)"
@@ -32,7 +75,7 @@ set -x
 echo "Starting SLURM job on $(hostname)"
 echo "GPUs: $SLURM_GPUS_PER_NODE, Tasks: $SLURM_NTASKS_PER_NODE"
 
-# cd /n/home05/sqin/rl_pretrain/verl
+cd /n/home05/sqin/rl_pretrain/verl
 
 # Get STEP_NUM from first argument or default to empty
 STEP_NUM=${1:-}
@@ -46,7 +89,11 @@ export STEP_NUM
 echo "Running with STEP_NUM=$STEP_NUM"
 
 # Run the main training script
+<<<<<<< HEAD
 bash /n/home05/sqin/rl_pretrain/verl/examples/grpo_trainer/run_olmo2-1b_openmath.sh "${@:2}"
+=======
+echo "Running training script with remaining arguments: $@"
+bash examples/grpo_trainer/run_olmo2-1b_openmath_gsm8k.sh "$@"
+>>>>>>> 35595c96bbe3bf82d7775e4b7be1b43d7525d1dc
 
 echo "Training completed!"
-

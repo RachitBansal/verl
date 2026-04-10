@@ -77,8 +77,17 @@ python3 -m verl.trainer.main_ppo \
     trainer.default_local_dir="${OUTPUT_DIR}/olmo2_1b_60bmath_step${STEP_NUM}_omi_n32" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
+<<<<<<< HEAD
     trainer.save_freq=50 \
+=======
+<<<<<<< Updated upstream
+    trainer.save_freq=250 \
+>>>>>>> 35595c96bbe3bf82d7775e4b7be1b43d7525d1dc
     trainer.test_freq=50 \
+=======
+    trainer.save_freq=200 \
+    trainer.test_freq=10 \
+>>>>>>> Stashed changes
     trainer.total_epochs=10 \
     "$@"
 

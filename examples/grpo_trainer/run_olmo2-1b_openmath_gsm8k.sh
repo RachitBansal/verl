@@ -14,7 +14,12 @@ sleep 30
 # ============================================================================
 # Model checkpoint
 STEP_NUM=${STEP_NUM:-22000}
+<<<<<<< HEAD
 OLMO_CHECKPOINT=${OLMO_CHECKPOINT:-"/n/netscratch/barak_lab/Everyone/sqin/olmo/checkpoints/OLMo2-1B-stage1-60B/step${STEP_NUM}-hf"}
+=======
+
+OLMO_CHECKPOINT="/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step${STEP_NUM}-hf"
+>>>>>>> 35595c96bbe3bf82d7775e4b7be1b43d7525d1dc
 
 # GPU configuration (auto-detect from SLURM if available)
 N_GPUS_PER_NODE=${SLURM_GPUS_PER_NODE:-1}
@@ -33,6 +38,8 @@ FORMAT_SCORE=0.1
 # Wandb (optional)
 # export WANDB_API_KEY="your_key_here"
 export WANDB_ENTITY="harvardml"  # Ensure all team members log to same entity
+
+source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
 
 # ============================================================================
 # Training
@@ -61,21 +68,36 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=128 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
+<<<<<<< HEAD
     actor_rollout_ref.rollout.gpu_memory_utilization=0.8 \
     actor_rollout_ref.rollout.n=32 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=128 \
+=======
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
+    actor_rollout_ref.rollout.n=32 \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=16 \
+>>>>>>> 35595c96bbe3bf82d7775e4b7be1b43d7525d1dc
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     algorithm.use_kl_in_reward=False \
     +reward_model.reward_kwargs.format_score=${FORMAT_SCORE} \
     trainer.critic_warmup=0 \
     trainer.logger='["console","wandb"]' \
     trainer.project_name='rl_pretrain' \
+<<<<<<< HEAD
     trainer.experiment_name="olmo2_1b_60bmath_step${STEP_NUM}_omigsm8k_n32" \
     trainer.default_local_dir="${OUTPUT_DIR}/olmo2_1b_60bmath_step${STEP_NUM}_omigsm8k_n32" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
     trainer.save_freq=200 \
     trainer.test_freq=50 \
+=======
+    trainer.experiment_name="olmo2_1b_step${STEP_NUM}_omigsm8k_n32_v4" \
+    trainer.default_local_dir="${OUTPUT_DIR}/olmo2_1b_step${STEP_NUM}_omigsm8k_n32_v4" \
+    trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
+    trainer.nnodes=1 \
+    trainer.save_freq=200 \
+    trainer.test_freq=20 \
+>>>>>>> 35595c96bbe3bf82d7775e4b7be1b43d7525d1dc
     trainer.total_epochs=10 \
     "$@"
 
