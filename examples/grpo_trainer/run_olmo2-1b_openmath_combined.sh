@@ -41,7 +41,7 @@ LR_SCALE=${LR_SCALE:-1.0}
 RL_LOSS_WEIGHT=${RL_LOSS_WEIGHT:-1.0}   # weight on the RL loss term
 SFT_LOSS_WEIGHT=${SFT_LOSS_WEIGHT:-1.0} # weight on the SFT loss term
 
-source /n/holylabs/dam_lab/Lab/brachit/envs/bin/activate
+source ${CONDA_ENV}
 
 
 # ============================================================================

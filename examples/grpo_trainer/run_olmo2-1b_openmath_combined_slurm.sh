@@ -45,7 +45,7 @@ set -x
 echo "Starting SLURM job on $(hostname)"
 echo "GPUs: $SLURM_GPUS_PER_NODE, Tasks: $SLURM_NTASKS_PER_NODE"
 
-cd /n/home05/sqin/rl_pretrain/verl
+cd ${VERL_DIR}
 
 # Run the combined SFT+RL training script
 bash examples/grpo_trainer/run_olmo2-1b_openmath_combined.sh "$@"

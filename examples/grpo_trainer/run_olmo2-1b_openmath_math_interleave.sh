@@ -98,5 +98,5 @@ python3 -m verl.trainer.main_ppo \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
     trainer.save_freq=500 \
-    trainer.test_freq=100 \
+    trainer.test_freq=250 \
     trainer.total_epochs=100
