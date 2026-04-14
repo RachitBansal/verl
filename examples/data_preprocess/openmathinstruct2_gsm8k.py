@@ -10,7 +10,7 @@ Usage:
      python examples/data_preprocess/openmathinstruct2_gsm8k.py \
       --n_val 1000 \
       --seed 42 \
-      --local_save_dir /n/netscratch/dam_lab/Lab/sqin/rl_pretrain/data/openmathinstruct2_gsm8k \
+      --local_save_dir /n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2_gsm8k \
       --cache_dir /n/netscratch/dam_lab/Lab/sqin/cache/datasets
 """
 
