@@ -1071,11 +1071,13 @@ class RayPPOTrainer:
         is_combined_mode = sft_enabled and (sft_mode == "combined")
         num_sft_steps = sft_config.get("num_sft_steps", 2)
         num_ppo_steps = sft_config.get("num_ppo_steps", 5)
-        
+        rl_increment = sft_config.get("rl_increment", 0)
+        sft_decrement = sft_config.get("sft_decrement", 0)
+
         # Track position in SFT/PPO cycle
         # 0 to num_sft_steps-1: SFT steps
         # num_sft_steps to num_sft_steps + num_ppo_steps-1: PPO steps
-        cycle_step = 0
+        cycle_position = 0
         cycle_length = num_sft_steps + num_ppo_steps
 
         # RL iterator drives epoch counting; SFT iterator cycles independently.
@@ -1091,9 +1093,14 @@ class RayPPOTrainer:
                 # num_sft_steps to cycle_length-1: PPO steps
                 is_sft_mode = False
                 if sft_enabled and not is_combined_mode:
-                    position_in_cycle = cycle_step % cycle_length
-                    is_sft_mode = position_in_cycle < num_sft_steps
-                    cycle_step += 1
+                    is_sft_mode = cycle_position < num_sft_steps
+                    cycle_position += 1
+                    if cycle_position >= cycle_length:
+                        # End of a round: apply increments/decrements and start a new cycle
+                        cycle_position = 0
+                        num_ppo_steps += rl_increment
+                        num_sft_steps = max(0, num_sft_steps - sft_decrement)
+                        cycle_length = num_sft_steps + num_ppo_steps
 
                 # Fetch from the appropriate dataloader(s).
                 # combined mode: fetch from both RL and SFT dataloaders every step.

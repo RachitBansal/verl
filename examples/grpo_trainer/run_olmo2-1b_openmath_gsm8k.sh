@@ -36,8 +36,7 @@ FORMAT_SCORE=0.1
 # export WANDB_API_KEY="your_key_here"
 export WANDB_ENTITY="harvardml"  # Ensure all team members log to same entity
 
-source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
-
+source /n/home03/cmohri/venvs/verl_env/bin/activate
 # ============================================================================
 # Training
 # ============================================================================
