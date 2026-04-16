@@ -1080,6 +1080,10 @@ class RayPPOTrainer:
         cycle_position = 0
         cycle_length = num_sft_steps + num_ppo_steps
 
+        # Cumulative step counters for logging
+        cumulative_sft_steps = 0
+        cumulative_rl_steps = 0
+
         # RL iterator drives epoch counting; SFT iterator cycles independently.
         rl_iter = iter(self.train_dataloader)
         epoch = 0
@@ -1101,6 +1105,12 @@ class RayPPOTrainer:
                         num_ppo_steps += rl_increment
                         num_sft_steps = max(0, num_sft_steps - sft_decrement)
                         cycle_length = num_sft_steps + num_ppo_steps
+
+                # Update cumulative step counters
+                if is_sft_mode or is_combined_mode:
+                    cumulative_sft_steps += 1
+                if not is_sft_mode or is_combined_mode:
+                    cumulative_rl_steps += 1
 
                 # Fetch from the appropriate dataloader(s).
                 # combined mode: fetch from both RL and SFT dataloaders every step.
@@ -1420,6 +1430,11 @@ class RayPPOTrainer:
                                 actor_output = self.actor_rollout_wg.update_actor(batch)
                         actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
                         metrics.update(actor_output_metrics)
+                        if "actor/pg_loss" in actor_output_metrics:
+                            if is_sft_mode:
+                                metrics["sft/loss"] = actor_output_metrics["actor/pg_loss"]
+                            else:
+                                metrics["rl/loss"] = actor_output_metrics["actor/pg_loss"]
 
                     # Log rollout generations if enabled
                     rollout_data_dir = self.config.trainer.get("rollout_data_dir", None)
@@ -1480,10 +1495,18 @@ class RayPPOTrainer:
                     {
                         "training/global_step": self.global_steps,
                         "training/epoch": epoch,
+                        "training/sft_steps": cumulative_sft_steps,
+                        "training/rl_steps": cumulative_rl_steps,
                     }
                 )
                 # collect metrics
-                metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
+                data_metrics = compute_data_metrics(batch=batch, use_critic=self.use_critic)
+                metrics.update(data_metrics)
+                if not is_sft_mode:
+                    for stat in ("mean", "min", "max"):
+                        key = f"critic/rewards/{stat}"
+                        if key in data_metrics:
+                            metrics[f"rl/rewards/{stat}"] = data_metrics[key]
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
                 # TODO: implement actual tflpo and theoretical tflpo
                 n_gpus = self.resource_pool_manager.get_n_gpus()
