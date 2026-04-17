@@ -1,0 +1,15 @@
+group: nonmath_capability_eval
+task:
+  - task: wikitext
+    num_fewshot: 0
+  - task: hellaswag
+    num_fewshot: 0
+  - task: lambada_openai
+    num_fewshot: 0
+  # squad_completion (generative, 3-shot) dropped: lm-eval 0.4.11 bug —
+  # SQUADCompletion.doc_to_text() signature is incompatible with few-shot
+  # context building. squad_completion_lm (BPB) covers reading comprehension.
+  - task: squad_completion_lm
+    num_fewshot: 0
+  - task: ifeval_lm
+    num_fewshot: 0

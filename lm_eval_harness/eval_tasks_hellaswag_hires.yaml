@@ -1,0 +1,4 @@
+group: hellaswag_hires
+task:
+  - task: hellaswag
+    num_fewshot: 0

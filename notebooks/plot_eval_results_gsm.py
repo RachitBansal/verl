@@ -96,6 +96,13 @@ interleave_sft_single_pattern = re.compile(
     r"OLMo2-1B_step(?P<pt_step>\d+)_interleave_twoloader_n(?P<num_rollouts>\d+)_sft_(?P<sft_steps>\d+)_ppo_(?P<ppo_flag>\d+)_gsm-step(?P<rl_step>\d+)-rl-0shot-boxed-(?P<samples>\d+)samples-temp(?P<temp>[\d.]+)$"
 )
 
+# 5. SFT->RL (sfted interleave runs): base model is first SFT'd, then RL'd
+#    "OLMo2-1B_step{pt_step}sfted_interleave_twoloader_n32_sft_0_ppo_50000_rgsm-step{rl_step}-rl-..."
+sftrl_rows = []
+sftrl_pattern = re.compile(
+    r"OLMo2-1B_step(?P<pt_step>\d+)sfted_interleave_twoloader_n(?P<num_rollouts>\d+)_sft_0_ppo_50000_rgsm-step(?P<rl_step>\d+)-rl-0shot-boxed-(?P<samples>\d+)samples-temp(?P<temp>[\d.]+)$"
+)
+
 for BASE_DIR in BASE_DIRS:
     if not BASE_DIR.exists():
         continue
@@ -131,6 +138,22 @@ for BASE_DIR in BASE_DIRS:
                     "samples": k,
                     "temp": float(isft_multi_match.group("temp")),
                     "num_rollouts": int(isft_multi_match.group("num_rollouts")),
+                    "score": score,
+                })
+            continue
+
+        # SFT->RL (sfted interleave) — check before RL and single patterns
+        sftrl_match = sftrl_pattern.match(name)
+        if sftrl_match:
+            samples = int(sftrl_match.group("samples"))
+            result_file = "gsm8k_majority_results.txt" if samples > 1 else "gsm8k_results.txt"
+            for k, score in read_score(path / result_file, samples=samples).items():
+                sftrl_rows.append({
+                    "pt_step": int(sftrl_match.group("pt_step")),
+                    "rl_step": int(sftrl_match.group("rl_step")),
+                    "samples": k,
+                    "temp": float(sftrl_match.group("temp")),
+                    "num_rollouts": int(sftrl_match.group("num_rollouts")),
                     "score": score,
                 })
             continue
@@ -180,6 +203,25 @@ ONE_OFF_EXPERIMENTS = {
         "path": "OLMo2-1B_step1000_combined_twoloader_n32_rl1.0_sft1.0_eos-step1880-rl-0shot-boxed-32samples-temp0.6",
         "pt_step": 1000,
     },
+    "interleave_20_1_step7000": {
+        "path": "OLMo2-1B_step7000_interleave_twoloader_n32_sft_20_ppo_1_rgsm-step9000-rl-0shot-boxed-32samples-temp0.6",
+        "pt_step": 7000,
+    },
+    "combined_1_1_step10000": {
+        "path": "OLMo2-1B_step10000_combined_twoloader_n32_rl1.0_sft1.0_eos-step820-rl-0shot-boxed-32samples-temp0.6",
+        "pt_step": 10000,
+    },
+    "curriculum_step1000": {
+        "path": "OLMo2-1B_step1000_curriculum_sft200_ppo1_rlinc1_sftdec1-step4750-rl-0shot-boxed-32samples-temp0.6",
+        "pt_step": 1000,
+    },
+}
+
+# Pre-computed pass@k scores from parquet predictions (scored offline)
+PRECOMPUTED_SCORES = {
+    "combined_1_1_step10000": {1: 0.4778, 8: 0.7435, 32: 0.8529},
+    "interleave_20_1_step7000": {1: 0.4645, 8: 0.7178, 32: 0.8317},
+    "curriculum_step1000": {1: 0.2476, 8: 0.4997, 32: 0.6596},
 }
 oneoff_scores = {}  # key -> {k: score}
 for key, info in ONE_OFF_EXPERIMENTS.items():
@@ -189,6 +231,8 @@ for key, info in ONE_OFF_EXPERIMENTS.items():
         if scores:
             oneoff_scores[key] = scores
             break
+    if key not in oneoff_scores and key in PRECOMPUTED_SCORES:
+        oneoff_scores[key] = PRECOMPUTED_SCORES[key]
     if key not in oneoff_scores:
         print(f"Warning: no results found for {key}")
 
@@ -196,6 +240,7 @@ pre_df = pd.DataFrame(pretrain_rows)
 rl_df = pd.DataFrame(rl_rows)
 interleave_sft_multi_df = pd.DataFrame(interleave_sft_multi_rows)
 interleave_sft_single_df = pd.DataFrame(interleave_sft_single_rows)
+sftrl_df = pd.DataFrame(sftrl_rows)
 
 # Deduplicate
 if not pre_df.empty:
@@ -206,8 +251,10 @@ if not interleave_sft_multi_df.empty:
     interleave_sft_multi_df = interleave_sft_multi_df.drop_duplicates(subset=["pt_step", "rl_step", "samples", "temp", "num_rollouts"], keep="first")
 if not interleave_sft_single_df.empty:
     interleave_sft_single_df = interleave_sft_single_df.drop_duplicates(subset=["pt_step", "rl_step", "samples", "temp", "num_rollouts"], keep="first")
+if not sftrl_df.empty:
+    sftrl_df = sftrl_df.drop_duplicates(subset=["pt_step", "rl_step", "samples", "temp", "num_rollouts"], keep="first")
 
-print(f"Loaded: {len(pre_df)} pretrain, {len(rl_df)} RL, {len(interleave_sft_multi_df)} SFT-Multi (rgsm), {len(interleave_sft_single_df)} SFT-Single (gsm)")
+print(f"Loaded: {len(pre_df)} pretrain, {len(rl_df)} RL, {len(interleave_sft_multi_df)} SFT-Multi (rgsm), {len(interleave_sft_single_df)} SFT-Single (gsm), {len(sftrl_df)} SFT->RL (sfted)")
 
 
 # ─── Plot 3: Base + Direct RL + SFT (rgsm) ───────────────────────────────────
@@ -229,8 +276,10 @@ color_base = "#777777"
 color_rl = "#E24A33"
 color_sft_multi = "#009E73"    # Emerald green (repeated/multi-solution SFT)
 color_sft_single = "#56B4E9"   # Light blue (single-solution SFT)
+color_sftrl = "#7B3294"        # Purple (SFT->RL)
 color_interleave = "#CC79A7"   # Muted pink (interleave 20:1)
 color_combined = "#D55E00"     # Vermillion orange (combined 1:1)
+color_curriculum = "#0072B2"   # Dark blue (curriculum)
 
 styles = {
     "pretrain": {
@@ -248,6 +297,10 @@ styles = {
     "rl": {
         "color": color_rl, "marker": "*", "ls": "-", "markersize": 18,
         "linewidth": 3.5, "label": r"$\mathcal{M}_t^{\text{RL}}$",
+    },
+    "sftrl": {
+        "color": color_sftrl, "marker": "D", "ls": "-", "markersize": 10,
+        "linewidth": 3.5, "label": r"$\mathcal{M}_t^{\text{SFT}\to\text{RL}}$",
     },
 }
 # Fix pretrain style separately (avoid the placeholder hack)
@@ -307,6 +360,16 @@ for idx, samples in enumerate(PLOT_SAMPLES):
         sft_single_last = sft_single_curve.loc[sft_single_curve.groupby("pt_step")["rl_step"].idxmax()].sort_values("pt_step")
         ax.plot(sft_single_last["pt_step"] * TOKEN_MULTIPLIER, sft_single_last["score"] * 100, **styles["sft_single"])
 
+    # SFT->RL — use last rl_step per pt_step
+    if not sftrl_df.empty:
+        sftrl_curve = sftrl_df[
+            (sftrl_df["samples"] == samples)
+            & (sftrl_df["temp"] == TARGET_TEMP)
+        ]
+        if not sftrl_curve.empty:
+            sftrl_last = sftrl_curve.loc[sftrl_curve.groupby("pt_step")["rl_step"].idxmax()].sort_values("pt_step")
+            ax.plot(sftrl_last["pt_step"] * TOKEN_MULTIPLIER, sftrl_last["score"] * 100, **styles["sftrl"], zorder=10)
+
     # Direct RL — use last rl_step per pt_step, best seed
     rl_subset = rl_df[
         (rl_df["samples"] == samples)
@@ -318,16 +381,18 @@ for idx, samples in enumerate(PLOT_SAMPLES):
         rl_last = rl_last.loc[rl_last.groupby("pt_step")["score"].idxmax()]
         ax.plot(rl_last["pt_step"] * TOKEN_MULTIPLIER, rl_last["score"] * 100, **styles["rl"], zorder=10)
 
-    # One-off dots at pt_step=1000
-    x_oneoff = 1000 * TOKEN_MULTIPLIER
-    if "interleave_20_1" in oneoff_scores and samples in oneoff_scores["interleave_20_1"]:
-        ax.scatter(x_oneoff, oneoff_scores["interleave_20_1"][samples] * 100,
-                   color=color_interleave, marker="P", s=200, zorder=15, edgecolors="k", linewidths=0.5,
-                   label=r"$\mathcal{M}_t^{\text{Interleave-20:1}}$" if idx == 0 else None)
-    if "combined_1_1" in oneoff_scores and samples in oneoff_scores["combined_1_1"]:
-        ax.scatter(x_oneoff, oneoff_scores["combined_1_1"][samples] * 100,
-                   color=color_combined, marker="X", s=200, zorder=15, edgecolors="k", linewidths=0.5,
-                   label=r"$\mathcal{M}_t^{\text{Combined-1:1}}$" if idx == 0 else None)
+    # One-off dots
+    for key, pt_step, color, marker, label_text in [
+        ("interleave_20_1", 1000, color_interleave, "P", r"$\mathcal{M}_t^{\text{Interleave-20:1}}$"),
+        ("combined_1_1", 1000, color_combined, "X", r"$\mathcal{M}_t^{\text{Combined-1:1}}$"),
+        ("interleave_20_1_step7000", 7000, color_interleave, "P", None),
+        ("combined_1_1_step10000", 10000, color_combined, "X", None),
+        ("curriculum_step1000", 1000, color_curriculum, "^", r"$\mathcal{M}_t^{\text{Curriculum}}$"),
+    ]:
+        if key in oneoff_scores and samples in oneoff_scores[key]:
+            ax.scatter(pt_step * TOKEN_MULTIPLIER, oneoff_scores[key][samples] * 100,
+                       color=color, marker=marker, s=200, zorder=15, edgecolors="k", linewidths=0.5,
+                       label=label_text if idx == 0 else None)
 
     # Formatting
     ax.set_title(f"Pass@{samples}", pad=15)
@@ -342,15 +407,23 @@ for idx, samples in enumerate(PLOT_SAMPLES):
         spine.set_edgecolor("black")
         spine.set_linewidth(1.2)
 
-# Legend
-handles, labels = axes[0].get_legend_handles_labels()
+# Legend — collect from all axes to catch series that may only appear in some panels
+handles, labels = [], []
+for a in axes:
+    h, l = a.get_legend_handles_labels()
+    for hi, li in zip(h, l):
+        if li not in labels:
+            handles.append(hi)
+            labels.append(li)
 desired_order = [
     styles["pretrain"]["label"],
     styles["rl"]["label"],
+    styles["sftrl"]["label"],
     styles["sft_multi"]["label"],
     styles["sft_single"]["label"],
     r"$\mathcal{M}_t^{\text{Interleave-20:1}}$",
     r"$\mathcal{M}_t^{\text{Combined-1:1}}$",
+    r"$\mathcal{M}_t^{\text{Curriculum}}$",
 ]
 order_lookup = {label: i for i, label in enumerate(desired_order)}
 sorted_pairs = sorted(zip(handles, labels), key=lambda pair: order_lookup.get(pair[1], 99))

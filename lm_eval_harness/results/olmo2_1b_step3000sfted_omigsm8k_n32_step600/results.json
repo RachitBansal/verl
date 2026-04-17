@@ -1,0 +1,71 @@
+{
+  "run_name": "olmo2_1b_step3000sfted_omigsm8k_n32_step600",
+  "results": {
+    "wikitext": {
+      "alias": "wikitext",
+      "word_perplexity,none": 50.50388490244952,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 2.082237432532121,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 1.058134585066836,
+      "bits_per_byte_stderr,none": "N/A"
+    },
+    "hellaswag": {
+      "alias": "hellaswag",
+      "acc,none": 0.342,
+      "acc_stderr,none": 0.021236147199899257,
+      "acc_norm,none": 0.362,
+      "acc_norm_stderr,none": 0.0215136625275824
+    },
+    "lambada_openai": {
+      "alias": "lambada_openai",
+      "perplexity,none": 178.2785416560244,
+      "perplexity_stderr,none": 88.99197845137016,
+      "acc,none": 0.2,
+      "acc_stderr,none": 0.04020151261036844
+    },
+    "squad_completion_lm": {
+      "alias": "squad_completion_lm",
+      "word_perplexity,none": 2483.83626199509,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 3.766252109494803,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 1.913129575879968,
+      "bits_per_byte_stderr,none": "N/A"
+    },
+    "ifeval_lm": {
+      "alias": "ifeval_lm",
+      "word_perplexity,none": 1555.5727974720342,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 3.6541777877044264,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 1.869546827506667,
+      "bits_per_byte_stderr,none": "N/A"
+    }
+  },
+  "config": {
+    "model": "hf",
+    "model_args": {
+      "pretrained": "/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step3000sfted_omigsm8k_n32/hf_model/step600",
+      "dtype": "bfloat16",
+      "max_length": 4096
+    },
+    "model_num_parameters": 1484916736,
+    "model_dtype": "torch.bfloat16",
+    "model_revision": "main",
+    "model_sha": "",
+    "batch_size": "auto",
+    "batch_sizes": [
+      64
+    ],
+    "device": "cuda:0",
+    "use_cache": null,
+    "limit": 500.0,
+    "bootstrap_iters": 100000,
+    "gen_kwargs": {},
+    "random_seed": 0,
+    "numpy_seed": 1234,
+    "torch_seed": 1234,
+    "fewshot_seed": 1234
+  }
+}

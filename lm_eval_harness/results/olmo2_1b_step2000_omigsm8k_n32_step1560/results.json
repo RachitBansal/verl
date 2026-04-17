@@ -1,0 +1,89 @@
+{
+  "run_name": "olmo2_1b_step2000_omigsm8k_n32_step1560",
+  "results": {
+    "gsm8k_lm": {
+      "alias": "gsm8k_lm",
+      "word_perplexity,none": 36.88786244310492,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 1.9149453930390283,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 0.9373032525601275,
+      "bits_per_byte_stderr,none": "N/A"
+    },
+    "c4": {
+      "alias": "c4",
+      "word_perplexity,none": 110.97693064898779,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 2.1982178433799135,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 1.1363343644448904,
+      "bits_per_byte_stderr,none": "N/A"
+    },
+    "wikitext": {
+      "alias": "wikitext",
+      "word_perplexity,none": 33.294385359224364,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 1.926153912887603,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 0.9457229890005858,
+      "bits_per_byte_stderr,none": "N/A"
+    },
+    "hellaswag": {
+      "alias": "hellaswag",
+      "acc,none": 0.348,
+      "acc_stderr,none": 0.0213237286328075,
+      "acc_norm,none": 0.388,
+      "acc_norm_stderr,none": 0.021814300984787635
+    },
+    "lambada_openai": {
+      "alias": "lambada_openai",
+      "perplexity,none": 92.82085885868244,
+      "perplexity_stderr,none": 31.73337901999375,
+      "acc,none": 0.25,
+      "acc_stderr,none": 0.04351941398892446
+    },
+    "squad_completion_lm": {
+      "alias": "squad_completion_lm",
+      "word_perplexity,none": 1062.2608168510517,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 3.2608802454053922,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 1.7052614596291045,
+      "bits_per_byte_stderr,none": "N/A"
+    },
+    "ifeval_lm": {
+      "alias": "ifeval_lm",
+      "word_perplexity,none": 219.741599552668,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 2.587752412587009,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 1.3716995917431407,
+      "bits_per_byte_stderr,none": "N/A"
+    }
+  },
+  "config": {
+    "model": "hf",
+    "model_args": {
+      "pretrained": "/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step2000_omigsm8k_n32/hf_model/step1560",
+      "dtype": "bfloat16",
+      "max_length": 4096
+    },
+    "model_num_parameters": 1484916736,
+    "model_dtype": "torch.bfloat16",
+    "model_revision": "main",
+    "model_sha": "",
+    "batch_size": "auto",
+    "batch_sizes": [
+      64
+    ],
+    "device": "cuda:0",
+    "use_cache": null,
+    "limit": 500.0,
+    "bootstrap_iters": 100000,
+    "gen_kwargs": {},
+    "random_seed": 0,
+    "numpy_seed": 1234,
+    "torch_seed": 1234,
+    "fewshot_seed": 1234
+  }
+}

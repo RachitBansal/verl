@@ -1,0 +1,15 @@
+task: squad_completion_lm
+dataset_path: hazyresearch/based-squad
+dataset_name: default
+output_type: loglikelihood
+validation_split: validation
+doc_to_text: "{{text}}"
+doc_to_target: "{{value}}"
+process_results: !function utils_lm.process_results
+metric_list:
+  - metric: word_perplexity
+  - metric: byte_perplexity
+  - metric: bits_per_byte
+num_fewshot: 0
+metadata:
+  version: 1.0

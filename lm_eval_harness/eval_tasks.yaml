@@ -1,0 +1,6 @@
+group: base_capability_eval
+task:
+  - task: c4
+    num_fewshot: 0
+  - task: gsm8k_lm
+    num_fewshot: 0

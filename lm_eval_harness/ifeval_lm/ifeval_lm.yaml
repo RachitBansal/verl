@@ -1,0 +1,14 @@
+task: ifeval_lm
+dataset_path: google/IFEval
+output_type: loglikelihood_rolling
+test_split: train
+doc_to_text: ""
+doc_to_target: "{{prompt}}"
+process_results: !function utils_lm.process_results
+metric_list:
+  - metric: word_perplexity
+  - metric: byte_perplexity
+  - metric: bits_per_byte
+num_fewshot: 0
+metadata:
+  version: 1.0

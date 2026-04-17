@@ -1,0 +1,123 @@
+# Checkpoint registry for lm_eval_harness evaluations
+# All checkpoints are OLMo2-1B, HuggingFace format
+#
+# pt_step: pretraining step (on 50B token run, 2M tokens/step)
+# For SFT/RL: pt_step = base model pretraining step before fine-tuning
+
+base_dir: /n/netscratch/dam_lab/Everyone/rl_pretrain
+
+# ─── Base Models ──────────────────────────────────────────────────────────────
+# OLMo2-1B pretrained on 50B tokens (stage1), converted to HF at each step
+base:
+  description: "OLMo2-1B base pretrained checkpoints (stage1, 50B tokens)"
+  checkpoints:
+    - pt_step: 1000
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step1000-hf
+    - pt_step: 2000
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step2000-hf
+    - pt_step: 3000
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step3000-hf
+    - pt_step: 5000
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step5000-hf
+    - pt_step: 6000
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step6000-hf
+    - pt_step: 7000
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step7000-hf
+    - pt_step: 10000
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step10000-hf
+    - pt_step: 14000
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step14000-hf
+    - pt_step: 22000
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step22000-hf
+
+# ─── SFT Models ───────────────────────────────────────────────────────────────
+# SFT on OpenMathInstruct-2 GSM8K (repeated, multi-solution), 50k SFT steps
+# Experiment name pattern: OLMo2-1B_step{pt_step}_interleave_twoloader_n32_sft_50000_ppo_0_rgsm
+# Each uses the last saved HF checkpoint under hf_model/
+sft:
+  description: "SFT on OMI-GSM8K (rgsm, repeated multi-solution), 50k steps, last checkpoint"
+  training_data: /n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2_gsm8k_duplicated/train_gsm8k.parquet
+  checkpoints:
+    - pt_step: 1000
+      sft_step: 9500
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/OLMo2-1B_step1000_interleave_twoloader_n32_sft_50000_ppo_0_rgsm/hf_model/step9500
+    - pt_step: 2000
+      sft_step: 9500
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/OLMo2-1B_step2000_interleave_twoloader_n32_sft_50000_ppo_0_rgsm/hf_model/step9500
+    - pt_step: 3000
+      sft_step: 9500
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/OLMo2-1B_step3000_interleave_twoloader_n32_sft_50000_ppo_0_rgsm/hf_model/step9500
+    - pt_step: 5000
+      sft_step: 9500
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/OLMo2-1B_step5000_interleave_twoloader_n32_sft_50000_ppo_0_rgsm/hf_model/step9500
+    - pt_step: 6000
+      sft_step: 9500
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/OLMo2-1B_step6000_interleave_twoloader_n32_sft_50000_ppo_0_rgsm/hf_model/step9500
+    - pt_step: 7000
+      sft_step: 9500
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/OLMo2-1B_step7000_interleave_twoloader_n32_sft_50000_ppo_0_rgsm/hf_model/step9500
+    - pt_step: 10000
+      sft_step: 9500
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/OLMo2-1B_step10000_interleave_twoloader_n32_sft_50000_ppo_0_rgsm/hf_model/step9500
+    - pt_step: 14000
+      sft_step: 14000
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/OLMo2-1B_step14000_interleave_twoloader_n32_sft_50000_ppo_0_rgsm/hf_model/step14000
+      note: "Different SFT step than others (14000 vs 9500)"
+    - pt_step: 22000
+      sft_step: 9500
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/OLMo2-1B_step22000_interleave_twoloader_n32_sft_50000_ppo_0_rgsm/hf_model/step9500
+
+# ─── RL Models (Direct RL, "Red Stars") ──────────────────────────────────────
+# Direct RL on GSM8K via PPO (omigsm8k), n=32 rollouts
+# Selected: last RL step, best seed per pretraining checkpoint (Pass@32, temp=0.6)
+# These correspond to the red stars in notebooks/plot_eval_results_gsm.py
+rl:
+  description: "Direct RL on GSM8K (omigsm8k, n=32), best checkpoint per pt_step"
+  checkpoints:
+    # pt_step=1000: checkpoint is EMPTY (no model files), excluded
+    # - pt_step: 1000
+    #   rl_step: 400
+    #   seed: 1
+    #   pass_at_32: 0.2055
+    #   path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step1000_omigsm8k_n32/hf_model/step400
+    #   note: "EMPTY checkpoint - no model files"
+    - pt_step: 2000
+      rl_step: 1560
+      seed: 1
+      pass_at_32: 0.3412
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step2000_omigsm8k_n32/hf_model/step1560
+    - pt_step: 3000
+      rl_step: 600
+      seed: 4
+      pass_at_32: 0.4519
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step3000_omigsm8k_n32_v4/hf_model/step600
+    - pt_step: 5000
+      rl_step: 1000
+      seed: 2
+      pass_at_32: 0.6111
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step5000_omigsm8k_n32_v2/hf_model/step1000
+    - pt_step: 6000
+      rl_step: 1400
+      seed: 1
+      pass_at_32: 0.6323
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step6000_omigsm8k_n32/hf_model/step1400
+    - pt_step: 7000
+      rl_step: 1000
+      seed: 1
+      pass_at_32: 0.6876
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step7000_omigsm8k_n32/hf_model/step1000
+    - pt_step: 10000
+      rl_step: 1560
+      seed: 1
+      pass_at_32: 0.7346
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step10000_omigsm8k_n32/hf_model/step1560
+    - pt_step: 14000
+      rl_step: 1200
+      seed: 1
+      pass_at_32: 0.7854
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step14000_omigsm8k_n32/hf_model/step1200
+    - pt_step: 22000
+      rl_step: 1000
+      seed: 1
+      pass_at_32: 0.8044
+      path: /n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step22000_omigsm8k_n32/hf_model/step1000

@@ -14,6 +14,7 @@ set -u  # Exit on undefined variable
 
 # ---- Activate your prebuilt env
 source /n/holylabs/dam_lab/Lab/brachit/envs/bin/activate
+export PYTHONPATH="/n/home05/sqin/rl_pretrain/verl:${PYTHONPATH:-}"
 
 #############################################
 # CONFIGURATION
@@ -47,9 +48,9 @@ TENSOR_PARALLEL_SIZE=1  # Increase if model doesn't fit in single GPU
 GPU_MEMORY_UTIL=0.85
 
 # Dataset Configuration
-BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_rollouts"
+BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain"
 DATA_DIR="${BASE_DIR}/data"
-CACHE_DIR="/n/netscratch/sham_lab/Lab/cmohri/cache"  # HuggingFace datasets cache - change it per user
+CACHE_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/cache"  # HuggingFace datasets cache
 GSM8K_DIR="${DATA_DIR}/gsm8k"
 MATH_DIR="${DATA_DIR}/math"
 
@@ -81,11 +82,7 @@ mkdir -p "${CACHE_DIR}"
 
 # Ray / tmp directories (avoid /tmp permission issues on shared nodes)
 # Use a very short path to avoid UNIX socket length limits (<108 chars).
-<<<<<<< HEAD
 JOB_TMP_BASE="/n/home05/sqin/tmp"
-=======
-JOB_TMP_BASE="/n/home03/cmohri/tmp"
->>>>>>> 35595c96bbe3bf82d7775e4b7be1b43d7525d1dc
 JOB_ID="${SLURM_JOB_ID:-$$}"
 export TMPDIR="${JOB_TMP_BASE}/job_${JOB_ID}"
 export RAY_TMPDIR="${TMPDIR}/ray"

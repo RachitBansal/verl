@@ -1,0 +1,71 @@
+{
+  "run_name": "olmo2_1b_step22000sfted_omigsm8k_n32_step600",
+  "results": {
+    "wikitext": {
+      "alias": "wikitext",
+      "word_perplexity,none": 24.806685238671832,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 1.8230195445008806,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 0.8663300285209575,
+      "bits_per_byte_stderr,none": "N/A"
+    },
+    "hellaswag": {
+      "alias": "hellaswag",
+      "acc,none": 0.358,
+      "acc_stderr,none": 0.021461434862859122,
+      "acc_norm,none": 0.41,
+      "acc_norm_stderr,none": 0.022017482578127676
+    },
+    "lambada_openai": {
+      "alias": "lambada_openai",
+      "perplexity,none": 73.29765789082023,
+      "perplexity_stderr,none": 32.903337992110984,
+      "acc,none": 0.33,
+      "acc_stderr,none": 0.04725815626252604
+    },
+    "squad_completion_lm": {
+      "alias": "squad_completion_lm",
+      "word_perplexity,none": 1754.7633538803761,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 3.550681438523115,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 1.8280959298663437,
+      "bits_per_byte_stderr,none": "N/A"
+    },
+    "ifeval_lm": {
+      "alias": "ifeval_lm",
+      "word_perplexity,none": 947.4235034072187,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 3.348267388316238,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 1.7434147442545287,
+      "bits_per_byte_stderr,none": "N/A"
+    }
+  },
+  "config": {
+    "model": "hf",
+    "model_args": {
+      "pretrained": "/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step22000sfted_omigsm8k_n32/hf_model/step600",
+      "dtype": "bfloat16",
+      "max_length": 4096
+    },
+    "model_num_parameters": 1484916736,
+    "model_dtype": "torch.bfloat16",
+    "model_revision": "main",
+    "model_sha": "",
+    "batch_size": "auto",
+    "batch_sizes": [
+      64
+    ],
+    "device": "cuda:0",
+    "use_cache": null,
+    "limit": 500.0,
+    "bootstrap_iters": 100000,
+    "gen_kwargs": {},
+    "random_seed": 0,
+    "numpy_seed": 1234,
+    "torch_seed": 1234,
+    "fewshot_seed": 1234
+  }
+}

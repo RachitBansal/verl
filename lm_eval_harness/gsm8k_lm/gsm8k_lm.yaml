@@ -1,0 +1,15 @@
+task: gsm8k_lm
+dataset_path: gsm8k
+dataset_name: main
+output_type: loglikelihood
+test_split: test
+doc_to_text: "Question: {{question}}\nAnswer:"
+doc_to_target: "{{answer}}"
+process_results: !function utils_lm.process_results
+metric_list:
+  - metric: word_perplexity
+  - metric: byte_perplexity
+  - metric: bits_per_byte
+num_fewshot: 0
+metadata:
+  version: 1.0

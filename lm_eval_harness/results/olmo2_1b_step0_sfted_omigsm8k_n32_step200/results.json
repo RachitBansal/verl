@@ -1,0 +1,71 @@
+{
+  "run_name": "olmo2_1b_step0_sfted_omigsm8k_n32_step200",
+  "results": {
+    "wikitext": {
+      "alias": "wikitext",
+      "word_perplexity,none": 10249.546181815029,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 5.623695734371127,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 2.491518540642928,
+      "bits_per_byte_stderr,none": "N/A"
+    },
+    "hellaswag": {
+      "alias": "hellaswag",
+      "acc,none": 0.268,
+      "acc_stderr,none": 0.019827714859587574,
+      "acc_norm,none": 0.268,
+      "acc_norm_stderr,none": 0.01982771485958757
+    },
+    "lambada_openai": {
+      "alias": "lambada_openai",
+      "perplexity,none": 755516.0086895853,
+      "perplexity_stderr,none": 914840.3175644455,
+      "acc,none": 0.0,
+      "acc_stderr,none": 0.0
+    },
+    "squad_completion_lm": {
+      "alias": "squad_completion_lm",
+      "word_perplexity,none": 11052362.477054263,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 15.659224647859503,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 3.968940875563524,
+      "bits_per_byte_stderr,none": "N/A"
+    },
+    "ifeval_lm": {
+      "alias": "ifeval_lm",
+      "word_perplexity,none": 28382.414389901496,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 6.097551495876355,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 2.608230037118504,
+      "bits_per_byte_stderr,none": "N/A"
+    }
+  },
+  "config": {
+    "model": "hf",
+    "model_args": {
+      "pretrained": "/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/olmo2_1b_step0_sfted_omigsm8k_n32/hf_model/step200",
+      "dtype": "bfloat16",
+      "max_length": 4096
+    },
+    "model_num_parameters": 1484916736,
+    "model_dtype": "torch.bfloat16",
+    "model_revision": "main",
+    "model_sha": "",
+    "batch_size": "auto",
+    "batch_sizes": [
+      64
+    ],
+    "device": "cuda:0",
+    "use_cache": null,
+    "limit": 500.0,
+    "bootstrap_iters": 100000,
+    "gen_kwargs": {},
+    "random_seed": 0,
+    "numpy_seed": 1234,
+    "torch_seed": 1234,
+    "fewshot_seed": 1234
+  }
+}

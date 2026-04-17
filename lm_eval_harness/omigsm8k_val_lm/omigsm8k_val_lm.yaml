@@ -1,0 +1,17 @@
+task: omigsm8k_val_lm
+dataset_path: parquet
+dataset_kwargs:
+  data_files:
+    test: /n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2_gsm8k_duplicated/val_gsm8k.parquet
+output_type: loglikelihood
+test_split: test
+doc_to_text: "Question: {{problem}}\nAnswer:"
+doc_to_target: "{{generated_solution}}"
+process_results: !function utils_lm.process_results
+metric_list:
+  - metric: word_perplexity
+  - metric: byte_perplexity
+  - metric: bits_per_byte
+num_fewshot: 0
+metadata:
+  version: 1.0
