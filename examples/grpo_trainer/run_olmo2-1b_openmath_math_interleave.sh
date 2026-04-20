@@ -97,6 +97,6 @@ python3 -m verl.trainer.main_ppo \
     trainer.default_local_dir="${OUTPUT_DIR}/${MODEL_NAME}_step${STEP_NUM}_${EXP_SUFFIX}" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
-    trainer.save_freq=500 \
-    trainer.test_freq=250 \
+    trainer.save_freq=100 \
+    trainer.test_freq=50 \
     trainer.total_epochs=100

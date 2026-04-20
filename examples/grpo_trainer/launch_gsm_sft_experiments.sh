@@ -56,43 +56,47 @@ COUNT=0
 # §1 — 60B base + RMATH SFT (5k, 10k) — 48h, 2 GPU
 #     SFT data: openmathinstruct2_duplicated (RMATH)
 #     Job names: rm60-5k, rm60-10k
+#
+#     ALREADY RUNNING — left in place for reference; uncomment to resubmit.
 # ============================================================================
-STEPS_60B_RMATH=(5000 10000)
-
-for STEP in "${STEPS_60B_RMATH[@]}"; do
-    SUFFIX=$(step_to_suffix $STEP)
-
-    echo "Submitting rm60-${SUFFIX} (60B RMATH SFT, step ${STEP}) — 48h"
-    sbatch --account=${SLURM_ACCOUNT} --mail-type=FAIL --mail-user=${MAIL_USER} \
-        --job-name="rm60-${SUFFIX}" --time=48:00:00 \
-        --export=ALL,VERL_DIR=${VERL_DIR},CONDA_ENV=${CONDA_ENV},STEP_NUM=${STEP},CHECKPOINT_DIR=${CKPT_60B},MODEL_NAME=OLMo2-1B-60BMATH,SFT_DATA_DIR=${MATH_DUP},NUM_SFT_STEPS=${NUM_SFT_STEPS},NUM_PPO_STEPS=${NUM_PPO_STEPS},EXP_SUFFIX="interleave_twoloader_n32_sft_${NUM_SFT_STEPS}_ppo_${NUM_PPO_STEPS}_rmath" \
-        ${MATH_SLURM}
-    COUNT=$((COUNT + 1))
-    sleep 1
-done
+# STEPS_60B_RMATH=(5000 10000)
+#
+# for STEP in "${STEPS_60B_RMATH[@]}"; do
+#     SUFFIX=$(step_to_suffix $STEP)
+#
+#     echo "Submitting rm60-${SUFFIX} (60B RMATH SFT, step ${STEP}) — 48h"
+#     sbatch --account=${SLURM_ACCOUNT} --mail-type=FAIL --mail-user=${MAIL_USER} \
+#         --job-name="rm60-${SUFFIX}" --time=48:00:00 \
+#         --export=ALL,VERL_DIR=${VERL_DIR},CONDA_ENV=${CONDA_ENV},STEP_NUM=${STEP},CHECKPOINT_DIR=${CKPT_60B},MODEL_NAME=OLMo2-1B-60BMATH,SFT_DATA_DIR=${MATH_DUP},NUM_SFT_STEPS=${NUM_SFT_STEPS},NUM_PPO_STEPS=${NUM_PPO_STEPS},EXP_SUFFIX="interleave_twoloader_n32_sft_${NUM_SFT_STEPS}_ppo_${NUM_PPO_STEPS}_rmath" \
+#         ${MATH_SLURM}
+#     COUNT=$((COUNT + 1))
+#     sleep 1
+# done
 
 # ============================================================================
 # §2 — GSM RL on already-SFTed 1B checkpoints — 24h, 2 GPU
 #     Resume from hf_model/step2000 of the SFT-only GSM runs and run pure RL.
 #     STEP_NUM is used as a label only; OLMO_CHECKPOINT overrides the actual path.
 #     Job names: srl-1k, srl-2k, srl-5k, srl-10k, srl-14k, srl-22k
+#
+#     ALREADY RUNNING — left in place for reference; uncomment to resubmit.
 # ============================================================================
-SFTED_STEPS=(1000 2000 5000 10000 14000 22000)
-INTERLEAVE_SFT=0
-INTERLEAVE_PPO=50000
-
-for PRETRAIN in "${SFTED_STEPS[@]}"; do
-    SUFFIX=$(step_to_suffix $PRETRAIN)
-    SFTED_DIR="${SFTED_GSM_BASE}/OLMo2-1B_step${PRETRAIN}_interleave_twoloader_n32_sft_50000_ppo_0_gsm/hf_model/step2000"
-
-    echo "Submitting srl-${SUFFIX} (RL on SFTed-2k of pretrain ${PRETRAIN}) — 24h"
-    sbatch --account=${SLURM_ACCOUNT} --mail-type=FAIL --mail-user=${MAIL_USER} \
-        --job-name="srl-${SUFFIX}" --time=24:00:00 \
-        --export=ALL,VERL_DIR=${VERL_DIR},CONDA_ENV=${CONDA_ENV},STEP_NUM=${PRETRAIN},OLMO_CHECKPOINT=${SFTED_DIR},NUM_SFT_STEPS=${INTERLEAVE_SFT},NUM_PPO_STEPS=${INTERLEAVE_PPO},EXP_TAG=sfted,EXP_SUFFIX="interleave_twoloader_n32_sft_${INTERLEAVE_SFT}_ppo_${INTERLEAVE_PPO}_gsm" \
-        ${GSM_SLURM}
-    COUNT=$((COUNT + 1))
-    sleep 1
-done
+# SFTED_STEPS=(1000 2000 5000 10000 14000 22000)
+# INTERLEAVE_SFT=0
+# INTERLEAVE_PPO=50000
+#
+# for PRETRAIN in "${SFTED_STEPS[@]}"; do
+#     SUFFIX=$(step_to_suffix $PRETRAIN)
+#     SFTED_DIR="${SFTED_GSM_BASE}/OLMo2-1B_step${PRETRAIN}_interleave_twoloader_n32_sft_50000_ppo_0_gsm/hf_model/step2000"
+#
+#     echo "Submitting srl-${SUFFIX} (RL on SFTed-2k of pretrain ${PRETRAIN}) — 24h"
+#     sbatch --account=${SLURM_ACCOUNT} --mail-type=FAIL --mail-user=${MAIL_USER} \
+#         --job-name="srl-${SUFFIX}" --time=24:00:00 \
+#         --export=ALL,VERL_DIR=${VERL_DIR},CONDA_ENV=${CONDA_ENV},STEP_NUM=${PRETRAIN},OLMO_CHECKPOINT=${SFTED_DIR},NUM_SFT_STEPS=${INTERLEAVE_SFT},NUM_PPO_STEPS=${INTERLEAVE_PPO},EXP_TAG=sfted,EXP_SUFFIX="interleave_twoloader_n32_sft_${INTERLEAVE_SFT}_ppo_${INTERLEAVE_PPO}_gsm" \
+#         ${GSM_SLURM}
+#     COUNT=$((COUNT + 1))
+#     sleep 1
+# done
 
 # ============================================================================
 # §3 — Curriculum SFT->RL on 10k pretrain checkpoint — 24h, 2 GPU
@@ -103,13 +107,14 @@ STEP=10000
 SUFFIX=$(step_to_suffix $STEP)
 
 # Schedule 1 — Debug curriculum: sft 250 / ppo 50, increment 20
-echo "Submitting curd-${SUFFIX} (curriculum debug: sft 250 / ppo 50, ±20) — 24h"
-sbatch --account=${SLURM_ACCOUNT} --mail-type=FAIL --mail-user=${MAIL_USER} \
-    --job-name="curd-${SUFFIX}" --time=24:00:00 \
-    --export=ALL,VERL_DIR=${VERL_DIR},CONDA_ENV=${CONDA_ENV},STEP_NUM=${STEP},NUM_SFT_STEPS=250,NUM_PPO_STEPS=50,RL_INCREMENT=20,SFT_DECREMENT=20,LR_SCALE=1.0 \
-    ${CURRICULUM_SLURM}
-COUNT=$((COUNT + 1))
-sleep 1
+#     ALREADY RUNNING — left in place for reference; uncomment to resubmit.
+# echo "Submitting curd-${SUFFIX} (curriculum debug: sft 250 / ppo 50, ±20) — 24h"
+# sbatch --account=${SLURM_ACCOUNT} --mail-type=FAIL --mail-user=${MAIL_USER} \
+#     --job-name="curd-${SUFFIX}" --time=24:00:00 \
+#     --export=ALL,VERL_DIR=${VERL_DIR},CONDA_ENV=${CONDA_ENV},STEP_NUM=${STEP},NUM_SFT_STEPS=250,NUM_PPO_STEPS=50,RL_INCREMENT=20,SFT_DECREMENT=20,LR_SCALE=1.0 \
+#     ${CURRICULUM_SLURM}
+# COUNT=$((COUNT + 1))
+# sleep 1
 
 # Schedule 2 — Novel curriculum: sft 800 / ppo 200, increment 50
 echo "Submitting curn-${SUFFIX} (curriculum novel: sft 800 / ppo 200, ±50) — 24h"
