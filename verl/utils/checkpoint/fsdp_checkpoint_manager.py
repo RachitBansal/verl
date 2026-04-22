@@ -79,6 +79,8 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         lr_scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
         processing_class: PreTrainedTokenizer | ProcessorMixin = None,
         checkpoint_config: DictConfig = None,
+        sft_optimizer: Optional[torch.optim.Optimizer] = None,
+        sft_lr_scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
         **kwargs,
     ):
         if processing_class is None and "tokenizer" in kwargs:
@@ -94,6 +96,8 @@ class FSDPCheckpointManager(BaseCheckpointManager):
             processing_class=processing_class,
             checkpoint_config=checkpoint_config,
         )
+        self.sft_optimizer = sft_optimizer
+        self.sft_lr_scheduler = sft_lr_scheduler
 
     def load_checkpoint(self, local_path: str, hdfs_path: str = None, del_local_after_load=False):
         """
@@ -145,6 +149,25 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                 self.optimizer.load_state_dict(optimizer_state_dict)
                 log_with_rank(f"Loaded optimizer from {remote_optim_path}", rank=self.rank, logger=logger)
 
+                if self.sft_optimizer is not None:
+                    remote_sft_optim_path = os.path.join(
+                        local_path, f"sft_optim_world_size_{self.world_size}_rank_{self.rank}.pt"
+                    )
+                    if os.path.exists(remote_sft_optim_path) or is_non_local(remote_sft_optim_path):
+                        local_sft_optim_path = copy_to_local(remote_sft_optim_path)
+                        sft_optimizer_state_dict = torch.load(local_sft_optim_path, weights_only=False)
+                        self.sft_optimizer.load_state_dict(sft_optimizer_state_dict)
+                        log_with_rank(
+                            f"Loaded sft_optimizer from {remote_sft_optim_path}", rank=self.rank, logger=logger
+                        )
+                    else:
+                        log_with_rank(
+                            f"SFT optimizer state not found at {remote_sft_optim_path}; "
+                            "initializing fresh (m_sft, v_sft).",
+                            rank=self.rank,
+                            logger=logger,
+                        )
+
         if self.should_load_extra:
             remote_extra_state_path = os.path.join(
                 local_path, f"extra_state_world_size_{self.world_size}_rank_{self.rank}.pt"
@@ -161,6 +184,13 @@ class FSDPCheckpointManager(BaseCheckpointManager):
             if lr_scheduler_state_dict is not None and self.lr_scheduler is not None:
                 self.lr_scheduler.load_state_dict(lr_scheduler_state_dict)
                 log_with_rank(f"Loaded lr_scheduler from {remote_extra_state_path}", rank=self.rank, logger=logger)
+
+            sft_lr_scheduler_state_dict = extra_state_dict.get("sft_lr_scheduler", None)
+            if sft_lr_scheduler_state_dict is not None and self.sft_lr_scheduler is not None:
+                self.sft_lr_scheduler.load_state_dict(sft_lr_scheduler_state_dict)
+                log_with_rank(
+                    f"Loaded sft_lr_scheduler from {remote_extra_state_path}", rank=self.rank, logger=logger
+                )
 
         if self.rank == 0 and del_local_after_load:
             try:
@@ -244,10 +274,24 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                     torch.save(optimizer_state_dict, optim_path)
                     log_with_rank(f"Saved optim to {os.path.abspath(optim_path)}", rank=self.rank, logger=logger)
 
+                    if self.sft_optimizer is not None:
+                        sft_optim_path = os.path.join(
+                            local_path, f"sft_optim_world_size_{self.world_size}_rank_{self.rank}.pt"
+                        )
+                        sft_optimizer_state_dict = self.sft_optimizer.state_dict()
+                        torch.save(sft_optimizer_state_dict, sft_optim_path)
+                        log_with_rank(
+                            f"Saved sft_optim to {os.path.abspath(sft_optim_path)}", rank=self.rank, logger=logger
+                        )
+
                 if self.should_save_extra:
                     lr_scheduler_state_dict = self.lr_scheduler.state_dict() if self.lr_scheduler is not None else None
+                    sft_lr_scheduler_state_dict = (
+                        self.sft_lr_scheduler.state_dict() if self.sft_lr_scheduler is not None else None
+                    )
                     extra_state_dict = {
                         "lr_scheduler": lr_scheduler_state_dict,
+                        "sft_lr_scheduler": sft_lr_scheduler_state_dict,
                         "rng": self.get_rng_state(),
                     }
                     torch.save(extra_state_dict, extra_path)

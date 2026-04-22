@@ -23,7 +23,7 @@ from verl.utils.profiler.config import ProfilerConfig
 
 from .engine import FSDPEngineConfig, McoreEngineConfig
 from .model import HFModelConfig
-from .optimizer import OptimizerConfig
+from .optimizer import FSDPOptimizerConfig, OptimizerConfig
 
 __all__ = ["PolicyLossConfig", "ActorConfig", "FSDPActorConfig", "McoreActorConfig"]
 
@@ -224,6 +224,10 @@ class FSDPActorConfig(ActorConfig):
         use_remove_padding (bool): Whether to remove padding tokens in inputs during training.
         sft_lr_scale (float): Learning rate scaling factor for SFT training mode. Multiplied with
             the base learning rate when is_sft=True. Default 1.0 means no scaling.
+        sft_optim (FSDPOptimizerConfig, optional): Second optimizer config used only under the
+            parallel_avg combined-training mode. When set, a second AdamW with its own (m, v) state
+            and its own learning rate is built for the SFT side; the parameter update is the average
+            of the two resulting models. Leave as None for the default fused-combined or pure-RL paths.
     """
 
     strategy: str = "fsdp"
@@ -236,6 +240,7 @@ class FSDPActorConfig(ActorConfig):
     profiler: ProfilerConfig = field(default_factory=ProfilerConfig)
     use_rollout_log_probs: bool = False
     sft_lr_scale: float = 1.0
+    sft_optim: Optional[FSDPOptimizerConfig] = None
 
     def __post_init__(self):
         """Validate FSDP actor configuration parameters."""

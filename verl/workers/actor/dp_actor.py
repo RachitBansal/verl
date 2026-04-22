@@ -55,11 +55,24 @@ class DataParallelPPOActor(BasePPOActor):
         actor_optimizer (torch.optim.Optimizer, optional): Actor optimizer. Defaults to None.
     """
 
-    def __init__(self, config: ActorConfig, actor_module: nn.Module, actor_optimizer: torch.optim.Optimizer = None):
-        """When optimizer is None, it is Reference Policy"""
+    def __init__(
+        self,
+        config: ActorConfig,
+        actor_module: nn.Module,
+        actor_optimizer: torch.optim.Optimizer = None,
+        sft_optimizer: torch.optim.Optimizer = None,
+    ):
+        """When optimizer is None, it is Reference Policy.
+
+        sft_optimizer, if provided, enables the parallel_avg combined-training mode:
+        RL gradients drive actor_optimizer with its own (m_rl, v_rl); SFT gradients drive
+        sft_optimizer with its own (m_sft, v_sft); the per-step parameter update is the
+        average of the two resulting models.
+        """
         super().__init__(config)
         self.actor_module = actor_module
         self.actor_optimizer = actor_optimizer
+        self.sft_optimizer = sft_optimizer
         role = "Ref" if actor_optimizer is None else "Actor"
 
         self.use_remove_padding = self.config.get("use_remove_padding", False)
@@ -90,6 +103,12 @@ class DataParallelPPOActor(BasePPOActor):
             self.scaler = ShardedGradScaler(growth_interval=400)
         else:
             self.scaler = None
+
+        if self.sft_optimizer is not None and self.param_dtype == torch.float16:
+            raise NotImplementedError(
+                "parallel_avg combined-training mode (sft_optimizer!=None) does not support float16; "
+                "use bfloat16."
+            )
 
     def _forward_micro_batch(
         self, micro_batch, temperature, calculate_entropy=False
@@ -280,10 +299,16 @@ class DataParallelPPOActor(BasePPOActor):
 
             return entropy, log_probs
 
-    def _optimizer_step(self):
+    def _optimizer_step(self, optimizer: torch.optim.Optimizer = None):
+        """Clip gradients on self.actor_module and take one step on `optimizer`.
+
+        `optimizer` defaults to self.actor_optimizer when omitted so existing callers keep working.
+        """
+        if optimizer is None:
+            optimizer = self.actor_optimizer
         assert self.config.grad_clip is not None
         if self.scaler is not None:
-            self.scaler.unscale_(self.actor_optimizer)
+            self.scaler.unscale_(optimizer)
         if isinstance(self.actor_module, FSDP):
             grad_norm = self.actor_module.clip_grad_norm_(max_norm=self.config.grad_clip)
         elif isinstance(self.actor_module, FSDPModule):
@@ -296,14 +321,14 @@ class DataParallelPPOActor(BasePPOActor):
 
         # if grad_norm is not finite, skip the update
         if self.scaler is not None:
-            self.scaler.step(self.actor_optimizer)
+            self.scaler.step(optimizer)
             self.scaler.update()
         else:
             if not torch.isfinite(grad_norm):
                 print(f"WARN: rank {torch.distributed.get_rank()} grad_norm is not finite: {grad_norm}")
-                self.actor_optimizer.zero_grad()
+                optimizer.zero_grad()
             else:
-                self.actor_optimizer.step()
+                optimizer.step()
         return grad_norm
 
     @GPUMemoryLogger(role="dp actor", logger=logger)
@@ -409,10 +434,15 @@ class DataParallelPPOActor(BasePPOActor):
 
         # Combined mode: compute both RL and SFT losses at every step
         is_combined = sft_data is not None
+        # Parallel-avg: SFT and RL drive two independent optimizers; the per-step update is
+        # the average of the two resulting models. Under this mode, rl_loss_weight /
+        # sft_loss_weight are never consulted.
+        is_parallel_avg = is_combined and self.sft_optimizer is not None
         if is_combined:
-            rl_loss_weight  = self.config.get("rl_loss_weight",  1.0)
-            sft_loss_weight = self.config.get("sft_loss_weight", 1.0)
             sft_mini_batches = sft_data.split(self.config.ppo_mini_batch_size)
+        if is_combined and not is_parallel_avg:
+            rl_loss_weight = self.config.get("rl_loss_weight", 1.0)
+            sft_loss_weight = self.config.get("sft_loss_weight", 1.0)
 
         metrics = {}
 
@@ -443,6 +473,18 @@ class DataParallelPPOActor(BasePPOActor):
                     if is_combined:
                         sft_micro_batches = sft_mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
 
+                if is_parallel_avg:
+                    mini_batch_metrics = self._update_mini_batch_parallel_avg(
+                        micro_batches=micro_batches,
+                        sft_micro_batches=sft_micro_batches,
+                        temperature=temperature,
+                        on_policy=on_policy,
+                        is_sft=is_sft,
+                        metrics=metrics,
+                    )
+                    append_to_dict(metrics, mini_batch_metrics)
+                    continue
+
                 self.actor_optimizer.zero_grad()
 
                 sft_micro_batch_iter = iter(sft_micro_batches) if is_combined else None
@@ -452,99 +494,19 @@ class DataParallelPPOActor(BasePPOActor):
                     micro_batch_metrics = {}
                     model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
                     response_mask = model_inputs["response_mask"]
-                    old_log_prob = model_inputs["old_log_probs"]
-                    advantages = model_inputs["advantages"]
-
-                    entropy_coeff = self.config.entropy_coeff
-                    loss_agg_mode = self.config.loss_agg_mode
 
                     if self.config.use_dynamic_bsz:
                         loss_scale_factor = response_mask.shape[0] / self.config.ppo_mini_batch_size
                     else:
                         loss_scale_factor = 1 / self.gradient_accumulation
 
-                    # all return: (bsz, response_length)
-                    calculate_entropy = False
-                    if entropy_coeff != 0:
-                        calculate_entropy = True
-                    entropy, log_prob = self._forward_micro_batch(
-                        model_inputs, temperature=temperature, calculate_entropy=calculate_entropy
+                    policy_loss, pg_loss, micro_batch_metrics = self._compute_rl_micro_loss(
+                        model_inputs=model_inputs,
+                        temperature=temperature,
+                        on_policy=on_policy,
+                        is_sft=is_sft,
+                        loss_scale_factor=loss_scale_factor,
                     )
-
-                    # for fully_async_policy recipe
-                    if hasattr(self.config, "use_rollout_log_probs") and self.config.use_rollout_log_probs:
-                        old_log_prob = model_inputs["old_log_probs"]
-                    else:
-                        if on_policy:
-                            old_log_prob = log_prob.detach()
-                        else:
-                            old_log_prob = model_inputs["old_log_probs"]
-
-                    loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
-                    # vanilla -> verl.trainer.ppo.core_algos.compute_policy_loss_vanilla
-
-                    # Extract pre-computed rollout correction weights if present
-                    # Weights are computed centrally in trainer and added when algorithm.rollout_is=True
-                    rollout_is_weights = model_inputs.get("rollout_is_weights", None)
-
-                    # Check if this is an SFT step - if so, compute pure NLL instead of PPO loss
-                    # is_sft = model_inputs.get("is_sft", False)
-                    if is_sft:
-                        # SFT mode: compute standard NLL (negative log likelihood)
-                        nll_loss = agg_loss(loss_mat=-log_prob, loss_mask=response_mask, loss_agg_mode="token-sum")
-                        pg_loss = nll_loss
-                        pg_metrics = {"actor/nll_loss": nll_loss.detach().item()}
-                    else:
-                        # RL mode: normal PPO policy loss computation
-                        # gpg -> verl.trainer.ppo.core_algos.compute_policy_loss_gpg
-                        # clip_cov -> verl.trainer.ppo.core_algos.compute_policy_loss_clip_cov
-                        policy_loss_fn = get_policy_loss_fn(loss_mode)
-
-                        # Compute policy loss (any function is expected to return 2 values)
-                        pg_loss, pg_metrics = policy_loss_fn(
-                            old_log_prob=old_log_prob,
-                            log_prob=log_prob,
-                            advantages=advantages,
-                            response_mask=response_mask,
-                            loss_agg_mode=loss_agg_mode,
-                            config=self.config,
-                            rollout_is_weights=rollout_is_weights,
-                        )
-                    micro_batch_metrics.update(pg_metrics)
-
-                    # Skip if using pure rollout correction mode (metrics already in pg_metrics)
-                    rollout_log_prob = model_inputs.get("rollout_log_probs", None)
-                    if loss_mode != "rollout_correction" and rollout_log_prob is not None:
-                        # Compute metrics using CURRENT policy π_θ vs π_rollout
-                        # Tracks evolving off-policy gap as π_θ updates during mini-batch training
-                        from verl.trainer.ppo.rollout_corr_helper import compute_rollout_corr_metrics_from_logprobs
-
-                        rollout_corr_metrics = compute_rollout_corr_metrics_from_logprobs(
-                            log_prob=log_prob,
-                            rollout_log_prob=rollout_log_prob,
-                            response_mask=response_mask,
-                        )
-                        micro_batch_metrics.update(rollout_corr_metrics)
-
-                    if entropy_coeff != 0:
-                        entropy_loss = agg_loss(loss_mat=entropy, loss_mask=response_mask, loss_agg_mode="token-sum")
-
-                        # compute policy loss
-                        policy_loss = pg_loss - entropy_loss * entropy_coeff
-                    else:
-                        policy_loss = pg_loss
-
-                    if self.config.use_kl_loss:
-                        ref_log_prob = model_inputs["ref_log_prob"]
-                        # compute kl loss
-                        kld = kl_penalty(
-                            logprob=log_prob, ref_logprob=ref_log_prob, kl_penalty=self.config.kl_loss_type
-                        )
-                        kl_loss = agg_loss(loss_mat=kld, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
-
-                        policy_loss = policy_loss + kl_loss * self.config.kl_loss_coef
-                        micro_batch_metrics["actor/kl_loss"] = kl_loss.detach().item() * loss_scale_factor
-                        micro_batch_metrics["actor/kl_coef"] = self.config.kl_loss_coef
 
                     if is_combined:
                         # SFT NLL loss on the paired SFT micro-batch
@@ -572,13 +534,188 @@ class DataParallelPPOActor(BasePPOActor):
 
                 grad_norm = self._optimizer_step()
                 mini_batch_metrics = {"actor/grad_norm": grad_norm.detach().item()}
-                
+
                 append_to_dict(metrics, mini_batch_metrics)
         self.actor_optimizer.zero_grad()
-        
+        if self.sft_optimizer is not None:
+            self.sft_optimizer.zero_grad()
+
         # Restore original learning rate if it was adjusted for SFT
         if original_lrs is not None:
             for param_group, original_lr in zip(self.actor_optimizer.param_groups, original_lrs):
                 param_group['lr'] = original_lr
-        
+
         return metrics
+
+    def _compute_rl_micro_loss(self, model_inputs, temperature, on_policy, is_sft, loss_scale_factor):
+        """Forward + policy-loss (+ entropy + KL) on one RL micro-batch.
+
+        Returns (policy_loss, pg_loss, micro_batch_metrics). The caller adds rollout-correction
+        metrics and performs the backward pass.
+        """
+        response_mask = model_inputs["response_mask"]
+        advantages = model_inputs["advantages"]
+
+        entropy_coeff = self.config.entropy_coeff
+        loss_agg_mode = self.config.loss_agg_mode
+
+        calculate_entropy = entropy_coeff != 0
+        entropy, log_prob = self._forward_micro_batch(
+            model_inputs, temperature=temperature, calculate_entropy=calculate_entropy
+        )
+
+        if hasattr(self.config, "use_rollout_log_probs") and self.config.use_rollout_log_probs:
+            old_log_prob = model_inputs["old_log_probs"]
+        else:
+            if on_policy:
+                old_log_prob = log_prob.detach()
+            else:
+                old_log_prob = model_inputs["old_log_probs"]
+
+        loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
+        rollout_is_weights = model_inputs.get("rollout_is_weights", None)
+
+        micro_batch_metrics = {}
+        if is_sft:
+            nll_loss = agg_loss(loss_mat=-log_prob, loss_mask=response_mask, loss_agg_mode="token-sum")
+            pg_loss = nll_loss
+            pg_metrics = {"actor/nll_loss": nll_loss.detach().item()}
+        else:
+            policy_loss_fn = get_policy_loss_fn(loss_mode)
+            pg_loss, pg_metrics = policy_loss_fn(
+                old_log_prob=old_log_prob,
+                log_prob=log_prob,
+                advantages=advantages,
+                response_mask=response_mask,
+                loss_agg_mode=loss_agg_mode,
+                config=self.config,
+                rollout_is_weights=rollout_is_weights,
+            )
+        micro_batch_metrics.update(pg_metrics)
+
+        rollout_log_prob = model_inputs.get("rollout_log_probs", None)
+        if loss_mode != "rollout_correction" and rollout_log_prob is not None:
+            from verl.trainer.ppo.rollout_corr_helper import compute_rollout_corr_metrics_from_logprobs
+
+            rollout_corr_metrics = compute_rollout_corr_metrics_from_logprobs(
+                log_prob=log_prob,
+                rollout_log_prob=rollout_log_prob,
+                response_mask=response_mask,
+            )
+            micro_batch_metrics.update(rollout_corr_metrics)
+
+        if entropy_coeff != 0:
+            entropy_loss = agg_loss(loss_mat=entropy, loss_mask=response_mask, loss_agg_mode="token-sum")
+            policy_loss = pg_loss - entropy_loss * entropy_coeff
+        else:
+            policy_loss = pg_loss
+
+        if self.config.use_kl_loss:
+            ref_log_prob = model_inputs["ref_log_prob"]
+            kld = kl_penalty(logprob=log_prob, ref_logprob=ref_log_prob, kl_penalty=self.config.kl_loss_type)
+            kl_loss = agg_loss(loss_mat=kld, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+            policy_loss = policy_loss + kl_loss * self.config.kl_loss_coef
+            micro_batch_metrics["actor/kl_loss"] = kl_loss.detach().item() * loss_scale_factor
+            micro_batch_metrics["actor/kl_coef"] = self.config.kl_loss_coef
+
+        return policy_loss, pg_loss, micro_batch_metrics
+
+    def _update_mini_batch_parallel_avg(
+        self,
+        micro_batches,
+        sft_micro_batches,
+        temperature,
+        on_policy,
+        is_sft,
+        metrics,
+    ):
+        """Parallel-avg step over one paired (RL, SFT) mini-batch.
+
+        Procedure:
+          1. Snapshot θ.
+          2. RL phase: accumulate ∇L_rl across all RL micro-batches, step actor_optimizer.
+             Parameters are now θ_A = θ + LR_rl · Δθ_rl.
+          3. Snapshot θ_A, restore θ.
+          4. SFT phase: accumulate ∇L_sft across all SFT micro-batches, step sft_optimizer.
+             Parameters are now θ_B = θ + LR_sft · Δθ_sft.
+          5. In place: θ ← ½(θ_A + θ_B).
+        Each optimizer's (m, v) is updated only from its own gradient stream, so the adaptive
+        step sizes are calibrated independently.
+        """
+        trainable_params = [p for p in self.actor_module.parameters() if p.requires_grad]
+
+        # Step 1 — snapshot θ and zero both optimizers' grads
+        self.actor_optimizer.zero_grad(set_to_none=True)
+        self.sft_optimizer.zero_grad(set_to_none=True)
+        theta_snap = {id(p): p.data.detach().clone() for p in trainable_params}
+
+        # Step 2 — RL phase
+        for micro_batch in micro_batches:
+            micro_batch = micro_batch.to(get_device_id())
+            model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
+            response_mask = model_inputs["response_mask"]
+
+            if self.config.use_dynamic_bsz:
+                loss_scale_factor = response_mask.shape[0] / self.config.ppo_mini_batch_size
+            else:
+                loss_scale_factor = 1 / self.gradient_accumulation
+
+            policy_loss, pg_loss, micro_batch_metrics = self._compute_rl_micro_loss(
+                model_inputs=model_inputs,
+                temperature=temperature,
+                on_policy=on_policy,
+                is_sft=is_sft,
+                loss_scale_factor=loss_scale_factor,
+            )
+            (policy_loss * loss_scale_factor).backward()
+            micro_batch_metrics["actor/pg_loss"] = pg_loss.detach().item() * loss_scale_factor
+            append_to_dict(metrics, micro_batch_metrics)
+
+        grad_norm_rl = self._optimizer_step(self.actor_optimizer)
+        # params are now θ_A
+
+        # Step 3 — snapshot θ_A, restore θ
+        theta_A = {id(p): p.data.detach().clone() for p in trainable_params}
+        with torch.no_grad():
+            for p in trainable_params:
+                p.data.copy_(theta_snap[id(p)])
+        del theta_snap
+
+        # Step 4 — SFT phase: accumulate ∇L_sft and step sft_optimizer
+        self.actor_optimizer.zero_grad(set_to_none=True)
+        self.sft_optimizer.zero_grad(set_to_none=True)
+
+        for sft_micro_batch in sft_micro_batches:
+            sft_micro_batch = sft_micro_batch.to(get_device_id())
+            sft_model_inputs = {**sft_micro_batch.batch, **sft_micro_batch.non_tensor_batch}
+            sft_response_mask = sft_model_inputs["response_mask"]
+
+            if self.config.use_dynamic_bsz:
+                sft_loss_scale = sft_response_mask.shape[0] / self.config.ppo_mini_batch_size
+            else:
+                sft_loss_scale = 1 / max(1, len(sft_micro_batches))
+
+            _, sft_log_prob = self._forward_micro_batch(
+                sft_model_inputs, temperature=temperature, calculate_entropy=False
+            )
+            nll_loss = agg_loss(
+                loss_mat=-sft_log_prob,
+                loss_mask=sft_response_mask,
+                loss_agg_mode="token-sum",
+            )
+            (nll_loss * sft_loss_scale).backward()
+            append_to_dict(metrics, {"actor/sft_nll_loss": nll_loss.detach().item() * sft_loss_scale})
+
+        grad_norm_sft = self._optimizer_step(self.sft_optimizer)
+        # params are now θ_B = θ + LR_sft · Δθ_sft
+
+        # Step 5 — average θ_A and θ_B in place: p.data = ½(θ_B + θ_A)
+        with torch.no_grad():
+            for p in trainable_params:
+                p.data.add_(theta_A[id(p)]).mul_(0.5)
+        del theta_A
+
+        return {
+            "actor/grad_norm_rl": grad_norm_rl.detach().item(),
+            "actor/grad_norm_sft": grad_norm_sft.detach().item(),
+        }

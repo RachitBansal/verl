@@ -238,10 +238,16 @@ sft_config:
   # Number of PPO steps to do at a time before switching back to SFT
   num_ppo_steps: 5
 
-  # Training mode: "interleaved" (alternates SFT/RL steps) or "combined" (both losses every step)
+  # Training mode. One of:
+  #   interleaved  — alternate pure-SFT and pure-RL steps via is_sft flag
+  #   combined     — both losses every step, fused into one scalar, single optimizer
+  #   parallel_avg — both losses every step, two independent Adam optimizers (one per loss),
+  #                  per-step update is the average of the two resulting models. Requires
+  #                  actor_rollout_ref.actor.sft_optim to be set. Under this mode,
+  #                  rl_loss_weight / sft_loss_weight below are IGNORED.
   mode: interleaved
 
-  # Loss weights used in combined mode (ignored in interleaved mode)
+  # Loss weights used in `combined` mode (ignored in `interleaved` and `parallel_avg` modes)
   rl_loss_weight: 1.0
   sft_loss_weight: 1.0
 

@@ -40,3 +40,11 @@ entropy_checkpointing: False
 
 # Whether to remove padding tokens in inputs during training
 use_remove_padding: ${oc.select:actor_rollout_ref.model.use_remove_padding,false}
+
+# Second optimizer for the parallel_avg combined-training mode.
+# When left null (default), there is only one optimizer — behavior is unchanged from vanilla RL
+# or fused-combined mode. When set, a second AdamW with its own (m, v) state and its own
+# learning rate is built for the SFT side; the per-step parameter update becomes the average
+# of the two independent Adam updates ("average of two models").
+# Under parallel_avg, sft_config.rl_loss_weight / sft_config.sft_loss_weight are ignored.
+sft_optim: null

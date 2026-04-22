@@ -414,6 +414,13 @@ class RayPPOTrainer:
         self._sft_iter = None
         sft_config_check = self.config.get("sft_config", {})
         sft_data_override = self.config.get("sft_data", None)
+        if sft_config_check.get("mode", "") == "parallel_avg":
+            if sft_config_check.get("enabled", False) and self.config.actor_rollout_ref.actor.get("sft_optim", None) is None:
+                raise ValueError(
+                    "sft_config.mode=parallel_avg requires actor_rollout_ref.actor.sft_optim to be set "
+                    "(second optimizer for the SFT-side gradient stream). Set the optimizer block or "
+                    "switch mode to 'combined' / 'interleaved'."
+                )
         if (
             sft_config_check.get("enabled", False)
             and sft_data_override is not None
@@ -431,9 +438,10 @@ class RayPPOTrainer:
             )
             self.sft_dataset = sft_dataset
             sft_batch_size = sft_data_config.get("gen_batch_size", sft_data_config.train_batch_size)
-            if sft_config_check.get("mode", "") == "combined":
-                # In combined mode, SFT needs train_batch_size * rollout.n samples per step
-                # so the mini-batch count matches the RL batch (which is expanded by rollout.n).
+            if sft_config_check.get("mode", "") in ("combined", "parallel_avg"):
+                # In combined / parallel_avg modes, SFT needs train_batch_size * rollout.n
+                # samples per step so the mini-batch count matches the RL batch (which is
+                # expanded by rollout.n).
                 sft_batch_size = sft_batch_size * self.config.actor_rollout_ref.rollout.n
             self.sft_dataloader = StatefulDataLoader(
                 dataset=sft_dataset,
@@ -1068,7 +1076,11 @@ class RayPPOTrainer:
         sft_config = self.config.get("sft_config", {})
         sft_enabled = sft_config.get("enabled", False)
         sft_mode = sft_config.get("mode", "interleaved")
-        is_combined_mode = sft_enabled and (sft_mode == "combined")
+        # combined: fused weighted-sum loss, single optimizer.
+        # parallel_avg: two independent Adam optimizers; per-step update is the average of the two
+        # resulting models (actor.sft_optim must be set so the worker builds the second optimizer).
+        # Both share the same trainer data-routing: paired RL + SFT mini-batches each step.
+        is_combined_mode = sft_enabled and (sft_mode in ("combined", "parallel_avg"))
         num_sft_steps = sft_config.get("num_sft_steps", 2)
         num_ppo_steps = sft_config.get("num_ppo_steps", 5)
         rl_increment = sft_config.get("rl_increment", 0)

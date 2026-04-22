@@ -45,6 +45,8 @@ export WANDB_ENTITY="harvardml"
 LR_SCALE=${LR_SCALE:-1.0}
 NUM_SFT_STEPS=${NUM_SFT_STEPS:-10}
 NUM_PPO_STEPS=${NUM_PPO_STEPS:-10}
+SAVE_FREQ=${SAVE_FREQ:-500}
+TEST_FREQ=${TEST_FREQ:-250}
 
 source ${CONDA_ENV}
 
@@ -97,6 +99,6 @@ python3 -m verl.trainer.main_ppo \
     trainer.default_local_dir="${OUTPUT_DIR}/${MODEL_NAME}_step${STEP_NUM}_${EXP_SUFFIX}" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
-    trainer.save_freq=100 \
-    trainer.test_freq=50 \
+    trainer.save_freq=${SAVE_FREQ} \
+    trainer.test_freq=${TEST_FREQ} \
     trainer.total_epochs=100

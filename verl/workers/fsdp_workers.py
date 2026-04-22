@@ -540,41 +540,62 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         if role == "actor" and optim_config is not None:
             from verl.utils.torch_functional import get_constant_schedule_with_warmup, get_cosine_schedule_with_warmup
 
-            actor_optimizer = build_optimizer(actor_module_fsdp.parameters(), optim_config)
+            def _build_opt_and_sched(cfg):
+                opt = build_optimizer(actor_module_fsdp.parameters(), cfg)
+                total_steps = cfg.get("total_training_steps", 0)
+                nwarm = int(cfg.get("lr_warmup_steps", -1))
+                sched_type = cfg.get("lr_scheduler_type", "constant")
+                min_lr_r = cfg.get("min_lr_ratio", 0.0)
+                n_cycles = cfg.get("num_cycles", 0.5)
+                if nwarm < 0:
+                    nwarm = int(cfg.get("lr_warmup_steps_ratio", 0.0) * total_steps)
+                if sched_type == "constant":
+                    sched = get_constant_schedule_with_warmup(optimizer=opt, num_warmup_steps=nwarm)
+                elif sched_type == "cosine":
+                    sched = get_cosine_schedule_with_warmup(
+                        optimizer=opt,
+                        num_warmup_steps=nwarm,
+                        num_training_steps=total_steps,
+                        min_lr_ratio=min_lr_r,
+                        num_cycles=n_cycles,
+                    )
+                else:
+                    raise NotImplementedError(f"LR scheduler type {sched_type} is not supported")
+                return opt, sched, total_steps, nwarm
 
-            total_steps = optim_config.get("total_training_steps", 0)
-            num_warmup_steps = int(optim_config.get("lr_warmup_steps", -1))
-            lr_scheduler_type = optim_config.get("lr_scheduler_type", "constant")
-            min_lr_ratio = optim_config.get("min_lr_ratio", 0.0)
-            num_cycles = optim_config.get("num_cycles", 0.5)
-            if num_warmup_steps < 0:
-                num_warmup_steps_ratio = optim_config.get("lr_warmup_steps_ratio", 0.0)
-                num_warmup_steps = int(num_warmup_steps_ratio * total_steps)
+            actor_optimizer, actor_lr_scheduler, total_steps, num_warmup_steps = _build_opt_and_sched(optim_config)
 
             if self.rank == 0:
                 print(f"Total steps: {total_steps}, num_warmup_steps: {num_warmup_steps}")
 
-            if lr_scheduler_type == "constant":
-                actor_lr_scheduler = get_constant_schedule_with_warmup(
-                    optimizer=actor_optimizer, num_warmup_steps=num_warmup_steps
-                )
-            elif lr_scheduler_type == "cosine":
-                actor_lr_scheduler = get_cosine_schedule_with_warmup(
-                    optimizer=actor_optimizer,
-                    num_warmup_steps=num_warmup_steps,
-                    num_training_steps=total_steps,
-                    min_lr_ratio=min_lr_ratio,
-                    num_cycles=num_cycles,
-                )
-            else:
-                raise NotImplementedError(f"LR scheduler type {lr_scheduler_type} is not supported")
-
             log_gpu_memory_usage(f"After {role} optimizer init", logger=logger)
+
+            # Second optimizer for the parallel_avg combined-training mode. Built only when
+            # actor.sft_optim is provided in config. Wraps the same parameters as the primary
+            # optimizer but keeps its own (m, v) state.
+            sft_optim_config = self.config.actor.get("sft_optim", None)
+            if sft_optim_config is not None:
+                sft_actor_optimizer, sft_actor_lr_scheduler, _, _ = _build_opt_and_sched(sft_optim_config)
+                if self.rank == 0:
+                    print(f"[parallel_avg] Built SFT optimizer with lr={sft_optim_config.get('lr')}")
+                log_gpu_memory_usage(f"After {role} SFT optimizer init", logger=logger)
+            else:
+                sft_actor_optimizer = None
+                sft_actor_lr_scheduler = None
         else:
             actor_optimizer = None
             actor_lr_scheduler = None
+            sft_actor_optimizer = None
+            sft_actor_lr_scheduler = None
 
-        return actor_module_fsdp, actor_optimizer, actor_lr_scheduler, actor_model_config
+        return (
+            actor_module_fsdp,
+            actor_optimizer,
+            actor_lr_scheduler,
+            actor_model_config,
+            sft_actor_optimizer,
+            sft_actor_lr_scheduler,
+        )
 
     def _build_rollout(self, trust_remote_code=False):
         from torch.distributed.device_mesh import init_device_mesh
@@ -776,6 +797,8 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 self.actor_optimizer,
                 self.actor_lr_scheduler,
                 self.actor_model_config,
+                self.sft_actor_optimizer,
+                self.sft_actor_lr_scheduler,
             ) = self._build_model_optimizer(
                 model_path=local_path,
                 fsdp_config=fsdp_config,
@@ -800,12 +823,17 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
 
             if self._is_offload_optimizer:
                 offload_fsdp_optimizer(optimizer=self.actor_optimizer)
+                if self.sft_actor_optimizer is not None:
+                    offload_fsdp_optimizer(optimizer=self.sft_actor_optimizer)
                 log_gpu_memory_usage("After offload actor optimizer during init", logger=logger)
 
         if self._is_actor:
             actor_cfg = omega_conf_to_dataclass(self.config.actor)
             self.actor = DataParallelPPOActor(
-                config=actor_cfg, actor_module=self.actor_module_fsdp, actor_optimizer=self.actor_optimizer
+                config=actor_cfg,
+                actor_module=self.actor_module_fsdp,
+                actor_optimizer=self.actor_optimizer,
+                sft_optimizer=self.sft_actor_optimizer,
             )
 
         if self._is_rollout:
@@ -845,6 +873,8 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 lr_scheduler=self.actor_lr_scheduler,
                 processing_class=self.processor if self.processor is not None else self.tokenizer,
                 checkpoint_config=self.config.actor.checkpoint,
+                sft_optimizer=self.sft_actor_optimizer,
+                sft_lr_scheduler=self.sft_actor_lr_scheduler,
             )
 
         if not self._is_actor and self._is_rollout:
@@ -868,6 +898,8 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
             load_fsdp_model_to_gpu(self.actor_module_fsdp)
         if self._is_offload_optimizer:
             load_fsdp_optimizer(optimizer=self.actor_optimizer, device_id=get_device_id())
+            if self.sft_actor_optimizer is not None:
+                load_fsdp_optimizer(optimizer=self.sft_actor_optimizer, device_id=get_device_id())
 
         with self.ulysses_sharding_manager:
             data = data.to("cpu")  # data will to device with each micro batch on actor.update_policy
@@ -891,6 +923,11 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
             metrics["actor/lr"] = lr.item() if torch.is_tensor(lr) else lr
             self.actor_lr_scheduler.step()
 
+            if self.sft_actor_lr_scheduler is not None:
+                sft_lr = self.sft_actor_lr_scheduler.get_last_lr()[0]
+                metrics["actor/sft_lr"] = sft_lr.item() if torch.is_tensor(sft_lr) else sft_lr
+                self.sft_actor_lr_scheduler.step()
+
             # TODO: here, we should return all metrics
             output = DataProto(meta_info={"metrics": metrics})
 
@@ -901,6 +938,8 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
             log_gpu_memory_usage("After offload actor model during update_actor", logger=logger)
         if self._is_offload_optimizer:
             offload_fsdp_optimizer(optimizer=self.actor_optimizer)
+            if self.sft_actor_optimizer is not None:
+                offload_fsdp_optimizer(optimizer=self.sft_actor_optimizer)
             log_gpu_memory_usage("After offload actor optimizer during update_actor", logger=logger)
 
         return output
