@@ -228,6 +228,11 @@ class FSDPActorConfig(ActorConfig):
             parallel_avg combined-training mode. When set, a second AdamW with its own (m, v) state
             and its own learning rate is built for the SFT side; the parameter update is the average
             of the two resulting models. Leave as None for the default fused-combined or pure-RL paths.
+        sft_loss_agg_mode (str): Aggregation for the SFT NLL loss. Applies to the three SFT NLL sites
+            (pure-SFT/is_sft=True path, fused-combined SFT side, parallel_avg SFT side). Default
+            "token-sum" matches legacy behavior. Set to "token-mean" (or other values supported by
+            agg_loss) to rescale the SFT gradient stream — primarily useful in fused-combined mode,
+            where the shared Adam v otherwise gets dominated by token-sum's ~1e4 magnitudes.
     """
 
     strategy: str = "fsdp"
@@ -241,6 +246,7 @@ class FSDPActorConfig(ActorConfig):
     use_rollout_log_probs: bool = False
     sft_lr_scale: float = 1.0
     sft_optim: Optional[FSDPOptimizerConfig] = None
+    sft_loss_agg_mode: str = "token-sum"
 
     def __post_init__(self):
         """Validate FSDP actor configuration parameters."""

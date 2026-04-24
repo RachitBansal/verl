@@ -27,8 +27,8 @@ RL_DATA_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2_g
 TRAIN_FILE="${RL_DATA_DIR}/train_gsm8k.parquet"
 VAL_FILE="${RL_DATA_DIR}/val_gsm8k.parquet"
 
-# SFT dataset (pre-written ground-truth responses)
-SFT_DATA_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2_gsm8k_duplicated"
+# SFT dataset (pre-written ground-truth responses) — overridable via env
+SFT_DATA_DIR=${SFT_DATA_DIR:-"/n/netscratch/dam_lab/Everyone/rl_pretrain/data/openmathinstruct2_gsm8k_duplicated"}
 SFT_TRAIN_FILE="${SFT_DATA_DIR}/train_gsm8k.parquet"
 
 # Output directory for checkpoints
@@ -40,6 +40,15 @@ export WANDB_ENTITY="harvardml"
 LR_SCALE=${LR_SCALE:-1.0}
 RL_LOSS_WEIGHT=${RL_LOSS_WEIGHT:-1.0}   # weight on the RL loss term
 SFT_LOSS_WEIGHT=${SFT_LOSS_WEIGHT:-1.0} # weight on the SFT loss term
+RL_LR=${RL_LR:-4e-5}                    # base optim lr (RL side)
+SFT_LOSS_AGG_MODE=${SFT_LOSS_AGG_MODE:-token-sum}  # token-sum | token-mean
+# scale_batch_by_rollout_n: when False, SFT mini-batch = RL mini-batch / rollout.n
+SCALE_BATCH=${SCALE_BATCH:-True}
+if [[ "${SCALE_BATCH}" == "False" ]]; then
+    BATCH_TAG="_smbatch"
+else
+    BATCH_TAG=""
+fi
 
 source ${CONDA_ENV}
 
@@ -63,11 +72,12 @@ python3 -m verl.trainer.main_ppo \
     sft_config.mode=combined \
     sft_config.rl_loss_weight=${RL_LOSS_WEIGHT} \
     sft_config.sft_loss_weight=${SFT_LOSS_WEIGHT} \
+    sft_config.scale_batch_by_rollout_n=${SCALE_BATCH} \
     sft_data.train_files=${SFT_TRAIN_FILE} \
     sft_data.load_ground_truth=True \
     sft_data.response_field_name='generated_solution' \
     actor_rollout_ref.model.path=$OLMO_CHECKPOINT \
-    actor_rollout_ref.actor.optim.lr=4e-5 \
+    actor_rollout_ref.actor.optim.lr=${RL_LR} \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=512 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
@@ -75,6 +85,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.use_kl_loss=False \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.actor.loss_agg_mode=token-mean \
+    actor_rollout_ref.actor.sft_loss_agg_mode=${SFT_LOSS_AGG_MODE} \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
@@ -88,8 +99,8 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger='["console","wandb"]' \
     trainer.project_name='rl_pretrain' \
-    trainer.experiment_name="OLMo2-1B_step${STEP_NUM}_combined_twoloader_n32_rl${RL_LOSS_WEIGHT}_sft${SFT_LOSS_WEIGHT}_eos" \
-    trainer.default_local_dir="${OUTPUT_DIR}/OLMo2-1B_step${STEP_NUM}_combined_twoloader_n32_rl${RL_LOSS_WEIGHT}_sft${SFT_LOSS_WEIGHT}_eos" \
+    trainer.experiment_name="OLMo2-1B_step${STEP_NUM}_combined_twoloader_n32_rl${RL_LOSS_WEIGHT}_sft${SFT_LOSS_WEIGHT}_lr${RL_LR}_${SFT_LOSS_AGG_MODE}${BATCH_TAG}" \
+    trainer.default_local_dir="${OUTPUT_DIR}/OLMo2-1B_step${STEP_NUM}_combined_twoloader_n32_rl${RL_LOSS_WEIGHT}_sft${SFT_LOSS_WEIGHT}_lr${RL_LR}_${SFT_LOSS_AGG_MODE}${BATCH_TAG}" \
     trainer.n_gpus_per_node=${N_GPUS_PER_NODE} \
     trainer.nnodes=1 \
     trainer.save_freq=20 \

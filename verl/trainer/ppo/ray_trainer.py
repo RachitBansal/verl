@@ -439,10 +439,13 @@ class RayPPOTrainer:
             self.sft_dataset = sft_dataset
             sft_batch_size = sft_data_config.get("gen_batch_size", sft_data_config.train_batch_size)
             if sft_config_check.get("mode", "") in ("combined", "parallel_avg"):
-                # In combined / parallel_avg modes, SFT needs train_batch_size * rollout.n
-                # samples per step so the mini-batch count matches the RL batch (which is
-                # expanded by rollout.n).
-                sft_batch_size = sft_batch_size * self.config.actor_rollout_ref.rollout.n
+                # Legacy behavior: scale SFT batch to match RL's post-rollout sample count so both
+                # sides have same-sized mini-batches after split. When scale_batch_by_rollout_n=False,
+                # SFT emits train_batch_size unique samples per step; dp_actor splits the SFT
+                # mini-batch into rollout.n times smaller mini-batches to keep mini-batch counts
+                # aligned with RL's.
+                if sft_config_check.get("scale_batch_by_rollout_n", True):
+                    sft_batch_size = sft_batch_size * self.config.actor_rollout_ref.rollout.n
             self.sft_dataloader = StatefulDataLoader(
                 dataset=sft_dataset,
                 batch_size=sft_batch_size,
@@ -1437,6 +1440,12 @@ class RayPPOTrainer:
                             batch.meta_info["multi_turn"] = self.config.actor_rollout_ref.rollout.multi_turn.enable
                             if is_combined_mode:
                                 sft_gen_batch.meta_info["multi_turn"] = self.config.actor_rollout_ref.rollout.multi_turn.enable
+                                # Thread SFT<->RL loss weights from sft_config to the actor.
+                                # Applies only to the fused 'combined' mode; parallel_avg never reads
+                                # these (its contract is "two independent optimizers, no weighting").
+                                if sft_mode == "combined":
+                                    batch.meta_info["rl_loss_weight"] = sft_config.get("rl_loss_weight", 1.0)
+                                    batch.meta_info["sft_loss_weight"] = sft_config.get("sft_loss_weight", 1.0)
                                 actor_output = self.actor_rollout_wg.update_actor(batch, sft_data=sft_gen_batch)
                             else:
                                 actor_output = self.actor_rollout_wg.update_actor(batch)

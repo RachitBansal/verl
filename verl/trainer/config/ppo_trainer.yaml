@@ -251,6 +251,14 @@ sft_config:
   rl_loss_weight: 1.0
   sft_loss_weight: 1.0
 
+  # Under combined/parallel_avg, controls whether the SFT dataloader's batch size is scaled by
+  # rollout.n so that each step emits rollout.n * train_batch_size SFT samples (matching the post-
+  # rollout RL batch in count). When True (default = legacy behavior), the SFT mini-batches are the
+  # same size as the RL mini-batches. When False, the SFT dataloader emits train_batch_size unique
+  # samples per step (same unique-prompt count as RL), and SFT mini-batches become rollout.n times
+  # smaller than RL mini-batches. Mini-batch count is always matched to RL in dp_actor, regardless.
+  scale_batch_by_rollout_n: True
+
   # Whether SFT steps are on-policy (should always be True)
   on_policy: True
 

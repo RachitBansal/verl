@@ -48,3 +48,9 @@ use_remove_padding: ${oc.select:actor_rollout_ref.model.use_remove_padding,false
 # of the two independent Adam updates ("average of two models").
 # Under parallel_avg, sft_config.rl_loss_weight / sft_config.sft_loss_weight are ignored.
 sft_optim: null
+
+# Aggregation for the SFT NLL loss (pure-SFT / fused-combined / parallel_avg SFT sides).
+# Default "token-sum" matches legacy behavior. Switching to "token-mean" primarily helps in the
+# fused-combined mode, where otherwise the shared Adam v is dominated by SFT's ~1e4 magnitudes
+# and the RL direction gets drowned in v's denominator.
+sft_loss_agg_mode: token-sum

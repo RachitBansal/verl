@@ -438,11 +438,22 @@ class DataParallelPPOActor(BasePPOActor):
         # the average of the two resulting models. Under this mode, rl_loss_weight /
         # sft_loss_weight are never consulted.
         is_parallel_avg = is_combined and self.sft_optimizer is not None
+        sft_mini_batch_size = None
         if is_combined:
-            sft_mini_batches = sft_data.split(self.config.ppo_mini_batch_size)
+            # Split SFT into the SAME NUMBER of mini-batches as RL, so per-mini-batch optimizer
+            # steps see both RL and SFT contributions. Under legacy scale_batch_by_rollout_n=True
+            # this yields mini-batches of self.config.ppo_mini_batch_size on both sides (same as
+            # before). Under the new scale_batch_by_rollout_n=False, SFT mini-batches are
+            # rollout.n times smaller than RL mini-batches, but the count still matches.
+            num_mini_batches = max(1, len(mini_batches))
+            sft_mini_batch_size = max(1, len(sft_data) // num_mini_batches)
+            sft_mini_batches = sft_data.split(sft_mini_batch_size)
         if is_combined and not is_parallel_avg:
-            rl_loss_weight = self.config.get("rl_loss_weight", 1.0)
-            sft_loss_weight = self.config.get("sft_loss_weight", 1.0)
+            # Read loss weights from data.meta_info (threaded from ray_trainer's sft_config in
+            # combined mode only). parallel_avg never reads these — its contract is "two
+            # independent optimizers, no weighting".
+            rl_loss_weight = data.meta_info.get("rl_loss_weight", 1.0)
+            sft_loss_weight = data.meta_info.get("sft_loss_weight", 1.0)
 
         metrics = {}
 
@@ -477,6 +488,7 @@ class DataParallelPPOActor(BasePPOActor):
                     mini_batch_metrics = self._update_mini_batch_parallel_avg(
                         micro_batches=micro_batches,
                         sft_micro_batches=sft_micro_batches,
+                        sft_mini_batch_size=sft_mini_batch_size,
                         temperature=temperature,
                         on_policy=on_policy,
                         is_sft=is_sft,
@@ -485,52 +497,71 @@ class DataParallelPPOActor(BasePPOActor):
                     append_to_dict(metrics, mini_batch_metrics)
                     continue
 
+                # Fused-combined path (and pure-RL / pure-SFT paths): one optimizer, gradient
+                # accumulated linearly across both RL and SFT phases, one step per mini-batch.
+                # Decoupled into two for-loops so SFT and RL don't need matching micro-batch
+                # counts. Math unchanged vs. legacy paired-loop (gradients add under backward).
                 self.actor_optimizer.zero_grad()
 
-                sft_micro_batch_iter = iter(sft_micro_batches) if is_combined else None
+                # RL phase: accumulate ∇L_rl (scaled by rl_loss_weight in fused-combined)
                 for micro_batch in micro_batches:
-                    sft_micro_batch = next(sft_micro_batch_iter) if is_combined else None
                     micro_batch = micro_batch.to(get_device_id())
                     micro_batch_metrics = {}
                     model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
                     response_mask = model_inputs["response_mask"]
 
                     if self.config.use_dynamic_bsz:
-                        loss_scale_factor = response_mask.shape[0] / self.config.ppo_mini_batch_size
+                        rl_scale = response_mask.shape[0] / self.config.ppo_mini_batch_size
                     else:
-                        loss_scale_factor = 1 / self.gradient_accumulation
+                        rl_scale = 1 / self.gradient_accumulation
 
                     policy_loss, pg_loss, micro_batch_metrics = self._compute_rl_micro_loss(
                         model_inputs=model_inputs,
                         temperature=temperature,
                         on_policy=on_policy,
                         is_sft=is_sft,
-                        loss_scale_factor=loss_scale_factor,
+                        loss_scale_factor=rl_scale,
                     )
 
-                    if is_combined:
-                        # SFT NLL loss on the paired SFT micro-batch
-                        sft_micro_batch = sft_micro_batch.to(get_device_id())
-                        sft_model_inputs = {**sft_micro_batch.batch, **sft_micro_batch.non_tensor_batch}
-                        _, sft_log_prob = self._forward_micro_batch(
-                            sft_model_inputs, temperature=temperature, calculate_entropy=False
-                        )
-                        nll_loss = agg_loss(
-                            loss_mat=-sft_log_prob,
-                            loss_mask=sft_model_inputs["response_mask"],
-                            loss_agg_mode="token-sum",
-                        )
-                        loss = (rl_loss_weight * policy_loss + sft_loss_weight * nll_loss) * loss_scale_factor
-                        micro_batch_metrics["actor/sft_nll_loss"] = nll_loss.detach().item() * loss_scale_factor
-                    else:
-                        loss = policy_loss * loss_scale_factor
+                    rl_weight = rl_loss_weight if is_combined else 1.0
+                    loss = rl_weight * policy_loss * rl_scale
                     if self.scaler is not None:
                         self.scaler.scale(loss).backward()
                     else:
                         loss.backward()
 
-                    micro_batch_metrics["actor/pg_loss"] = pg_loss.detach().item() * loss_scale_factor
+                    micro_batch_metrics["actor/pg_loss"] = pg_loss.detach().item() * rl_scale
                     append_to_dict(metrics, micro_batch_metrics)
+
+                # SFT phase (fused-combined only): accumulate w_sft · ∇L_sft into the same .grad.
+                # Separate per-side scale so SFT mini-batches of a different size than RL still
+                # sum to a unit-weight gradient (Σ_m sft_scale_m = 1 over the SFT mini-batch).
+                if is_combined:
+                    sft_agg_mode = self.config.get("sft_loss_agg_mode", "token-sum")
+                    for sft_micro_batch in sft_micro_batches:
+                        sft_micro_batch = sft_micro_batch.to(get_device_id())
+                        sft_model_inputs = {**sft_micro_batch.batch, **sft_micro_batch.non_tensor_batch}
+                        sft_response_mask = sft_model_inputs["response_mask"]
+
+                        if self.config.use_dynamic_bsz:
+                            sft_scale = sft_response_mask.shape[0] / sft_mini_batch_size
+                        else:
+                            sft_scale = 1 / max(1, len(sft_micro_batches))
+
+                        _, sft_log_prob = self._forward_micro_batch(
+                            sft_model_inputs, temperature=temperature, calculate_entropy=False
+                        )
+                        nll_loss = agg_loss(
+                            loss_mat=-sft_log_prob,
+                            loss_mask=sft_response_mask,
+                            loss_agg_mode=sft_agg_mode,
+                        )
+                        loss = sft_loss_weight * nll_loss * sft_scale
+                        if self.scaler is not None:
+                            self.scaler.scale(loss).backward()
+                        else:
+                            loss.backward()
+                        append_to_dict(metrics, {"actor/sft_nll_loss": nll_loss.detach().item() * sft_scale})
 
                 grad_norm = self._optimizer_step()
                 mini_batch_metrics = {"actor/grad_norm": grad_norm.detach().item()}
@@ -577,7 +608,8 @@ class DataParallelPPOActor(BasePPOActor):
 
         micro_batch_metrics = {}
         if is_sft:
-            nll_loss = agg_loss(loss_mat=-log_prob, loss_mask=response_mask, loss_agg_mode="token-sum")
+            sft_agg_mode = self.config.get("sft_loss_agg_mode", "token-sum")
+            nll_loss = agg_loss(loss_mat=-log_prob, loss_mask=response_mask, loss_agg_mode=sft_agg_mode)
             pg_loss = nll_loss
             pg_metrics = {"actor/nll_loss": nll_loss.detach().item()}
         else:
@@ -624,6 +656,7 @@ class DataParallelPPOActor(BasePPOActor):
         self,
         micro_batches,
         sft_micro_batches,
+        sft_mini_batch_size,
         temperature,
         on_policy,
         is_sft,
@@ -685,13 +718,14 @@ class DataParallelPPOActor(BasePPOActor):
         self.actor_optimizer.zero_grad(set_to_none=True)
         self.sft_optimizer.zero_grad(set_to_none=True)
 
+        sft_agg_mode = self.config.get("sft_loss_agg_mode", "token-sum")
         for sft_micro_batch in sft_micro_batches:
             sft_micro_batch = sft_micro_batch.to(get_device_id())
             sft_model_inputs = {**sft_micro_batch.batch, **sft_micro_batch.non_tensor_batch}
             sft_response_mask = sft_model_inputs["response_mask"]
 
             if self.config.use_dynamic_bsz:
-                sft_loss_scale = sft_response_mask.shape[0] / self.config.ppo_mini_batch_size
+                sft_loss_scale = sft_response_mask.shape[0] / sft_mini_batch_size
             else:
                 sft_loss_scale = 1 / max(1, len(sft_micro_batches))
 
@@ -701,7 +735,7 @@ class DataParallelPPOActor(BasePPOActor):
             nll_loss = agg_loss(
                 loss_mat=-sft_log_prob,
                 loss_mask=sft_response_mask,
-                loss_agg_mode="token-sum",
+                loss_agg_mode=sft_agg_mode,
             )
             (nll_loss * sft_loss_scale).backward()
             append_to_dict(metrics, {"actor/sft_nll_loss": nll_loss.detach().item() * sft_loss_scale})

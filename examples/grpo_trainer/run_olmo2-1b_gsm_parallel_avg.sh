@@ -23,6 +23,13 @@ RL_LR=${RL_LR:-1e-6}
 SFT_LR=${SFT_LR:-4e-5}
 SAVE_FREQ=${SAVE_FREQ:-100}
 TEST_FREQ=${TEST_FREQ:-50}
+# scale_batch_by_rollout_n: when False, SFT mini-batch = RL mini-batch / rollout.n
+SCALE_BATCH=${SCALE_BATCH:-True}
+if [[ "${SCALE_BATCH}" == "False" ]]; then
+    BATCH_TAG="_smbatch"
+else
+    BATCH_TAG=""
+fi
 
 OLMO_CHECKPOINT=/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B/step${STEP_NUM}-hf
 
@@ -51,7 +58,7 @@ source ${CONDA_ENV}
 # Structural fields mirror the defaults in verl/trainer/config/optim/fsdp.yaml.
 SFT_OPTIM="{optimizer: AdamW, optimizer_impl: torch.optim, lr: ${SFT_LR}, weight_decay: 0.01, betas: [0.9, 0.999], lr_warmup_steps_ratio: 0.0, lr_warmup_steps: -1, total_training_steps: -1, clip_grad: 1.0, lr_scheduler_type: constant, min_lr_ratio: 0.0, num_cycles: 0.5, grad_clip: null, warmup_style: null, override_optimizer_config: null}"
 
-EXP_NAME="OLMo2-1B_step${STEP_NUM}_parallel_avg_n32_rl${RL_LR}_sft${SFT_LR}_TEST"
+EXP_NAME="OLMo2-1B_step${STEP_NUM}_parallel_avg_n32_rl${RL_LR}_sft${SFT_LR}${BATCH_TAG}"
 
 # ============================================================================
 # Training - Parallel-avg combined SFT+RL mode
@@ -70,6 +77,7 @@ python3 -m verl.trainer.main_ppo \
     sft_config.enabled=True \
     sft_config.load_ground_truth=True \
     sft_config.mode=parallel_avg \
+    sft_config.scale_batch_by_rollout_n=${SCALE_BATCH} \
     sft_data.train_files=${SFT_TRAIN_FILE} \
     sft_data.load_ground_truth=True \
     sft_data.response_field_name='generated_solution' \
