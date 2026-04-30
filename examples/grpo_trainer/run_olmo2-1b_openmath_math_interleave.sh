@@ -47,6 +47,7 @@ NUM_SFT_STEPS=${NUM_SFT_STEPS:-10}
 NUM_PPO_STEPS=${NUM_PPO_STEPS:-10}
 SAVE_FREQ=${SAVE_FREQ:-500}
 TEST_FREQ=${TEST_FREQ:-250}
+RL_LR=${RL_LR:-4e-5}
 
 source ${CONDA_ENV}
 
@@ -74,7 +75,7 @@ python3 -m verl.trainer.main_ppo \
     sft_data.load_ground_truth=True \
     sft_data.response_field_name='generated_solution' \
     actor_rollout_ref.model.path=$OLMO_CHECKPOINT \
-    actor_rollout_ref.actor.optim.lr=4e-5 \
+    actor_rollout_ref.actor.optim.lr=${RL_LR} \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=512 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
