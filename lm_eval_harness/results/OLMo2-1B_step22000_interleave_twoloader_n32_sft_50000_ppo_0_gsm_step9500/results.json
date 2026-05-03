@@ -1,0 +1,104 @@
+{
+  "run_name": "OLMo2-1B_step22000_interleave_twoloader_n32_sft_50000_ppo_0_gsm_step9500",
+  "results": {
+    "arc_challenge": {
+      "alias": "arc_challenge",
+      "acc,none": 0.263,
+      "acc_stderr,none": 0.013929286594259746,
+      "acc_norm,none": 0.292,
+      "acc_norm_stderr,none": 0.014385511563477347
+    },
+    "arc_easy": {
+      "alias": "arc_easy",
+      "acc,none": 0.507,
+      "acc_stderr,none": 0.015817749561843578,
+      "acc_norm,none": 0.485,
+      "acc_norm_stderr,none": 0.015812179641814902
+    },
+    "hellaswag": {
+      "alias": "hellaswag",
+      "acc,none": 0.342,
+      "acc_stderr,none": 0.01500870618212173,
+      "acc_norm,none": 0.405,
+      "acc_norm_stderr,none": 0.015531136990453047
+    },
+    "ifeval_lm": {
+      "alias": "ifeval_lm",
+      "word_perplexity,none": 1320.054083958723,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 3.5366853717621303,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 1.8223978806763117,
+      "bits_per_byte_stderr,none": "N/A"
+    },
+    "lambada_openai": {
+      "alias": "lambada_openai",
+      "perplexity,none": 148.76018089879705,
+      "perplexity_stderr,none": 23.61419438209036,
+      "acc,none": 0.311,
+      "acc_stderr,none": 0.014645596385722692
+    },
+    "openbookqa": {
+      "alias": "openbookqa",
+      "acc,none": 0.204,
+      "acc_stderr,none": 0.01803936910413866,
+      "acc_norm,none": 0.334,
+      "acc_norm_stderr,none": 0.02111349234774372
+    },
+    "piqa": {
+      "alias": "piqa",
+      "acc,none": 0.642,
+      "acc_stderr,none": 0.015167928865407557,
+      "acc_norm,none": 0.641,
+      "acc_norm_stderr,none": 0.015177264224798601
+    },
+    "squad_completion_lm": {
+      "alias": "squad_completion_lm",
+      "word_perplexity,none": 2239.9379345765765,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 3.4754536204400264,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 1.7972012924400371,
+      "bits_per_byte_stderr,none": "N/A"
+    },
+    "wikitext": {
+      "alias": "wikitext",
+      "word_perplexity,none": 129.3490755396747,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 2.4826202797968486,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 1.311863616187801,
+      "bits_per_byte_stderr,none": "N/A"
+    },
+    "winogrande": {
+      "alias": "winogrande",
+      "acc,none": 0.528,
+      "acc_stderr,none": 0.015794475789511476
+    }
+  },
+  "config": {
+    "model": "hf",
+    "model_args": {
+      "pretrained": "/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments/OLMo2-1B_step22000_interleave_twoloader_n32_sft_50000_ppo_0_gsm/hf_model/step9500",
+      "dtype": "bfloat16",
+      "max_length": 4096
+    },
+    "model_num_parameters": 1484916736,
+    "model_dtype": "torch.bfloat16",
+    "model_revision": "main",
+    "model_sha": "",
+    "batch_size": "auto",
+    "batch_sizes": [
+      64
+    ],
+    "device": "cuda:0",
+    "use_cache": null,
+    "limit": 1000.0,
+    "bootstrap_iters": 100000,
+    "gen_kwargs": {},
+    "random_seed": 0,
+    "numpy_seed": 1234,
+    "torch_seed": 1234,
+    "fewshot_seed": 1234
+  }
+}

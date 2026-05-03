@@ -70,10 +70,10 @@ while IFS= read -r -d '' checkpoint; do
     CHECKPOINT_NAMES+=("${experiment_name}")
     CHECKPOINT_STEPS+=("${checkpoint_step}")
     echo "  Found: ${experiment_name} (${checkpoint_step_dir}) -> ${checkpoint}"
-done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 3 -type d -path "${CHECKPOINT_BASE_DIR}/OLMo2-1B_step*_interleave_twoloader_n32_sft_50000_ppo_0_rmath/hf_model/step*" -print0 | sort -z)
+done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 3 -type d -path "${CHECKPOINT_BASE_DIR}/OLMo2-1B-60BMATH_step*_interleave_twoloader_n32_sft_50000_ppo_0_rmath/hf_model/step*" -not -path "*OLMo2-1B-60BMATH_step10000_interleave_twoloader_n32_sft_50000_ppo_0_rmath*" -print0 | sort -z)
 
 if [ ${#CHECKPOINT_PATHS[@]} -eq 0 ]; then
-    echo "ERROR: No checkpoints found"
+    echo "ERROR: No checkpoints found at ${CHECKPOINT_BASE_DIR}/OLMo2-1B-60BMATH_step*_interleave_twoloader_n32_sft_50000_ppo_0_rmath/hf_model/step* (excluding step10000 experiment)"
     exit 1
 fi
 

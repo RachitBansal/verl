@@ -30,35 +30,68 @@
     },
     "hellaswag": {
       "alias": "hellaswag",
-      "acc,none": 0.368,
-      "acc_stderr,none": 0.021588982568353544,
-      "acc_norm,none": 0.41,
-      "acc_norm_stderr,none": 0.022017482578127683
+      "acc,none": 0.348,
+      "acc_stderr,none": 0.01507060460376841,
+      "acc_norm,none": 0.403,
+      "acc_norm_stderr,none": 0.015518757419066533
     },
     "lambada_openai": {
       "alias": "lambada_openai",
-      "perplexity,none": 62.58761298033048,
-      "perplexity_stderr,none": 24.983042306886077,
-      "acc,none": 0.25,
-      "acc_stderr,none": 0.04351941398892446
+      "perplexity,none": 76.2809673266845,
+      "perplexity_stderr,none": 8.393677726595959,
+      "acc,none": 0.259,
+      "acc_stderr,none": 0.013860415257527911
     },
     "squad_completion_lm": {
       "alias": "squad_completion_lm",
-      "word_perplexity,none": 1099.2473005971106,
+      "word_perplexity,none": 1183.8646135858844,
       "word_perplexity_stderr,none": "N/A",
-      "byte_perplexity,none": 3.2798671151973045,
+      "byte_perplexity,none": 3.135385399065785,
       "byte_perplexity_stderr,none": "N/A",
-      "bits_per_byte,none": 1.713637364803894,
+      "bits_per_byte,none": 1.6486427888477975,
       "bits_per_byte_stderr,none": "N/A"
     },
     "ifeval_lm": {
       "alias": "ifeval_lm",
-      "word_perplexity,none": 199.95776421675103,
+      "word_perplexity,none": 190.8847939988416,
       "word_perplexity_stderr,none": "N/A",
-      "byte_perplexity,none": 2.545061268051776,
+      "byte_perplexity,none": 2.5174274875733373,
       "byte_perplexity_stderr,none": "N/A",
-      "bits_per_byte,none": 1.347700387165615,
+      "bits_per_byte,none": 1.3319502231873788,
       "bits_per_byte_stderr,none": "N/A"
+    },
+    "arc_challenge": {
+      "alias": "arc_challenge",
+      "acc,none": 0.265,
+      "acc_stderr,none": 0.013963164754809953,
+      "acc_norm,none": 0.278,
+      "acc_norm_stderr,none": 0.014174516461485258
+    },
+    "arc_easy": {
+      "alias": "arc_easy",
+      "acc,none": 0.5,
+      "acc_stderr,none": 0.015819299929208316,
+      "acc_norm,none": 0.472,
+      "acc_norm_stderr,none": 0.015794475789511476
+    },
+    "openbookqa": {
+      "alias": "openbookqa",
+      "acc,none": 0.2,
+      "acc_stderr,none": 0.01790645924143385,
+      "acc_norm,none": 0.27,
+      "acc_norm_stderr,none": 0.01987435483128749
+    },
+    "piqa": {
+      "alias": "piqa",
+      "acc,none": 0.636,
+      "acc_stderr,none": 0.01522286884052202,
+      "acc_norm,none": 0.628,
+      "acc_norm_stderr,none": 0.015292149942040577
+    },
+    "winogrande": {
+      "alias": "winogrande",
+      "acc,none": 0.525,
+      "acc_stderr,none": 0.01579951342999602
     }
   },
   "config": {
@@ -78,7 +111,7 @@
     ],
     "device": "cuda:0",
     "use_cache": null,
-    "limit": 500.0,
+    "limit": 1000.0,
     "bootstrap_iters": 100000,
     "gen_kwargs": {},
     "random_seed": 0,

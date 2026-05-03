@@ -44,6 +44,11 @@ DATASET_KEY = "test_score/openai/gsm8k"
 TASKS = {
     "lambada_acc":         ("lambada_openai",      "acc,none",           "LAMBADA Accuracy",       "higher"),
     "hellaswag":           ("hellaswag",           "acc_norm,none",      "HellaSwag Acc (norm)",   "higher"),
+    "arc_easy":            ("arc_easy",            "acc_norm,none",      "ARC-Easy Acc (norm)",    "higher"),
+    "arc_challenge":       ("arc_challenge",       "acc_norm,none",      "ARC-Challenge Acc (norm)", "higher"),
+    "piqa":                ("piqa",                "acc_norm,none",      "PIQA Acc (norm)",        "higher"),
+    "winogrande":          ("winogrande",          "acc,none",           "WinoGrande Acc",         "higher"),
+    "openbookqa":          ("openbookqa",          "acc_norm,none",      "OpenBookQA Acc (norm)",  "higher"),
     "wikitext":            ("wikitext",            "bits_per_byte,none", "WikiText BPB",          "lower"),
     "lambada_ppl":         ("lambada_openai",      "perplexity,none",    "LAMBADA Perplexity",     "lower"),
     "squad_completion_lm": ("squad_completion_lm", "bits_per_byte,none", "SQuAD-Completion BPB",   "lower"),
@@ -53,7 +58,8 @@ TASK_KEYS = list(TASKS.keys())
 LOG_Y_TASKS = {"lambada_ppl"}  # log y-axis for perplexity panels
 
 # Tasks used in the tradeoff scatter (same order — acc first, then lower-is-better)
-TRADEOFF_TASKS = ["lambada_acc", "hellaswag", "wikitext", "lambada_ppl", "squad_completion_lm", "ifeval_lm"]
+TRADEOFF_TASKS = ["lambada_acc", "hellaswag", "arc_easy", "arc_challenge", "piqa", "winogrande",
+                  "openbookqa", "wikitext", "lambada_ppl", "squad_completion_lm", "ifeval_lm"]
 
 
 # ─── Parsers ──────────────────────────────────────────────────────────────────
@@ -61,6 +67,10 @@ TRADEOFF_TASKS = ["lambada_acc", "hellaswag", "wikitext", "lambada_ppl", "squad_
 RE_BASE = re.compile(r"^OLMo2-1B-stage1-50B_step(?P<step>\d+)-hf$")
 RE_SFT = re.compile(
     r"^OLMo2-1B_step(?P<step>\d+)_interleave_twoloader_n\d+_sft_\d+_ppo_\d+_rgsm_step(?P<sft_step>\d+)$"
+)
+# Same pattern as SFT (rgsm) but trained with `gsm` data instead of `rgsm`.
+RE_SFT_GSM = re.compile(
+    r"^OLMo2-1B_step(?P<step>\d+)_interleave_twoloader_n\d+_sft_\d+_ppo_\d+_gsm_step(?P<sft_step>\d+)$"
 )
 # RL from SFT-ed base: `stepN_sfted` OR `stepNsfted`
 RE_RL_SFT = re.compile(
@@ -73,11 +83,11 @@ RE_RL_BASE = re.compile(
 
 
 def load_nonmath_results():
-    """Return dicts: base[step], sft[step], rl_base[step], rl_sft[step].
+    """Return dicts: base[step], sft[step], sft_gsm[step], rl_base[step], rl_sft[step].
 
     Each value is {task: metric_value}. For RL groups we average across seeds.
     """
-    base, sft = {}, {}
+    base, sft, sft_gsm = {}, {}, {}
     rl_base_raw, rl_sft_raw = defaultdict(list), defaultdict(list)
 
     for f in sorted(LM_EVAL_RESULTS_DIR.glob("*/results.json")):
@@ -95,6 +105,10 @@ def load_nonmath_results():
         m = RE_SFT.match(name)
         if m:
             sft[int(m.group("step"))] = row
+            continue
+        m = RE_SFT_GSM.match(name)
+        if m:
+            sft_gsm[int(m.group("step"))] = row
             continue
         m = RE_RL_SFT.match(name)  # check sfted first (more specific)
         if m:
@@ -114,7 +128,7 @@ def load_nonmath_results():
             }
         return out
 
-    return base, sft, avg(rl_base_raw), avg(rl_sft_raw)
+    return base, sft, sft_gsm, avg(rl_base_raw), avg(rl_sft_raw)
 
 
 # ─── GSM accuracy loading ─────────────────────────────────────────────────────
@@ -256,11 +270,13 @@ plt.rcParams.update({
 
 C_BASE = "#777777"
 C_SFT = "#009E73"
+C_SFT_GSM = "#FFB000"  # amber/orange to distinguish from green SFT-rgsm
 C_RL_BASE = "#E24A33"
 C_RL_SFT = "#9467BD"
 
 STYLE_BASE = dict(color=C_BASE, marker="o", ls=":", ms=8, lw=2.0, label=r"Base $\mathcal{M}_t$")
-STYLE_SFT = dict(color=C_SFT, marker="d", ls="-.", ms=9, lw=2.0, label=r"SFT $\mathcal{M}_t^{\text{SFT}}$")
+STYLE_SFT = dict(color=C_SFT, marker="d", ls="-.", ms=9, lw=2.0, label=r"SFT-rgsm $\mathcal{M}_t^{\text{SFT-r}}$")
+STYLE_SFT_GSM = dict(color=C_SFT_GSM, marker="^", ls="-.", ms=9, lw=2.0, label=r"SFT-gsm $\mathcal{M}_t^{\text{SFT-g}}$")
 STYLE_RL_BASE = dict(color=C_RL_BASE, marker="*", ls="-", ms=14, lw=2.5, label=r"RL-from-base $\mathcal{M}_t^{\text{RL}}$")
 STYLE_RL_SFT = dict(color=C_RL_SFT, marker="s", ls="--", ms=8, lw=2.0, label=r"RL-from-SFT $\mathcal{M}_t^{\text{SFT}\to\text{RL}}$")
 
@@ -287,10 +303,10 @@ formatter = FuncFormatter(dual_axis_formatter)
 
 # ─── Load data ────────────────────────────────────────────────────────────────
 
-base, sft, rl_base, rl_sft = load_nonmath_results()
+base, sft, sft_gsm, rl_base, rl_sft = load_nonmath_results()
 base_acc, sft_acc, rl_base_acc, rl_sft_acc = load_gsm_accuracy()
 
-all_steps = sorted(set(base) | set(sft) | set(rl_base) | set(rl_sft))
+all_steps = sorted(set(base) | set(sft) | set(sft_gsm) | set(rl_base) | set(rl_sft))
 
 print("=" * 110)
 print("Non-math task values (averaged across seeds for RL)")
@@ -299,7 +315,7 @@ header = f"{'step':>7}  {'group':<12}  " + "  ".join(f"{t:<10}" for t in TASK_KE
 print(header)
 print("-" * len(header))
 for step in all_steps:
-    for label, d in [("base", base), ("SFT", sft), ("RL-base", rl_base), ("RL-sft", rl_sft)]:
+    for label, d in [("base", base), ("SFT-rgsm", sft), ("SFT-gsm", sft_gsm), ("RL-base", rl_base), ("RL-sft", rl_sft)]:
         if step in d:
             vals = "  ".join(
                 ("%10.4f" % d[step][t]) if d[step][t] is not None else "        --"
@@ -331,7 +347,10 @@ def plot_line(ax, d, style):
     ax.plot(xs, ys, **style)
 
 
-fig1, axes = plt.subplots(2, 3, figsize=(18, 10))
+N1 = len(TASK_KEYS)
+NCOL1 = 4
+NROW1 = (N1 + NCOL1 - 1) // NCOL1
+fig1, axes = plt.subplots(NROW1, NCOL1, figsize=(6 * NCOL1, 4.5 * NROW1))
 axes = axes.ravel()
 
 for i, task in enumerate(TASK_KEYS):
@@ -339,6 +358,7 @@ for i, task in enumerate(TASK_KEYS):
     _, _, title, direction = TASKS[task]
     plot_line(ax, base, STYLE_BASE)
     plot_line(ax, sft, STYLE_SFT)
+    plot_line(ax, sft_gsm, STYLE_SFT_GSM)
     plot_line(ax, rl_base, STYLE_RL_BASE)
     plot_line(ax, rl_sft, STYLE_RL_SFT)
     arrow = "↓ better" if direction == "lower" else "↑ better"
@@ -352,7 +372,11 @@ for i, task in enumerate(TASK_KEYS):
         spine.set_edgecolor("black")
         spine.set_linewidth(1.0)
 
-# Legend below figure (all 6 panels used)
+# Hide unused panels
+for ax in axes[N1:]:
+    ax.set_visible(False)
+
+# Legend below figure
 handles, labels = axes[0].get_legend_handles_labels()
 fig1.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, -0.04),
             ncol=len(handles), frameon=True, fontsize=13)
@@ -371,10 +395,13 @@ print(f"\nSaved absolute curves -> {out1}")
 # ═══════════════════════════════════════════════════════════════════════════════
 
 rows = []
+# SFT-gsm has no GSM accuracy data (no GSM math eval run on these ckpts yet),
+# so it appears as no-acc entries — drawn at acc_gain=None on the scatter.
 groups = [
-    ("SFT",     sft,     sft_acc,     C_SFT,     "d"),
-    ("RL-base", rl_base, rl_base_acc, C_RL_BASE, "*"),
-    ("RL-sft",  rl_sft,  rl_sft_acc,  C_RL_SFT,  "s"),
+    ("SFT-rgsm", sft,     sft_acc,     C_SFT,     "d"),
+    ("SFT-gsm",  sft_gsm, {},          C_SFT_GSM, "^"),
+    ("RL-base",  rl_base, rl_base_acc, C_RL_BASE, "*"),
+    ("RL-sft",   rl_sft,  rl_sft_acc,  C_RL_SFT,  "s"),
 ]
 for label, bpb_d, acc_d, color, marker in groups:
     for step in bpb_d:
@@ -397,7 +424,10 @@ for label, bpb_d, acc_d, color, marker in groups:
             })
 df = pd.DataFrame(rows)
 
-fig2, axes2 = plt.subplots(2, 3, figsize=(20, 10))
+N2 = len(TRADEOFF_TASKS)
+NCOL2 = 4
+NROW2 = (N2 + NCOL2 - 1) // NCOL2
+fig2, axes2 = plt.subplots(NROW2, NCOL2, figsize=(6 * NCOL2, 4.5 * NROW2))
 axes2 = axes2.ravel()
 for i, task in enumerate(TRADEOFF_TASKS):
     ax = axes2[i]
@@ -464,5 +494,56 @@ plt.subplots_adjust(bottom=0.12)
 out2 = Path(__file__).parent / "regression_tradeoff.pdf"
 fig2.savefig(out2, bbox_inches="tight")
 print(f"Saved tradeoff scatter -> {out2}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FIGURE 3: Condensed version for the main paper
+# ═══════════════════════════════════════════════════════════════════════════════
+
+CONDENSED_TASKS = ["lambada_acc", "hellaswag", "arc_easy", "piqa", "openbookqa"]
+CONDENSED_TITLE_OVERRIDES = {"lambada_acc": "LAMBADA Acc"}
+
+
+def token_only_formatter(num, pos):
+    tok, mag = num, 0
+    while abs(tok) >= 1000:
+        mag += 1
+        tok /= 1000.0
+    return "%.0f%s" % (tok, ["", "K", "M", "B", "T"][mag])
+
+
+formatter_tokens_only = FuncFormatter(token_only_formatter)
+
+N3 = len(CONDENSED_TASKS)
+fig3, axes3 = plt.subplots(1, N3, figsize=(4.5 * N3, 4))
+axes3 = np.atleast_1d(axes3).ravel()
+
+for i, task in enumerate(CONDENSED_TASKS):
+    ax = axes3[i]
+    _, _, title, _ = TASKS[task]
+    title = CONDENSED_TITLE_OVERRIDES.get(task, title)
+    plot_line(ax, base, STYLE_BASE)
+    plot_line(ax, sft_gsm, STYLE_SFT_GSM)
+    plot_line(ax, sft, STYLE_SFT)
+    plot_line(ax, rl_base, STYLE_RL_BASE)
+    ax.set_title(title, pad=10, fontsize=18)
+    ax.set_xlabel("Pre-training tokens", fontsize=16)
+    ax.xaxis.set_major_formatter(formatter_tokens_only)
+    ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=3))
+    ax.tick_params(axis="both", labelsize=15)
+    ax.grid(True, linestyle=":", color="gray", alpha=0.7)
+    for spine in ax.spines.values():
+        spine.set_edgecolor("black")
+        spine.set_linewidth(1.0)
+
+handles, labels = axes3[0].get_legend_handles_labels()
+fig3.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, -0.06),
+            ncol=len(handles), frameon=True, fontsize=16)
+
+plt.tight_layout()
+plt.subplots_adjust(bottom=0.22)
+out3 = Path(__file__).parent / "regression_main.pdf"
+fig3.savefig(out3, bbox_inches="tight")
+print(f"Saved condensed main-paper figure -> {out3}")
 
 plt.show()

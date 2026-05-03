@@ -16,6 +16,7 @@ import argparse
 import json
 import subprocess
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 import yaml
@@ -138,10 +139,17 @@ def main():
 
     limit = 5 if args.quick else args.limit
 
+    # Batch tasks sharing the same num_fewshot into one lm_eval call so the
+    # model loads once per group instead of once per task.
+    groups = defaultdict(list)
     for task, num_fewshot in tasks:
-        rc = run_lm_eval(model_args, task, num_fewshot, limit, output_path, args.batch_size)
+        groups[num_fewshot].append(task)
+
+    for num_fewshot, task_list in groups.items():
+        task_arg = ",".join(task_list)
+        rc = run_lm_eval(model_args, task_arg, num_fewshot, limit, output_path, args.batch_size)
         if rc != 0:
-            print(f"ERROR: {task} failed with return code {rc}")
+            print(f"ERROR: tasks {task_arg} failed with return code {rc}")
             sys.exit(rc)
 
     consolidate_results(output_path, run_name)
