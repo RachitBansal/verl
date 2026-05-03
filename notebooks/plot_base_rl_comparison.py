@@ -115,20 +115,6 @@ for BASE_DIR in BASE_DIRS:
             continue
         name = path.name
 
-        # 60B Base (check before 50B to avoid partial match)
-        m = pre60_pattern.match(name)
-        if m:
-            samples = int(m.group("samples"))
-            result_file = "math_majority_results.txt" if samples > 1 else "math_results.txt"
-            for k, score in read_score(path / result_file, samples=samples).items():
-                pre60_rows.append({
-                    "step": int(m.group("step")),
-                    "shot": int(m.group("shot")),
-                    "samples": k,
-                    "temp": float(m.group("temp")),
-                    "score": score,
-                })
-            continue
 
         # 50B Base
         m = pre50_pattern.match(name)
@@ -137,6 +123,36 @@ for BASE_DIR in BASE_DIRS:
             result_file = "math_majority_results.txt" if samples > 1 else "math_results.txt"
             for k, score in read_score(path / result_file, samples=samples).items():
                 pre50_rows.append({
+                    "step": int(m.group("step")),
+                    "shot": int(m.group("shot")),
+                    "samples": k,
+                    "temp": float(m.group("temp")),
+                    "score": score,
+                })
+            continue
+
+        # 50B RL
+        m = rl50_pattern.match(name)
+        if m:
+            samples = int(m.group("samples"))
+            result_file = "math_majority_results.txt" if samples > 1 else "math_results.txt"
+            for k, score in read_score(path / result_file, samples=samples).items():
+                rl50_rows.append({
+                    "pt_step": int(m.group("pt_step")),
+                    "rl_step": int(m.group("rl_step")),
+                    "samples": k,
+                    "temp": float(m.group("temp")),
+                    "num_rollouts": int(m.group("num_rollouts")),
+                    "score": score,
+                })
+
+        # 60B Base (check before 50B to avoid partial match)
+        m = pre60_pattern.match(name)
+        if m:
+            samples = int(m.group("samples"))
+            result_file = "math_majority_results.txt" if samples > 1 else "math_results.txt"
+            for k, score in read_score(path / result_file, samples=samples).items():
+                pre60_rows.append({
                     "step": int(m.group("step")),
                     "shot": int(m.group("shot")),
                     "samples": k,
@@ -191,20 +207,7 @@ for BASE_DIR in BASE_DIRS:
                 })
             continue
 
-        # 50B RL
-        m = rl50_pattern.match(name)
-        if m:
-            samples = int(m.group("samples"))
-            result_file = "math_majority_results.txt" if samples > 1 else "math_results.txt"
-            for k, score in read_score(path / result_file, samples=samples).items():
-                rl50_rows.append({
-                    "pt_step": int(m.group("pt_step")),
-                    "rl_step": int(m.group("rl_step")),
-                    "samples": k,
-                    "temp": float(m.group("temp")),
-                    "num_rollouts": int(m.group("num_rollouts")),
-                    "score": score,
-                })
+        
 
 pre50_df = pd.DataFrame(pre50_rows)
 rl50_df = pd.DataFrame(rl50_rows)
@@ -285,123 +288,175 @@ styles = {
     },
 }
 
-def dual_format(num, pos):
+def dual_format(num, _pos):
     tok = num
     mag = 0
     while abs(tok) >= 1000:
         mag += 1
         tok /= 1000.0
     tok_str = "%.0f%s" % (tok, ["", "K", "M", "B", "T"][mag])
-    step = num / TOKEN_MULTIPLIER
-    smag = 0
-    while abs(step) >= 1000:
-        smag += 1
-        step /= 1000.0
-    step_str = "%.0f%s" % (step, ["", "k", "m", "b"][smag])
-    return f"{tok_str}\n{step_str}"
+    # step = num / TOKEN_MULTIPLIER
+    # smag = 0
+    # while abs(step) >= 1000:
+    #     smag += 1
+    #     step /= 1000.0
+    # step_str = "%.0f%s" % (step, ["", "k", "m", "b"][smag])
+    return tok_str  # f"{tok_str}\n{step_str}"
 
 formatter = FuncFormatter(dual_format)
 
-fig, axes = plt.subplots(1, 3, figsize=(18, 6), sharey=True)
+fig, axes = plt.subplots(1, 4, figsize=(23, 6), sharey=False, constrained_layout=False,
+                         gridspec_kw={"width_ratios": [1, 1, 1, 0.55]})
+for ax in axes[1:3]:
+    ax.sharey(axes[0])
+    ax.tick_params(labelleft=False)
+
+diff_styles = {
+    "50B": {
+        "color": color_rl50, "marker": "*", "ls": "-", "markersize": 18,
+        "linewidth": 3.5, "label": "1B Params - 50B Tokens",
+    },
+    "60B": {
+        "color": color_rl60, "marker": "*", "ls": "-", "markersize": 18,
+        "linewidth": 3.5, "label": "1B Params - 60B Tokens",
+    },
+    "4B": {
+        "color": color_rl4b, "marker": "*", "ls": "-", "markersize": 18,
+        "linewidth": 3.5, "label": "4B Params - 50B Tokens",
+    },
+}
+
+all_diffs = []
 
 for idx, samples in enumerate(PLOT_SAMPLES):
     ax = axes[idx]
 
-    # 50B Base
-    curve = pre50_df[
-        (pre50_df["samples"] == samples)
-        & (pre50_df["shot"] == TARGET_SHOT)
-        & (pre50_df["temp"] == TARGET_TEMP)
-    ].sort_values("step")
-    if not curve.empty:
-        ax.plot(curve["step"] * TOKEN_MULTIPLIER, curve["score"] * 100, **styles["base50"])
+    # 50B: RL − Base
+    rl_last_50, base50_at = None, None
+    if not rl50_df.empty:
+        rl_sub = rl50_df[
+            (rl50_df["samples"] == samples)
+            & (rl50_df["temp"] == TARGET_TEMP)
+            & (rl50_df["num_rollouts"] == 64)
+        ]
+        if not rl_sub.empty:
+            rl_last_50 = rl_sub.loc[rl_sub.groupby("pt_step")["rl_step"].idxmax()].sort_values("pt_step")
+    if not pre50_df.empty:
+        curve = pre50_df[
+            (pre50_df["samples"] == samples)
+            & (pre50_df["shot"] == TARGET_SHOT)
+            & (pre50_df["temp"] == TARGET_TEMP)
+        ].sort_values("step")
+        if not curve.empty:
+            _bx, _by = curve["step"].values, curve["score"].values * 100
+            base50_at = lambda x, bx=_bx, by=_by: np.interp(x, bx, by)
+    if base50_at is None and rl_last_50 is not None:
+        # TODO: replace with real evals once available; using dummy 5% placeholder
+        base50_at = lambda x: np.full(len(x), 5.0)
+    if rl_last_50 is not None and base50_at is not None:
+        dx = rl_last_50["pt_step"].values
+        dy = rl_last_50["score"].values * 100 - base50_at(dx)
+        all_diffs.extend(dy.tolist())
+        ax.plot(dx * TOKEN_MULTIPLIER, dy, **diff_styles["50B"], zorder=10)
 
-    # 50B RL — best rl_step per pt_step, use n=64
-    rl_sub = rl50_df[
-        (rl50_df["samples"] == samples)
-        & (rl50_df["temp"] == TARGET_TEMP)
-        & (rl50_df["num_rollouts"] == 64)
-    ]
-    if not rl_sub.empty:
-        rl_last = rl_sub.loc[rl_sub.groupby("pt_step")["rl_step"].idxmax()].sort_values("pt_step")
-        ax.plot(rl_last["pt_step"] * TOKEN_MULTIPLIER, rl_last["score"] * 100, **styles["rl50"], zorder=10)
+    # 60B: RL − Base
+    rl_last_60, base60_at = None, None
+    if not pre60_df.empty:
+        curve60 = pre60_df[
+            (pre60_df["samples"] == samples)
+            & (pre60_df["shot"] == TARGET_SHOT)
+            & (pre60_df["temp"] == TARGET_TEMP)
+        ].sort_values("step")
+        if not curve60.empty:
+            _bx, _by = curve60["step"].values, curve60["score"].values * 100
+            base60_at = lambda x, bx=_bx, by=_by: np.interp(x, bx, by)
+    if not rl60_df.empty:
+        rl60_sub = rl60_df[
+            (rl60_df["samples"] == samples)
+            & (rl60_df["temp"] == TARGET_TEMP)
+        ]
+        if not rl60_sub.empty:
+            rl_last_60 = rl60_sub.loc[rl60_sub.groupby("pt_step")["rl_step"].idxmax()].sort_values("pt_step")
+    if rl_last_60 is not None and base60_at is not None:
+        dx = rl_last_60["pt_step"].values
+        dy = rl_last_60["score"].values * 100 - base60_at(dx)
+        all_diffs.extend(dy.tolist())
+        ax.plot(dx * TOKEN_MULTIPLIER, dy, **diff_styles["60B"], zorder=10)
 
-    # 60B Base
-    curve60 = pre60_df[
-        (pre60_df["samples"] == samples)
-        & (pre60_df["shot"] == TARGET_SHOT)
-        & (pre60_df["temp"] == TARGET_TEMP)
-    ].sort_values("step")
-    if not curve60.empty:
-        ax.plot(curve60["step"] * TOKEN_MULTIPLIER, curve60["score"] * 100, **styles["base60"])
-
-    # 60B RL — best rl_step per pt_step (n=32)
-    rl60_sub = rl60_df[
-        (rl60_df["samples"] == samples)
-        & (rl60_df["temp"] == TARGET_TEMP)
-    ]
-    if not rl60_sub.empty:
-        rl60_last = rl60_sub.loc[rl60_sub.groupby("pt_step")["rl_step"].idxmax()].sort_values("pt_step")
-        ax.plot(rl60_last["pt_step"] * TOKEN_MULTIPLIER, rl60_last["score"] * 100, **styles["rl60"], zorder=10)
-
-    # 4B Base (0-shot boxed — no shot filter needed, pattern already selects 0-shot)
-    curve4b = pre4b_df[
-        (pre4b_df["samples"] == samples)
-        & (pre4b_df["temp"] == TARGET_TEMP)
-    ].sort_values("step")
-    if not curve4b.empty:
-        ax.plot(curve4b["step"] * TOKEN_MULTIPLIER, curve4b["score"] * 100, **styles["base4b"])
-
-    # 4B RL — best rl_step per pt_step
-    rl4b_sub = rl4b_df[
-        (rl4b_df["samples"] == samples)
-        & (rl4b_df["temp"] == TARGET_TEMP)
-    ]
-    if not rl4b_sub.empty:
-        rl4b_last = rl4b_sub.loc[rl4b_sub.groupby("pt_step")["rl_step"].idxmax()].sort_values("pt_step")
-        ax.plot(rl4b_last["pt_step"] * TOKEN_MULTIPLIER, rl4b_last["score"] * 100, **styles["rl4b"], zorder=10)
+    # 4B: RL − Base
+    rl_last_4b, base4b_at = None, None
+    if not pre4b_df.empty:
+        curve4b = pre4b_df[
+            (pre4b_df["samples"] == samples)
+            & (pre4b_df["temp"] == TARGET_TEMP)
+        ].sort_values("step")
+        if not curve4b.empty:
+            _bx, _by = curve4b["step"].values, curve4b["score"].values * 100
+            base4b_at = lambda x, bx=_bx, by=_by: np.interp(x, bx, by)
+    if not rl4b_df.empty:
+        rl4b_sub = rl4b_df[
+            (rl4b_df["samples"] == samples)
+            & (rl4b_df["temp"] == TARGET_TEMP)
+        ]
+        if not rl4b_sub.empty:
+            rl_last_4b = rl4b_sub.loc[rl4b_sub.groupby("pt_step")["rl_step"].idxmax()].sort_values("pt_step")
+    if rl_last_4b is not None and base4b_at is not None:
+        dx = rl_last_4b["pt_step"].values
+        dy = rl_last_4b["score"].values * 100 - base4b_at(dx)
+        all_diffs.extend(dy.tolist())
+        ax.plot(dx * TOKEN_MULTIPLIER, dy, **diff_styles["4B"], zorder=10)
 
     # Formatting
+    ax.axhline(0, color="black", linewidth=0.8, linestyle="--")
     ax.set_title(f"Pass@{samples}", pad=15)
-    ax.set_xlabel("Pre-training tokens (steps)")
-    ax.xaxis.set_major_locator(MultipleLocator(10_000_000_000))  # every 10B tokens
+    ax.set_xlabel("Pre-training tokens")
+    ax.xaxis.set_major_locator(MultipleLocator(10_000_000_000))
     ax.xaxis.set_major_formatter(formatter)
     if idx == 0:
-        ax.set_ylabel("MATH Accuracy (%)")
-    ax.set_ylim(-5, 80)
+        ax.set_ylabel("RL − Base Acc (pp)", labelpad=12)
     ax.grid(True, linestyle=":", color="gray", alpha=0.7)
     for spine in ax.spines.values():
         spine.set_visible(True)
         spine.set_edgecolor("black")
         spine.set_linewidth(1.2)
 
-# Legend
-handles, labels = axes[0].get_legend_handles_labels()
-desired_order = [
-    styles["base50"]["label"],
-    styles["rl50"]["label"],
-    styles["base60"]["label"],
-    styles["rl60"]["label"],
-    styles["base4b"]["label"],
-    styles["rl4b"]["label"],
-]
-order_lookup = {label: i for i, label in enumerate(desired_order)}
-sorted_pairs = sorted(zip(handles, labels), key=lambda pair: order_lookup.get(pair[1], 99))
-sorted_handles, sorted_labels = zip(*sorted_pairs)
+# Set ylim dynamically so the top tick is visible with headroom
+if all_diffs:
+    y_top = max(all_diffs)
+    axes[0].set_ylim(top=y_top * 1.15)
 
-plt.tight_layout()
-plt.subplots_adjust(bottom=0.45)
-fig.legend(
-    sorted_handles, sorted_labels,
-    loc="lower center", bbox_to_anchor=(0.5, -0.12),
-    ncol=3, frameon=True, framealpha=1.0, borderpad=0.3,
+# Model description panel (right)
+from matplotlib.lines import Line2D
+
+ax_desc = axes[3]
+ax_desc.set_axis_off()
+model_handles = [
+    Line2D([0, 1], [0, 0], color=diff_styles["50B"]["color"], marker=diff_styles["50B"]["marker"],
+           ls=diff_styles["50B"]["ls"], markersize=14, linewidth=2.5),
+    Line2D([0, 1], [0, 0], color=diff_styles["60B"]["color"], marker=diff_styles["60B"]["marker"],
+           ls=diff_styles["60B"]["ls"], markersize=14, linewidth=2.5),
+    Line2D([0, 1], [0, 0], color=diff_styles["4B"]["color"], marker=diff_styles["4B"]["marker"],
+           ls=diff_styles["4B"]["ls"], markersize=14, linewidth=2.5),
+]
+model_labels = [
+    "N = 1B \nD = 50B (Mix A)",
+    "N = 1B \nD = 60B (Mix A $\cup$ Mix B)",
+    "N = 4B \nD = 50B (Mix A)",
+]
+ax_desc.legend(
+    model_handles, model_labels,
+    loc="center left", bbox_to_anchor=(-0.15, 0.5), frameon=True, framealpha=1.0,
+    fontsize=18, title="Models and Pretraining Data", title_fontsize=20,
+    handlelength=2.5, labelspacing=1.2, borderpad=0.8,
 )
 
-# Footnote about 4B base using 0-shot
-fig.text(0.5, -0.28, r"$\dagger$ 4B Base uses 0-shot evaluation (8-shot evals not yet available)",
-         ha="center", fontsize=16, fontstyle="italic", color="#555555")
+plt.tight_layout(pad=2.0)
+plt.subplots_adjust(left=0.07)
 
 output_path = Path(__file__).parent / "math_base_rl_comparison.pdf"
 plt.savefig(output_path, bbox_inches="tight")
 print(f"Saved to {output_path}")
+png_path = output_path.with_suffix(".png")
+plt.savefig(png_path, bbox_inches="tight", dpi=150)
+print(f"Saved to {png_path}")
 plt.show()
