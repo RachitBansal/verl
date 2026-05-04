@@ -1,11 +1,6 @@
 #!/bin/bash
-<<<<<<< HEAD
 #SBATCH --job-name=rl-22k
 #SBATCH --account=kempner_barak_lab
-=======
-#SBATCH --job-name=verl-grpo-olmo2-openmath
-#SBATCH --account=kempner_sham_lab
->>>>>>> 35595c96bbe3bf82d7775e4b7be1b43d7525d1dc
 #SBATCH --partition=kempner_h100
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -75,7 +70,8 @@ set -x
 echo "Starting SLURM job on $(hostname)"
 echo "GPUs: $SLURM_GPUS_PER_NODE, Tasks: $SLURM_NTASKS_PER_NODE"
 
-cd /n/home05/sqin/rl_pretrain/verl
+VERL_DIR="${VERL_DIR:-/n/home05/sqin/rl_pretrain/verl}"
+cd "${VERL_DIR}"
 
 # Get STEP_NUM from first argument or default to empty
 STEP_NUM=${1:-}
@@ -89,11 +85,6 @@ export STEP_NUM
 echo "Running with STEP_NUM=$STEP_NUM"
 
 # Run the main training script
-<<<<<<< HEAD
-bash /n/home05/sqin/rl_pretrain/verl/examples/grpo_trainer/run_olmo2-1b_openmath.sh "${@:2}"
-=======
-echo "Running training script with remaining arguments: $@"
-bash examples/grpo_trainer/run_olmo2-1b_openmath_gsm8k.sh "$@"
->>>>>>> 35595c96bbe3bf82d7775e4b7be1b43d7525d1dc
+bash "${VERL_DIR}/examples/grpo_trainer/run_olmo2-1b_openmath.sh" "${@:2}"
 
 echo "Training completed!"
