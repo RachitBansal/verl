@@ -42,13 +42,13 @@ DATASET_KEY = "test_score/openai/gsm8k"
 # pseudo-task key → (lm-eval task, metric key, short title, direction ["lower"=better])
 # Ordering: accuracy (higher=better) panels first, BPB/perplexity (lower=better) after.
 TASKS = {
-    "lambada_acc":         ("lambada_openai",      "acc,none",           "LAMBADA Accuracy",       "higher"),
-    "hellaswag":           ("hellaswag",           "acc_norm,none",      "HellaSwag Acc (norm)",   "higher"),
-    "arc_easy":            ("arc_easy",            "acc_norm,none",      "ARC-Easy Acc (norm)",    "higher"),
-    "arc_challenge":       ("arc_challenge",       "acc_norm,none",      "ARC-Challenge Acc (norm)", "higher"),
-    "piqa":                ("piqa",                "acc_norm,none",      "PIQA Acc (norm)",        "higher"),
+    "lambada_acc":         ("lambada_openai",      "acc,none",           "LAMBADA",       "higher"),
+    "hellaswag":           ("hellaswag",           "acc_norm,none",      "HellaSwag",   "higher"),
+    "arc_easy":            ("arc_easy",            "acc_norm,none",      "ARC-Easy",    "higher"),
+    "arc_challenge":       ("arc_challenge",       "acc_norm,none",      "ARC-Challenge", "higher"),
+    "piqa":                ("piqa",                "acc_norm,none",      "PIQA",        "higher"),
     "winogrande":          ("winogrande",          "acc,none",           "WinoGrande Acc",         "higher"),
-    "openbookqa":          ("openbookqa",          "acc_norm,none",      "OpenBookQA Acc (norm)",  "higher"),
+    "openbookqa":          ("openbookqa",          "acc_norm,none",      "OpenBookQA",  "higher"),
     "wikitext":            ("wikitext",            "bits_per_byte,none", "WikiText BPB",          "lower"),
     "lambada_ppl":         ("lambada_openai",      "perplexity,none",    "LAMBADA Perplexity",     "lower"),
     "squad_completion_lm": ("squad_completion_lm", "bits_per_byte,none", "SQuAD-Completion BPB",   "lower"),
@@ -274,11 +274,11 @@ C_SFT_GSM = "#FFB000"  # amber/orange to distinguish from green SFT-rgsm
 C_RL_BASE = "#E24A33"
 C_RL_SFT = "#9467BD"
 
-STYLE_BASE = dict(color=C_BASE, marker="o", ls=":", ms=8, lw=2.0, label=r"Base $\mathcal{M}_t$")
-STYLE_SFT = dict(color=C_SFT, marker="d", ls="-.", ms=9, lw=2.0, label=r"SFT-rgsm $\mathcal{M}_t^{\text{SFT-r}}$")
-STYLE_SFT_GSM = dict(color=C_SFT_GSM, marker="^", ls="-.", ms=9, lw=2.0, label=r"SFT-gsm $\mathcal{M}_t^{\text{SFT-g}}$")
-STYLE_RL_BASE = dict(color=C_RL_BASE, marker="*", ls="-", ms=14, lw=2.5, label=r"RL-from-base $\mathcal{M}_t^{\text{RL}}$")
-STYLE_RL_SFT = dict(color=C_RL_SFT, marker="s", ls="--", ms=8, lw=2.0, label=r"RL-from-SFT $\mathcal{M}_t^{\text{SFT}\to\text{RL}}$")
+STYLE_BASE = dict(color=C_BASE, marker="o", ls=":", ms=8, lw=2.0, label=r"Base ($\mathcal{M}_t$)")
+STYLE_SFT = dict(color=C_SFT, marker="d", ls="-.", ms=9, lw=2.0, label=r"SFT-Multi ($\mathcal{M}_t^{\text{SFT-multi}})$")
+STYLE_SFT_GSM = dict(color=C_SFT_GSM, marker="^", ls="-.", ms=9, lw=2.0, label=r"SFT-Single ($\mathcal{M}_t^{\text{SFT-single}})$")
+STYLE_RL_BASE = dict(color=C_RL_BASE, marker="*", ls="-", ms=14, lw=2.5, label=r"RL-from-base ($\mathcal{M}_t^{\text{RL}})$")
+STYLE_RL_SFT = dict(color=C_RL_SFT, marker="s", ls="--", ms=8, lw=2.0, label=r"RL-from-SFT ($\mathcal{M}_t^{\text{SFT}\to\text{RL}})$")
 
 
 def dual_axis_formatter(num, pos):
@@ -338,12 +338,15 @@ for step in all_steps:
 # FIGURE 1: Absolute curves per task
 # ═══════════════════════════════════════════════════════════════════════════════
 
+pct_formatter = FuncFormatter(lambda x, _: f"{x:.0f}")
+
+
 def plot_line(ax, d, style):
     steps = sorted(s for s in d if d[s].get(task) is not None)
     if not steps:
         return
     xs = [s * TOKEN_MULTIPLIER for s in steps]
-    ys = [d[s][task] for s in steps]
+    ys = [d[s][task] * 100 for s in steps]
     ax.plot(xs, ys, **style)
 
 
@@ -365,6 +368,7 @@ for i, task in enumerate(TASK_KEYS):
     ax.set_title(f"{title}  ({arrow})", pad=10)
     ax.set_xlabel("Pre-training tokens (steps)")
     ax.xaxis.set_major_formatter(formatter)
+    ax.yaxis.set_major_formatter(pct_formatter)
     ax.grid(True, linestyle=":", color="gray", alpha=0.7)
     if task in LOG_Y_TASKS:
         ax.set_yscale("log")
@@ -387,6 +391,7 @@ plt.tight_layout()
 plt.subplots_adjust(bottom=0.09)
 out1 = Path(__file__).parent / "regression_absolute.pdf"
 fig1.savefig(out1, bbox_inches="tight")
+fig1.savefig(out1.with_suffix(".png"), bbox_inches="tight", dpi=150)
 print(f"\nSaved absolute curves -> {out1}")
 
 
@@ -493,6 +498,7 @@ plt.tight_layout()
 plt.subplots_adjust(bottom=0.12)
 out2 = Path(__file__).parent / "regression_tradeoff.pdf"
 fig2.savefig(out2, bbox_inches="tight")
+fig2.savefig(out2.with_suffix(".png"), bbox_inches="tight", dpi=150)
 print(f"Saved tradeoff scatter -> {out2}")
 
 
@@ -501,7 +507,7 @@ print(f"Saved tradeoff scatter -> {out2}")
 # ═══════════════════════════════════════════════════════════════════════════════
 
 CONDENSED_TASKS = ["lambada_acc", "hellaswag", "arc_easy", "piqa", "openbookqa"]
-CONDENSED_TITLE_OVERRIDES = {"lambada_acc": "LAMBADA Acc"}
+CONDENSED_TITLE_OVERRIDES = {"lambada_acc": "LAMBADA"}
 
 
 def token_only_formatter(num, pos):
@@ -529,6 +535,7 @@ for i, task in enumerate(CONDENSED_TASKS):
     ax.set_title(title, pad=10, fontsize=18)
     ax.set_xlabel("Pre-training tokens", fontsize=16)
     ax.xaxis.set_major_formatter(formatter_tokens_only)
+    ax.yaxis.set_major_formatter(pct_formatter)
     ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=3))
     ax.tick_params(axis="both", labelsize=15)
     ax.grid(True, linestyle=":", color="gray", alpha=0.7)
@@ -537,13 +544,15 @@ for i, task in enumerate(CONDENSED_TASKS):
         spine.set_linewidth(1.0)
 
 handles, labels = axes3[0].get_legend_handles_labels()
-fig3.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, -0.06),
+fig3.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, -0.1),
             ncol=len(handles), frameon=True, fontsize=16)
 
 plt.tight_layout()
 plt.subplots_adjust(bottom=0.22)
 out3 = Path(__file__).parent / "regression_main.pdf"
 fig3.savefig(out3, bbox_inches="tight")
+fig3.savefig(out3.with_suffix(".png"), bbox_inches="tight", dpi=150)
 print(f"Saved condensed main-paper figure -> {out3}")
+print(f"Saved png version -> {out3.with_suffix('.png')}")
 
 plt.show()
