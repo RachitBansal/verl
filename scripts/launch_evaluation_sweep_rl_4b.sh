@@ -1,11 +1,11 @@
 #!/bin/bash
 #
-# Launcher script for OLMo-2 RL evaluation sweep
+# Launcher script for OLMo-2 4B RL evaluation sweep
 # Discovers RL checkpoints and creates sbatch jobs to run
-# scripts/evaluate_olmo2_math_rl.sh on each checkpoint.
+# scripts/evaluate_olmo2_math_rl_4b.sh on each checkpoint.
 #
 # Usage:
-#   bash scripts/launch_evaluation_sweep_rl.sh
+#   bash scripts/launch_evaluation_sweep_rl_4b.sh
 #
 
 set -e  # Exit on error
@@ -20,7 +20,7 @@ CHECKPOINT_BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments"
 
 # Base directory for verl
 BASE_DIR="/n/home05/sqin/rl_pretrain/verl/"
-EVAL_SCRIPT="${BASE_DIR}/scripts/evaluate_olmo2_math_rl.sh"
+EVAL_SCRIPT="${BASE_DIR}/scripts/evaluate_olmo2_math_rl_4b.sh"
 
 # N_SAMPLES values to test (used as top-k generations per prompt)
 N_SAMPLES_LIST=(32)
@@ -30,7 +30,7 @@ SLURM_PARTITION="kempner"
 SLURM_ACCOUNT="kempner_barak_lab"
 SLURM_TIME="20:00:00"
 SLURM_NODES=1
-SLURM_GPUS_PER_NODE=1
+SLURM_GPUS_PER_NODE=2
 SLURM_CPUS_PER_TASK=24
 SLURM_MEM="250GB"
 
@@ -41,7 +41,7 @@ EVAL_GSM8K=false
 EVAL_MATH=true
 
 # Output directories
-SBATCH_DIR="${BASE_DIR}/sbatch_jobs_rl"
+SBATCH_DIR="${BASE_DIR}/sbatch_jobs_rl_4b"
 LOGS_DIR="${BASE_DIR}/logs"
 mkdir -p "${SBATCH_DIR}"
 mkdir -p "${LOGS_DIR}"
@@ -51,7 +51,7 @@ mkdir -p "${LOGS_DIR}"
 #############################################
 
 echo "================================================"
-echo "OLMo-2 RL Evaluation Sweep Launcher"
+echo "OLMo-2 4B RL Evaluation Sweep Launcher"
 echo "================================================"
 echo "Checkpoint directory: ${CHECKPOINT_BASE_DIR}"
 echo ""
@@ -70,10 +70,10 @@ while IFS= read -r -d '' checkpoint; do
     CHECKPOINT_NAMES+=("${experiment_name}")
     CHECKPOINT_STEPS+=("${checkpoint_step}")
     echo "  Found: ${experiment_name} (${checkpoint_step_dir}) -> ${checkpoint}"
-done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 3 -type d -path "${CHECKPOINT_BASE_DIR}/OLMo2-1B-60BMATH_step14000_interleave_twoloader_n32_sft_50000_ppo_0_math/hf_model/step*" -print0 | sort -z)
+done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 3 -type d -path "${CHECKPOINT_BASE_DIR}/OLMo2-4B_step*_interleave_twoloader_n32_sft_50000_ppo_0_math/hf_model/step*" -print0 | sort -z)
 
 if [ ${#CHECKPOINT_PATHS[@]} -eq 0 ]; then
-    echo "ERROR: No checkpoints found at ${CHECKPOINT_BASE_DIR}/OLMo2-1B-60BMATH_step14000_interleave_twoloader_n32_sft_50000_ppo_0_math/hf_model/step*"
+    echo "ERROR: No checkpoints found at ${CHECKPOINT_BASE_DIR}/OLMo2-4B_step*_interleave_twoloader_n32_sft_50000_ppo_0_math/hf_model/step*"
     exit 1
 fi
 
@@ -103,7 +103,7 @@ for idx in "${!CHECKPOINT_PATHS[@]}"; do
     for n_samples in "${N_SAMPLES_LIST[@]}"; do
         JOB_COUNT=$((JOB_COUNT + 1))
 
-        job_name="rl-eval-${experiment}-step${checkpoint_step}-${n_samples}samples"
+        job_name="rl-eval-4b-${experiment}-step${checkpoint_step}-${n_samples}samples"
         sbatch_file="${SBATCH_DIR}/${job_name}.sbatch"
 
         cat > "${sbatch_file}" <<EOF
@@ -167,7 +167,7 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
 
         for n_samples in "${N_SAMPLES_LIST[@]}"; do
             checkpoint_step="${CHECKPOINT_STEPS[$idx]}"
-            job_name="rl-eval-${experiment}-step${checkpoint_step}-${n_samples}samples"
+            job_name="rl-eval-4b-${experiment}-step${checkpoint_step}-${n_samples}samples"
             sbatch_file="${SBATCH_DIR}/${job_name}.sbatch"
 
             job_id=$(sbatch "${sbatch_file}" | grep -oP '\d+')
@@ -204,7 +204,7 @@ else
         experiment="${CHECKPOINT_NAMES[$idx]}"
         checkpoint_step="${CHECKPOINT_STEPS[$idx]}"
         for n_samples in "${N_SAMPLES_LIST[@]}"; do
-            job_name="rl-eval-${experiment}-step${checkpoint_step}-${n_samples}samples"
+            job_name="rl-eval-4b-${experiment}-step${checkpoint_step}-${n_samples}samples"
             echo "  sbatch ${SBATCH_DIR}/${job_name}.sbatch"
         done
     done

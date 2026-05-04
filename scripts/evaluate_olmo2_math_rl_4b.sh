@@ -13,7 +13,7 @@ set -e  # Exit on error
 set -u  # Exit on undefined variable
 
 # ---- Activate your prebuilt env
-source /n/netscratch/sham_lab/Everyone/cmohri/venvs/verl/bin/activate
+source /n/holylabs/dam_lab/Lab/brachit/envs/bin/activate
 
 #############################################
 # CONFIGURATION
