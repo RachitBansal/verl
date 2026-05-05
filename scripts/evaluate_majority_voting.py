@@ -36,6 +36,9 @@ def extract_answer(response: str, dataset_type: str, ground_truth: str) -> float
     elif dataset_type == "math":
         from verl.utils.reward_score.math_reward import compute_score
         return compute_score(response, ground_truth)
+    elif dataset_type == "openmathinstruct":
+        from verl.utils.reward_score.openmathinstruct import compute_score
+        return compute_score(response, ground_truth)
     else:
         raise ValueError(f"Unknown dataset type: {dataset_type}")
 
@@ -97,7 +100,7 @@ def main():
     parser.add_argument("--input_file", type=str, required=True, 
                         help="Input parquet file with predictions")
     parser.add_argument("--dataset_type", type=str, required=True, 
-                        choices=["gsm8k", "math"],
+                        choices=["gsm8k", "math", "openmathinstruct"],
                         help="Dataset type")
     
     args = parser.parse_args()

@@ -70,9 +70,9 @@ def read_score(result_path: Path, samples: int, dataset_key: str = DATASET_KEY):
 
 # --- Patterns ---------------------------------------------------------------
 
-# 50B Base: "1B-step{step}-{shot}shot-{samples}samples-temp{temp}"
+# 50B Base: "1B-step..." or "1B-stage1-50B-step..."
 pre50_pattern = re.compile(
-    r"1B-step(?P<step>\d+)-(?P<shot>\d+)shot-(?P<samples>\d+)samples-temp(?P<temp>[\d.]+)$"
+    r"1B-(?:stage1-50B-)?step(?P<step>\d+)-(?P<shot>\d+)shot-(?P<samples>\d+)samples-temp(?P<temp>[\d.]+)$"
 )
 
 # 50B Direct RL: "olmo2_1b_step{pt_step}_omi_n{rollouts}-step{rl_step}-rl-..."
@@ -350,9 +350,6 @@ for idx, samples in enumerate(PLOT_SAMPLES):
         if not curve.empty:
             _bx, _by = curve["step"].values, curve["score"].values * 100
             base50_at = lambda x, bx=_bx, by=_by: np.interp(x, bx, by)
-    if base50_at is None and rl_last_50 is not None:
-        # TODO: replace with real evals once available; using dummy 5% placeholder
-        base50_at = lambda x: np.full(len(x), 5.0)
     if rl_last_50 is not None and base50_at is not None:
         dx = rl_last_50["pt_step"].values
         dy = rl_last_50["score"].values * 100 - base50_at(dx)

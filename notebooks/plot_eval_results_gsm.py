@@ -8,6 +8,7 @@ Usage:
 """
 
 from pathlib import Path
+import json
 import re
 import ast
 import pandas as pd
@@ -28,6 +29,12 @@ PLOT_SAMPLES = [1, 8, 32]
 TARGET_TEMP = 0.6
 TARGET_SHOT = 8       # for base model
 RL_ROLLOUTS = 32
+
+# Manual direct-RL points for Plot 3 (most olmo2_1b_step*_omigsm8k_n* eval dirs are
+# empty placeholders; numbers provided by the user).
+MANUAL_RL_GSM_PATH = Path(__file__).parent / "manual_rl_gsm.json"
+with open(MANUAL_RL_GSM_PATH) as f:
+    MANUAL_RL_GSM = {int(k): v for k, v in json.load(f).items() if k.isdigit()}
 
 
 # ─── read_score ───────────────────────────────────────────────────────────────
@@ -288,11 +295,11 @@ styles = {
     },
     "sft_multi": {
         "color": color_sft_multi, "marker": "d", "ls": "-.", "markersize": 12,
-        "linewidth": 2.5, "label": r"$\mathcal{M}_t^{\text{SFT-Multi}}$",
+        "linewidth": 1.8, "label": r"$\mathcal{M}_t^{\text{SFT-Multi}}$",
     },
     "sft_single": {
         "color": color_sft_single, "marker": "d", "ls": "--", "markersize": 12,
-        "linewidth": 2.5, "label": r"$\mathcal{M}_t^{\text{SFT-Single}}$",
+        "linewidth": 1.8, "label": r"$\mathcal{M}_t^{\text{SFT-Single}}$",
     },
     "rl": {
         "color": color_rl, "marker": "*", "ls": "-", "markersize": 18,
@@ -370,16 +377,12 @@ for idx, samples in enumerate(PLOT_SAMPLES):
             sftrl_last = sftrl_curve.loc[sftrl_curve.groupby("pt_step")["rl_step"].idxmax()].sort_values("pt_step")
             ax.plot(sftrl_last["pt_step"] * TOKEN_MULTIPLIER, sftrl_last["score"] * 100, **styles["sftrl"], zorder=10)
 
-    # Direct RL — use last rl_step per pt_step, best seed
-    rl_subset = rl_df[
-        (rl_df["samples"] == samples)
-        & (rl_df["temp"] == TARGET_TEMP)
-        & (rl_df["num_rollouts"] == RL_ROLLOUTS)
-    ]
-    if not rl_subset.empty:
-        rl_last = rl_subset.loc[rl_subset.groupby(["pt_step", "seed"])["rl_step"].idxmax()].sort_values("pt_step")
-        rl_last = rl_last.loc[rl_last.groupby("pt_step")["score"].idxmax()]
-        ax.plot(rl_last["pt_step"] * TOKEN_MULTIPLIER, rl_last["score"] * 100, **styles["rl"], zorder=10)
+    # Direct RL — use manually-supplied (token_in_billions, accuracy_%) points
+    rl_points = MANUAL_RL_GSM.get(samples)
+    if rl_points:
+        xs = [p[0] * 1e9 for p in sorted(rl_points)]
+        ys = [p[1] for p in sorted(rl_points)]
+        ax.plot(xs, ys, **styles["rl"], zorder=10)
 
     # One-off dots
     for key, pt_step, color, marker, label_text in [

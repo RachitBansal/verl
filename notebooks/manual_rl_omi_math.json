@@ -1,0 +1,27 @@
+{
+  "_comment": "Manually-provided direct-RL Pass@1 (%) measured on the omi-math training distribution. Keyed by base-model family and pretraining step.",
+  "math_1b": {
+    "_comment": "OLMo2-1B / 50B-stage1 series",
+    "1000": 9.0,
+    "3000": 10.5,
+    "5000": 11.0,
+    "6000": 12.0,
+    "7000": 11.0,
+    "10000": 13.0,
+    "14000": 15.0,
+    "22000": 15.0
+  },
+  "math_4b": {
+    "_comment": "OLMo2-4B series — recorded for later, not currently plotted",
+    "5000": 10.0,
+    "14000": 12.0
+  },
+  "math_60b": {
+    "_comment": "OLMo2-1B-MATH60B series",
+    "5000": 10.0,
+    "10000": 12.0,
+    "17000": 18.0,
+    "22000": 21.0,
+    "28000": 22.0
+  }
+}
