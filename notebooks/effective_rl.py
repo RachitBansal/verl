@@ -665,38 +665,34 @@ def plot_first_row(df: pd.DataFrame, output_path: Path, relative: bool = False):
             if sub.empty:
                 continue
             sub["_x"] = sub[f"omi_pass_{k}"] * 100
-            for series_k in Y_DELTA_KS:
-                sub_d = sub.copy()
-                base_vals = sub_d[f"base_test_pass_{series_k}"]
-                delta_abs = (sub_d[f"rl_test_pass_{series_k}"] - base_vals) * 100
-                sub_d["_y"] = delta_abs / (base_vals * 100) * 100 if relative else delta_abs
-                sub_d = sub_d.sort_values("_x")
-                if series_k == 32:
-                    ax.scatter(sub_d["_x"], sub_d["_y"], color=cfg["color"],
-                               marker=cfg["marker"], s=95,
-                               edgecolors="k", linewidths=0.6, zorder=10)
-                else:
-                    ax.scatter(sub_d["_x"], sub_d["_y"], facecolors="none",
-                               edgecolors=cfg["color"], marker=cfg["marker"], s=95,
-                               linewidths=1.6, zorder=10)
+            sub["_y"] = sub[f"rl_test_pass_{k}"] * 100
+            sub = sub.sort_values("_x")
+            ax.scatter(sub["_x"], sub["_y"], color=cfg["color"],
+                       marker=cfg["marker"], s=95,
+                       edgecolors="k", linewidths=0.6, zorder=10)
 
-        ax.axhline(0, color="black", linewidth=0.7, linestyle="-", alpha=0.4)
+        x0, x1 = ax.get_xlim()
+        y0, y1 = ax.get_ylim()
+        lo = min(x0, y0)
+        hi = max(x1, y1)
+        ax.plot([lo, hi], [lo, hi], color="gray", linewidth=0.9,
+                linestyle="--", alpha=0.6, zorder=1)
+        ax.set_xlim(x0, x1)
+        ax.set_ylim(y0, y1)
+
         ax.set_title(f"{panel_label}  (k = {k})")
         ax.set_xlabel(f"Base Pass@{k} on Train (%)")
         ax.grid(True, linestyle=":", color="gray", alpha=0.6)
         for spine in ax.spines.values():
             spine.set_visible(True); spine.set_edgecolor("black"); spine.set_linewidth(1.0)
 
-    ylabel = r"Relative $\Delta$Pass on test (%) [RL $-$ Base]" if relative else r"$\Delta$Pass on test (%) [RL $-$ Base]"
-    axes[0].set_ylabel(ylabel)
+    axes[0].set_ylabel("Direct RL Pass@k on test (%)")
 
     legend_handles = [
-        Line2D([0], [0], marker="o", color="#555555", markerfacecolor="#555555",
+        Line2D([0], [0], marker=DATASETS["gsm"]["marker"],
+               color=DATASETS["gsm"]["color"], markerfacecolor=DATASETS["gsm"]["color"],
                markeredgecolor="#222222", markeredgewidth=0.6, markersize=9,
-               linestyle="None", label=r"$\Delta$Pass@32"),
-        Line2D([0], [0], marker="o", color="#555555", markerfacecolor="none",
-               markeredgecolor="#555555", markeredgewidth=1.8, markersize=9,
-               linestyle="None", label=r"$\Delta$Pass@1"),
+               linestyle="None", label="GSM8K"),
         Line2D([0], [0], marker=DATASETS["math"]["marker"],
                color=DATASETS["math"]["color"], markerfacecolor=DATASETS["math"]["color"],
                markeredgecolor="#222222", markeredgewidth=0.6, markersize=9,
@@ -706,7 +702,7 @@ def plot_first_row(df: pd.DataFrame, output_path: Path, relative: bool = False):
                markeredgecolor="#222222", markeredgewidth=0.6, markersize=9,
                linestyle="None", label="MATH (1B / 60BMATH)"),
     ]
-    fig.legend(handles=legend_handles, loc="lower center", ncol=4,
+    fig.legend(handles=legend_handles, loc="lower center", ncol=3,
                bbox_to_anchor=(0.5, -0.08), frameon=True,
                framealpha=0.95, edgecolor="#cccccc",
                fontsize=11, handletextpad=0.5, columnspacing=1.2)
@@ -727,74 +723,9 @@ _NEW_PLOT_COLORS = {
 }
 
 
-def plot_first_row_pass1_hollow(df: pd.DataFrame, output_path: Path):
-    """Two panels (combining ΔPass@1 from the existing row1 plot, hollow only):
-       Panel 0: x = base omi-gsm Pass@32 (%),  y = (RL gsm − base gsm) Pass@1 (%).
-       Panel 1: x = base omi-math Pass@32 (%), y = (RL math − base math) Pass@1 (%);
-                math 1B/50B (orange) and math 1B/60BMATH (purple) overlaid.
-    """
-    sns.set_theme(style="whitegrid", context="paper", font_scale=1.0)
-    plt.rcParams.update({
-        "font.family": "serif",
-        "mathtext.fontset": "cm",
-        "axes.titlesize": 13,
-        "axes.labelsize": 12,
-        "xtick.labelsize": 10,
-        "ytick.labelsize": 10,
-        "axes.edgecolor": "black",
-        "axes.linewidth": 1.0,
-        "legend.fontsize": 10,
-    })
-
-    fig, ax = plt.subplots(1, 1, figsize=(5.0, 4.0))
-
-    for ds_key in ["gsm", "math", "math_60b"]:
-        cfg = DATASETS[ds_key]
-        sub = df[df["dataset"] == ds_key].dropna(subset=[
-            "omi_pass_32", "base_test_pass_1", "rl_test_pass_1",
-        ]).copy()
-        if sub.empty:
-            continue
-        x_vals = sub["omi_pass_32"] * 100
-        y_vals = (sub["rl_test_pass_1"] - sub["base_test_pass_1"]) * 100
-        color = _NEW_PLOT_COLORS.get(ds_key, cfg["color"])
-        ax.scatter(x_vals, y_vals, facecolors="none",
-                   edgecolors=color, marker=cfg["marker"], s=110,
-                   linewidths=1.8, zorder=10)
-    ax.axhline(0, color="black", linewidth=0.7, linestyle="-", alpha=0.4)
-    ax.set_xlabel("Base Pass@32 on omi train (%)")
-    ax.set_ylabel(r"$\Delta$Pass@1 on test (%)  [RL $-$ Base]")
-    ax.grid(True, linestyle=":", color="gray", alpha=0.6)
-    for spine in ax.spines.values():
-        spine.set_visible(True); spine.set_edgecolor("black"); spine.set_linewidth(1.0)
-
-    legend_handles = [
-        Line2D([0], [0], marker="o", color=_NEW_PLOT_COLORS["gsm"], linestyle="None",
-               markerfacecolor="none", markeredgecolor=_NEW_PLOT_COLORS["gsm"],
-               markeredgewidth=1.8, markersize=10, label="GSM8K (1B / 50B-stage1)"),
-        Line2D([0], [0], marker="s", color=_NEW_PLOT_COLORS["math"], linestyle="None",
-               markerfacecolor="none", markeredgecolor=_NEW_PLOT_COLORS["math"],
-               markeredgewidth=1.8, markersize=10, label="MATH (1B / 50B-stage1)"),
-        Line2D([0], [0], marker="D", color=_NEW_PLOT_COLORS["math_60b"], linestyle="None",
-               markerfacecolor="none", markeredgecolor=_NEW_PLOT_COLORS["math_60b"],
-               markeredgewidth=1.8, markersize=10, label="MATH (1B / 60BMATH)"),
-    ]
-    ax.legend(handles=legend_handles, loc="best", frameon=True,
-              framealpha=0.95, edgecolor="#cccccc", fontsize=10,
-              handletextpad=0.5)
-
-    fig.tight_layout()
-    plt.savefig(output_path, bbox_inches="tight")
-    print(f"Saved to {output_path}")
-    plt.savefig(output_path.with_suffix(".png"), bbox_inches="tight", dpi=150)
-    print(f"Saved to {output_path.with_suffix('.png')}")
-    plt.close()
-
-
 def plot_omi_rl_effectiveness_math(df: pd.DataFrame, output_path: Path):
     """Single panel for math 1B/50B (orange ■) + math 1B/60BMATH (purple ◆):
-       x = base omi-math Pass@32 (%),
-       y = (RL omi-math Pass@1 − base omi-math Pass@1) × 100, in %.
+       x = base omi-math Pass@32 (%),  y = direct-RL omi-math Pass@1 (%).
     The RL omi-math Pass@1 comes from notebooks/manual_rl_omi_math.json.
     """
     sns.set_theme(style="whitegrid", context="paper", font_scale=1.0)
@@ -815,27 +746,23 @@ def plot_omi_rl_effectiveness_math(df: pd.DataFrame, output_path: Path):
     for ds_key in ["math", "math_60b"]:
         cfg = DATASETS[ds_key]
         sub = df[df["dataset"] == ds_key].dropna(subset=[
-            "omi_pass_1", "omi_pass_32", "rl_omi_pass_1",
+            "omi_pass_1", "rl_omi_pass_1",
         ]).copy()
         if sub.empty:
             continue
-        x_vals = sub["omi_pass_32"] * 100
-        y_vals = (sub["rl_omi_pass_1"] - sub["omi_pass_1"]) * 100
+        x_vals = sub["omi_pass_1"] * 100
+        y_vals = sub["rl_omi_pass_1"] * 100
         color = _NEW_PLOT_COLORS.get(ds_key, cfg["color"])
         ax.scatter(x_vals, y_vals, color=color, marker=cfg["marker"], s=110,
                    edgecolors="k", linewidths=0.6, zorder=10)
-        # Print numbers for sanity-check
         for _, row in sub.sort_values("pt_step").iterrows():
             print(f"  [{ds_key} step={int(row['pt_step'])}] "
                   f"base_omi_pass1={row['omi_pass_1']*100:.2f}%  "
-                  f"base_omi_pass32={row['omi_pass_32']*100:.2f}%  "
-                  f"rl_omi_pass1={row['rl_omi_pass_1']*100:.2f}%  "
-                  f"Δ={ (row['rl_omi_pass_1']-row['omi_pass_1'])*100 :+.2f}%")
+                  f"rl_omi_pass1={row['rl_omi_pass_1']*100:.2f}%")
 
-    ax.axhline(0, color="black", linewidth=0.7, linestyle="-", alpha=0.4)
-    ax.set_xlabel("Base Pass@32 on omi-math (%)")
-    ax.set_ylabel(r"$\Delta$Pass@1 on omi-math (%)  [RL $-$ Base]")
-    ax.set_title("RL effectiveness on omi-math (Pass@1)")
+    ax.set_xlabel("Base Pass@1 on omi-math (%)")
+    ax.set_ylabel("Direct RL Pass@1 on omi-math (%)")
+    ax.set_title("Direct RL Pass@1 on omi-math")
     ax.grid(True, linestyle=":", color="gray", alpha=0.6)
     for spine in ax.spines.values():
         spine.set_visible(True); spine.set_edgecolor("black"); spine.set_linewidth(1.0)
@@ -861,6 +788,101 @@ def plot_omi_rl_effectiveness_math(df: pd.DataFrame, output_path: Path):
     plt.close()
 
 
+def plot_first_row_xtest(df: pd.DataFrame, output_path: Path):
+    """Combined version: per-panel x is base 8-shot Pass@k on that panel's own test
+    set. So GSM panels use base GSM Pass@k as x; MATH panels use base MATH Pass@k
+    as x. y is direct-RL Pass on test. A y=x dashed line is drawn as a reference
+    in each panel without changing the x/y ranges.
+    """
+    sns.set_theme(style="whitegrid", context="paper", font_scale=1.0)
+    plt.rcParams.update({
+        "font.family": "serif",
+        "mathtext.fontset": "cm",
+        "axes.titlesize": 13,
+        "axes.labelsize": 12,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "axes.edgecolor": "black",
+        "axes.linewidth": 1.0,
+        "legend.fontsize": 10,
+    })
+
+    PANEL_KS = [1, 32]
+    PANEL_GROUPS = [
+        ("GSM8K", "GSM8K", ["gsm"]),
+        ("MATH",  "MATH",  ["math", "math_60b"]),
+    ]
+    panel_specs = [(label, x_test_label, ds_keys, k)
+                   for label, x_test_label, ds_keys in PANEL_GROUPS
+                   for k in PANEL_KS]
+
+    fig, axes = plt.subplots(1, len(panel_specs), figsize=(3.7 * len(panel_specs), 3.6))
+    axes = axes.ravel()
+
+    for col_idx, (panel_label, x_test_label, ds_keys, k) in enumerate(panel_specs):
+        ax = axes[col_idx]
+        for ds_key in ds_keys:
+            cfg = DATASETS[ds_key]
+            sub = df[df["dataset"] == ds_key].dropna(subset=[
+                f"base_test_pass_{k}", "rl_test_pass_1", "rl_test_pass_32",
+            ]).copy()
+            if sub.empty:
+                continue
+            sub["_x"] = sub[f"base_test_pass_{k}"] * 100
+            sub["_y"] = sub[f"rl_test_pass_{k}"] * 100
+            sub = sub.sort_values("_x")
+            ax.scatter(sub["_x"], sub["_y"], color=cfg["color"],
+                       marker=cfg["marker"], s=95,
+                       edgecolors="k", linewidths=0.6, zorder=10)
+
+        # y=x reference line over the data extent — drawn after autoscale, then
+        # restore the ranges so the line doesn't zoom out the axes.
+        x0, x1 = ax.get_xlim()
+        y0, y1 = ax.get_ylim()
+        lo = min(x0, y0)
+        hi = max(x1, y1)
+        ax.plot([lo, hi], [lo, hi], color="gray", linewidth=0.9,
+                linestyle="--", alpha=0.6, zorder=1)
+        ax.set_xlim(x0, x1)
+        ax.set_ylim(y0, y1)
+
+        ax.set_title(f"{panel_label}  (k = {k})")
+        ax.set_xlabel(f"Base 8-shot Pass@{k} on {x_test_label} test (%)")
+        ax.grid(True, linestyle=":", color="gray", alpha=0.6)
+        for spine in ax.spines.values():
+            spine.set_visible(True); spine.set_edgecolor("black"); spine.set_linewidth(1.0)
+
+    axes[0].set_ylabel("Direct RL Pass@k on test (%)")
+
+    legend_handles = [
+        Line2D([0], [0], marker=DATASETS["gsm"]["marker"],
+               color=DATASETS["gsm"]["color"], markerfacecolor=DATASETS["gsm"]["color"],
+               markeredgecolor="#222222", markeredgewidth=0.6, markersize=9,
+               linestyle="None", label="GSM8K"),
+        Line2D([0], [0], marker=DATASETS["math"]["marker"],
+               color=DATASETS["math"]["color"], markerfacecolor=DATASETS["math"]["color"],
+               markeredgecolor="#222222", markeredgewidth=0.6, markersize=9,
+               linestyle="None", label="MATH (1B / 50B-stage1)"),
+        Line2D([0], [0], marker=DATASETS["math_60b"]["marker"],
+               color=DATASETS["math_60b"]["color"], markerfacecolor=DATASETS["math_60b"]["color"],
+               markeredgecolor="#222222", markeredgewidth=0.6, markersize=9,
+               linestyle="None", label="MATH (1B / 60BMATH)"),
+        Line2D([0], [0], color="gray", linewidth=0.9, linestyle="--",
+               alpha=0.6, label=r"$y = x$"),
+    ]
+    fig.legend(handles=legend_handles, loc="lower center", ncol=4,
+               bbox_to_anchor=(0.5, -0.08), frameon=True,
+               framealpha=0.95, edgecolor="#cccccc",
+               fontsize=11, handletextpad=0.5, columnspacing=1.2)
+
+    fig.subplots_adjust(wspace=0.3, top=0.92, bottom=0.22, left=0.08, right=0.97)
+    plt.savefig(output_path, bbox_inches="tight")
+    print(f"Saved to {output_path}")
+    plt.savefig(output_path.with_suffix(".png"), bbox_inches="tight", dpi=150)
+    print(f"Saved to {output_path.with_suffix('.png')}")
+    plt.close()
+
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     df = build_table()
@@ -871,5 +893,5 @@ if __name__ == "__main__":
     output_path = Path(__file__).parent / "base_metric_rl_effectiveness.pdf"
     plot(df, output_path)
     plot_first_row(df, Path(__file__).parent / "base_metric_rl_effectiveness_row1.pdf", relative=False)
-    plot_first_row_pass1_hollow(df, Path(__file__).parent / "base_metric_rl_effectiveness_row1_pass1.pdf")
     plot_omi_rl_effectiveness_math(df, Path(__file__).parent / "base_metric_rl_omi_pass1_math.pdf")
+    plot_first_row_xtest(df, Path(__file__).parent / "base_metric_rl_effectiveness_row1_xtest.pdf")

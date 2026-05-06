@@ -504,9 +504,11 @@ print(f"Saved tradeoff scatter -> {out2}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FIGURE 3: Condensed version for the main paper
+# Layout: large left panel with the average across benchmarks, and a 3x2 grid
+# on the right with one panel per benchmark (minimal labeling).
 # ═══════════════════════════════════════════════════════════════════════════════
 
-CONDENSED_TASKS = ["lambada_acc", "hellaswag", "arc_easy", "piqa", "openbookqa"]
+CONDENSED_TASKS = ["lambada_acc", "hellaswag", "arc_easy", "arc_challenge", "piqa", "openbookqa"]
 CONDENSED_TITLE_OVERRIDES = {"lambada_acc": "LAMBADA"}
 
 
@@ -520,35 +522,102 @@ def token_only_formatter(num, pos):
 
 formatter_tokens_only = FuncFormatter(token_only_formatter)
 
-N3 = len(CONDENSED_TASKS)
-fig3, axes3 = plt.subplots(1, N3, figsize=(4.5 * N3, 4))
-axes3 = np.atleast_1d(axes3).ravel()
 
+def average_across_tasks(d, tasks):
+    """For each step, average the given task values (in %). Skips Nones."""
+    out = {}
+    for step, row in d.items():
+        vals = [row[t] for t in tasks if row.get(t) is not None]
+        if vals:
+            out[step] = {"_avg": float(np.mean(vals))}
+    return out
+
+
+def plot_line_avg(ax, d_avg, style):
+    steps = sorted(d_avg)
+    if not steps:
+        return
+    xs = [s * TOKEN_MULTIPLIER for s in steps]
+    ys = [d_avg[s]["_avg"] * 100 for s in steps]
+    ax.plot(xs, ys, **style)
+
+
+fig3 = plt.figure(figsize=(13, 4.5))
+gs = fig3.add_gridspec(3, 3, width_ratios=[1.6, 1, 1], hspace=0.08, wspace=0.10)
+
+# Left: big average panel spanning all 3 rows
+ax_avg = fig3.add_subplot(gs[:, 0])
+base_avg = average_across_tasks(base, CONDENSED_TASKS)
+sft_avg = average_across_tasks(sft, CONDENSED_TASKS)
+sft_gsm_avg = average_across_tasks(sft_gsm, CONDENSED_TASKS)
+rl_base_avg = average_across_tasks(rl_base, CONDENSED_TASKS)
+plot_line_avg(ax_avg, base_avg, STYLE_BASE)
+plot_line_avg(ax_avg, sft_gsm_avg, STYLE_SFT_GSM)
+plot_line_avg(ax_avg, sft_avg, STYLE_SFT)
+plot_line_avg(ax_avg, rl_base_avg, STYLE_RL_BASE)
+ax_avg.set_title("Average across 6 benchmarks", pad=10, fontsize=20)
+ax_avg.set_xlabel("Pre-training tokens", fontsize=18)
+ax_avg.set_ylabel("Accuracy (%)", fontsize=18)
+ax_avg.xaxis.set_major_formatter(formatter_tokens_only)
+ax_avg.yaxis.set_major_formatter(pct_formatter)
+ax_avg.tick_params(axis="both", labelsize=16)
+ax_avg.grid(True, linestyle=":", color="gray", alpha=0.7)
+for spine in ax_avg.spines.values():
+    spine.set_edgecolor("black")
+    spine.set_linewidth(1.0)
+
+# Right: 3x2 grid of small square per-benchmark panels
+small_axes = []
 for i, task in enumerate(CONDENSED_TASKS):
-    ax = axes3[i]
+    r, c = i // 2, i % 2
+    ax = fig3.add_subplot(gs[r, 1 + c])
+    small_axes.append(ax)
     _, _, title, _ = TASKS[task]
     title = CONDENSED_TITLE_OVERRIDES.get(task, title)
     plot_line(ax, base, STYLE_BASE)
     plot_line(ax, sft_gsm, STYLE_SFT_GSM)
     plot_line(ax, sft, STYLE_SFT)
     plot_line(ax, rl_base, STYLE_RL_BASE)
-    ax.set_title(title, pad=10, fontsize=18)
-    ax.set_xlabel("Pre-training tokens", fontsize=16)
-    ax.xaxis.set_major_formatter(formatter_tokens_only)
+    # Benchmark name inside panel at bottom-right (frees vertical space → taller panels)
+    ax.text(0.97, 0.05, title, transform=ax.transAxes,
+            ha="right", va="bottom", fontsize=12, fontweight="bold",
+            color="#222222",
+            bbox=dict(boxstyle="round,pad=0.2", facecolor="white",
+                      edgecolor="none", alpha=0.75))
+    # Minimal labeling: just two y ticks; only bottom row keeps x-axis
+    is_bottom = (r == 2)
+    if is_bottom:
+        ax.xaxis.set_major_formatter(formatter_tokens_only)
+        ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=3))
+        ax.tick_params(axis="x", labelsize=12)
+    else:
+        ax.set_xlabel("")
+        ax.set_xticks([])
+    # Y-ticks at panel top and bottom (same relative spot across panels)
+    task_vals = []
+    for d in (base, sft_gsm, sft, rl_base):
+        for s in d:
+            v = d[s].get(task)
+            if v is not None:
+                task_vals.append(v * 100)
+    if task_vals:
+        ylo = int(np.floor(min(task_vals)))
+        yhi = int(np.ceil(max(task_vals)))
+        pad = max(1, (yhi - ylo) * 0.08)
+        ax.set_ylim(ylo - pad, yhi + pad)
+        ax.set_yticks([ylo, yhi])
     ax.yaxis.set_major_formatter(pct_formatter)
-    ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=3))
-    ax.tick_params(axis="both", labelsize=15)
-    ax.grid(True, linestyle=":", color="gray", alpha=0.7)
+    ax.tick_params(axis="y", labelsize=11)
+    ax.grid(True, linestyle=":", color="gray", alpha=0.5)
     for spine in ax.spines.values():
         spine.set_edgecolor("black")
-        spine.set_linewidth(1.0)
+        spine.set_linewidth(0.8)
 
-handles, labels = axes3[0].get_legend_handles_labels()
-fig3.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, -0.1),
-            ncol=len(handles), frameon=True, fontsize=16)
+handles, labels = ax_avg.get_legend_handles_labels()
+ax_avg.legend(handles, labels, loc="lower right", frameon=True, fontsize=11,
+              framealpha=0.92)
 
-plt.tight_layout()
-plt.subplots_adjust(bottom=0.22)
+plt.subplots_adjust(left=0.05, right=0.99, top=0.93, bottom=0.10)
 out3 = Path(__file__).parent / "regression_main.pdf"
 fig3.savefig(out3, bbox_inches="tight")
 fig3.savefig(out3.with_suffix(".png"), bbox_inches="tight", dpi=150)
