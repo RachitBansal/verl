@@ -269,10 +269,10 @@ plt.rcParams.update({
 })
 
 C_BASE = "#777777"
-C_SFT = "#009E73"
-C_SFT_GSM = "#FFB000"  # amber/orange to distinguish from green SFT-rgsm
-C_RL_BASE = "#E24A33"
-C_RL_SFT = "#9467BD"
+C_SFT = "#009E73"        # Emerald green (SFT-Multi)
+C_SFT_GSM = "#7B3294"    # Purple (SFT-Single)
+C_RL_BASE = "#E24A33"    # Red (RL, matches plot_eval_results_gsm.py)
+C_RL_SFT = "#9467BD"     # Light purple (SFT->RL)
 
 STYLE_BASE = dict(color=C_BASE, marker="o", ls=":", ms=8, lw=2.0, label=r"Base ($\mathcal{M}_t$)")
 STYLE_SFT = dict(color=C_SFT, marker="d", ls="-.", ms=9, lw=2.0, label=r"SFT-Multi ($\mathcal{M}_t^{\text{SFT-multi}})$")

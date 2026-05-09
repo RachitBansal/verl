@@ -288,11 +288,11 @@ plt.rcParams.update({
 _blues = plt.get_cmap("Blues")
 styles = {
     "sft4e-5": {"color": _blues(0.45), "marker": "^", "ls": "-",
-                "label": r"Parallel avg: $\eta_{\text{SFT}}=4\times10^{-5},\ \eta_{\text{RL}}=10^{-6}$"},
+                "label": r"$\mathcal{M}^{\text{Parallel}}_1$ ($\eta_{\text{SFT}}=4\times10^{-5}$)"},
     "sft1e-6": {"color": _blues(0.70), "marker": "o", "ls": "-",
-                "label": r"Parallel avg: $\eta_{\text{SFT}}=10^{-6},\ \eta_{\text{RL}}=10^{-6}$"},
+                "label": r"$\mathcal{M}^{\text{Parallel}}_2$ ($\eta_{\text{SFT}}=10^{-6}$)"},
     "sft1e-7": {"color": _blues(0.95), "marker": "s", "ls": "-",
-                "label": r"Parallel avg: $\eta_{\text{SFT}}=10^{-7},\ \eta_{\text{RL}}=10^{-6}$"},
+                "label": r"$\mathcal{M}^{\text{Parallel}}_3$ ($\eta_{\text{SFT}}=10^{-7}$)"},
 }
 
 PRETRAIN_REF_STYLE = {"color": "#777777", "ls": ":", "linewidth": 2.5,
@@ -369,9 +369,9 @@ ax = axes[3]
 NM_BASE_STYLE = {**PRETRAIN_REF_STYLE, "label": r"$\mathcal{M}_{10\mathrm{k}}$ (Base, 8-shot)"}
 
 PARA_TICK_NAMES = {
-    "sft4e-5": "para-avg sft4e-5",
-    "sft1e-6": "para-avg sft1e-6",
-    "sft1e-7": "para-avg sft1e-7",
+    "sft4e-5": r"$\mathcal{M}^{\text{Para}}_1$",
+    "sft1e-6": r"$\mathcal{M}^{\text{Para}}_2$",
+    "sft1e-7": r"$\mathcal{M}^{\text{Para}}_3$",
 }
 
 nm_bar_entries = []  # (legend_label, value%, color, tick_label)
@@ -431,7 +431,7 @@ for a in axes:
             seen.add(li)
 
 plt.tight_layout()
-plt.subplots_adjust(bottom=0.38)
+plt.subplots_adjust(bottom=0.38, wspace=0.35)
 fig.legend(
     handles, labels,
     loc="lower center", bbox_to_anchor=(0.5, -0.22),

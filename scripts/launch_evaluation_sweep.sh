@@ -21,8 +21,8 @@ set -u  # Exit on undefined variable
 #############################################
 
 # Base checkpoint directory
-CHECKPOINT_BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-1B-stage1-50B"
-MODEL_NAME="1B-stage1-50B"
+CHECKPOINT_BASE_DIR="/n/netscratch/barak_lab/Everyone/sqin/olmo/checkpoints/OLMo2-1B-stage1-60B"
+MODEL_NAME="OLMo2-1B-stage1-60B"
 
 # Base directory for verl
 BASE_DIR="/n/home05/sqin/rl_pretrain/verl/"
@@ -32,9 +32,9 @@ EVAL_SCRIPT="${BASE_DIR}/scripts/evaluate_olmo2_math.sh"
 N_SAMPLES_LIST=(32)
 
 # SLURM Configuration
-SLURM_PARTITION="kempner"
+SLURM_PARTITION="kempner_h100"
 SLURM_ACCOUNT="kempner_barak_lab"
-SLURM_TIME="20:00:00"
+SLURM_TIME="16:00:00"
 SLURM_NODES=1
 SLURM_GPUS_PER_NODE=1
 SLURM_CPUS_PER_TASK=24
@@ -71,10 +71,10 @@ while IFS= read -r -d '' checkpoint; do
     checkpoint_name=$(basename "${checkpoint}")
     CHECKPOINTS+=("${checkpoint_name}")
     echo "  Found: ${checkpoint_name}"
-done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 1 -type d -name "step*-hf" -print0 | sort -z)
+done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 1 -type d -name "step22000-hf" -print0 | sort -z)
 
 if [ ${#CHECKPOINTS[@]} -eq 0 ]; then
-    echo "ERROR: No step*-hf checkpoints found in ${CHECKPOINT_BASE_DIR}"
+    echo "ERROR: No step22000-hf checkpoints found in ${CHECKPOINT_BASE_DIR}"
     exit 1
 fi
 

@@ -26,7 +26,7 @@ EVAL_SCRIPT="${BASE_DIR}/scripts/evaluate_olmo2_math_rl_4b.sh"
 N_SAMPLES_LIST=(32)
 
 # SLURM Configuration
-SLURM_PARTITION="kempner"
+SLURM_PARTITION="kempner_h100"
 SLURM_ACCOUNT="kempner_barak_lab"
 SLURM_TIME="20:00:00"
 SLURM_NODES=1

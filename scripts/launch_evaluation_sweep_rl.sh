@@ -26,9 +26,9 @@ EVAL_SCRIPT="${BASE_DIR}/scripts/evaluate_olmo2_math_rl.sh"
 N_SAMPLES_LIST=(32)
 
 # SLURM Configuration
-SLURM_PARTITION="kempner"
+SLURM_PARTITION="kempner_h100"
 SLURM_ACCOUNT="kempner_barak_lab"
-SLURM_TIME="20:00:00"
+SLURM_TIME="16:00:00"
 SLURM_NODES=1
 SLURM_GPUS_PER_NODE=1
 SLURM_CPUS_PER_TASK=24
@@ -41,7 +41,7 @@ EVAL_GSM8K=false
 EVAL_MATH=true
 
 # Output directories
-SBATCH_DIR="${BASE_DIR}/sbatch_jobs_rl"
+SBATCH_DIR="${BASE_DIR}/sbatch_jobs_rl_omi_math"
 LOGS_DIR="${BASE_DIR}/logs"
 mkdir -p "${SBATCH_DIR}"
 mkdir -p "${LOGS_DIR}"
@@ -70,10 +70,10 @@ while IFS= read -r -d '' checkpoint; do
     CHECKPOINT_NAMES+=("${experiment_name}")
     CHECKPOINT_STEPS+=("${checkpoint_step}")
     echo "  Found: ${experiment_name} (${checkpoint_step_dir}) -> ${checkpoint}"
-done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 3 -type d -path "${CHECKPOINT_BASE_DIR}/OLMo2-1B-60BMATH_step14000_interleave_twoloader_n32_sft_50000_ppo_0_math/hf_model/step*" -print0 | sort -z)
+done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 3 -type d -path "${CHECKPOINT_BASE_DIR}/olmo2_1b_60bmath_step*_omi_n32/hf_model/step*" -print0 | sort -z)
 
 if [ ${#CHECKPOINT_PATHS[@]} -eq 0 ]; then
-    echo "ERROR: No checkpoints found at ${CHECKPOINT_BASE_DIR}/OLMo2-1B-60BMATH_step14000_interleave_twoloader_n32_sft_50000_ppo_0_math/hf_model/step*"
+    echo "ERROR: No checkpoints found at ${CHECKPOINT_BASE_DIR}/olmo2_1b_60bmath_step*_omi_n32/hf_model/step*"
     exit 1
 fi
 
