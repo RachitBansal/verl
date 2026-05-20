@@ -103,9 +103,9 @@ def extract_boxed_answer(text: str) -> Optional[str]:
 def compute_score(solution_str, ground_truth) -> float:
     retval = 0.0
     try:
-        # Use the new regex-based extraction
-        answer = extract_boxed_answer(solution_str)
-        if answer is not None:
+        string_in_last_boxed = last_boxed_only_string(solution_str)
+        if string_in_last_boxed is not None:
+            answer = remove_boxed(string_in_last_boxed)
             if is_equiv(answer, ground_truth):
                 retval = 1.0
     except Exception as e:
