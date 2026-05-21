@@ -108,15 +108,10 @@ rl4b_pattern = re.compile(
     r"olmo2_4b_step(?P<pt_step>\d+)_omi_n(?P<num_rollouts>\d+)-step(?P<rl_step>\d+)-rl-0shot-boxed-(?P<samples>\d+)samples-temp(?P<temp>[\d.]+)$"
 )
 
-# --- NEW 4B series (overlay) -----------------------------------------------
+# --- NEW 4B base (overlay) -------------------------------------------------
 # 4B Base (8-shot, stage1-50B): "4B-stage1-50B-step{step}-{shot}shot-{samples}samples-temp{temp}"
 pre4b_new_pattern = re.compile(
     r"4B-stage1-50B-step(?P<step>\d+)-(?P<shot>\d+)shot-(?P<samples>\d+)samples-temp(?P<temp>[\d.]+)$"
-)
-
-# 4B Direct RL (rmath = sft_0_ppo_50000): "OLMo2-4B_step{pt}_interleave_twoloader_n{r}_sft_0_ppo_50000_rmath-step{rl}-rl-..."
-rl4b_new_pattern = re.compile(
-    r"OLMo2-4B_step(?P<pt_step>\d+)_interleave_twoloader_n(?P<num_rollouts>\d+)_sft_0_ppo_50000_rmath-step(?P<rl_step>\d+)-rl-0shot-boxed-(?P<samples>\d+)samples-temp(?P<temp>[\d.]+)$"
 )
 
 
@@ -124,7 +119,7 @@ rl4b_new_pattern = re.compile(
 pre50_rows, rl50_rows = [], []
 pre60_rows, rl60_rows = [], []
 pre4b_rows, rl4b_rows = [], []
-pre4b_new_rows, rl4b_new_rows = [], []
+pre4b_new_rows = []
 
 for BASE_DIR in BASE_DIRS:
     if not BASE_DIR.exists():
@@ -241,22 +236,6 @@ for BASE_DIR in BASE_DIRS:
                 })
             continue
 
-        # NEW 4B RL (rmath family)
-        m = rl4b_new_pattern.match(name)
-        if m:
-            samples = int(m.group("samples"))
-            result_file = "math_majority_results.txt" if samples > 1 else "math_results.txt"
-            for k, score in read_score(path / result_file, samples=samples).items():
-                rl4b_new_rows.append({
-                    "pt_step": int(m.group("pt_step")),
-                    "rl_step": int(m.group("rl_step")),
-                    "samples": k,
-                    "temp": float(m.group("temp")),
-                    "num_rollouts": int(m.group("num_rollouts")),
-                    "score": score,
-                })
-            continue
-
 
 
 pre50_df = pd.DataFrame(pre50_rows)
@@ -266,7 +245,6 @@ rl60_df = pd.DataFrame(rl60_rows)
 pre4b_df = pd.DataFrame(pre4b_rows)
 rl4b_df = pd.DataFrame(rl4b_rows)
 pre4b_new_df = pd.DataFrame(pre4b_new_rows)
-rl4b_new_df = pd.DataFrame(rl4b_new_rows)
 
 # Deduplicate
 if not pre50_df.empty:
@@ -283,13 +261,11 @@ if not rl4b_df.empty:
     rl4b_df = rl4b_df.drop_duplicates(subset=["pt_step", "rl_step", "samples", "temp", "num_rollouts"], keep="first")
 if not pre4b_new_df.empty:
     pre4b_new_df = pre4b_new_df.drop_duplicates(subset=["step", "shot", "samples", "temp"], keep="first")
-if not rl4b_new_df.empty:
-    rl4b_new_df = rl4b_new_df.drop_duplicates(subset=["pt_step", "rl_step", "samples", "temp", "num_rollouts"], keep="first")
 
 print(f"Loaded: {len(pre50_df)} 50B-base, {len(rl50_df)} 50B-RL, "
       f"{len(pre60_df)} 60B-base, {len(rl60_df)} 60B-RL, "
       f"{len(pre4b_df)} 4B-base, {len(rl4b_df)} 4B-RL, "
-      f"{len(pre4b_new_df)} 4B-base-new, {len(rl4b_new_df)} 4B-RL-new")
+      f"{len(pre4b_new_df)} 4B-base-new")
 
 
 # --- Plot -------------------------------------------------------------------
@@ -382,10 +358,6 @@ diff_styles = {
         "color": color_rl4b, "marker": "*", "ls": "-", "markersize": 18,
         "linewidth": 3.5, "label": "4B Params - 50B Tokens",
     },
-    "4B_new": {
-        "color": color_rl4b, "marker": "*", "ls": "-", "markersize": 18,
-        "linewidth": 3.5, "label": "4B Params - 50B Tokens",
-    },
 }
 
 all_diffs = []
@@ -454,8 +426,7 @@ for idx, samples in enumerate(PLOT_SAMPLES):
         all_diffs.extend(dy.tolist())
         ax.plot(dx * TOKEN_MULTIPLIER, dy, **diff_styles["60B"], zorder=10)
 
-    # 4B: RL − Base. Combined series — step5000 from new rmath data, step14000 from old data.
-    # Base interpolator built from new (8-shot, stage1-50B) base since it's the proper eval.
+    # 4B: RL − Base. Base interpolator from 8-shot stage1-50B base evals.
     base4b_token_at = None
     if not pre4b_new_df.empty:
         curve4b_new = pre4b_new_df[
@@ -468,35 +439,20 @@ for idx, samples in enumerate(PLOT_SAMPLES):
             _by = curve4b_new["score"].values * 100
             base4b_token_at = lambda tok, bx=_bx_tok, by=_by: np.interp(tok, bx, by)
 
-    combined_pts = []  # list of (pt_step, rl_score_pct)
-    # step5000 from new rmath data
-    if not rl4b_new_df.empty:
-        sub = rl4b_new_df[
-            (rl4b_new_df["samples"] == samples)
-            & (rl4b_new_df["temp"] == TARGET_TEMP)
-            & (rl4b_new_df["pt_step"] == 5000)
-        ]
-        if not sub.empty:
-            row = sub.loc[sub["rl_step"].idxmax()]
-            combined_pts.append((5000, row["score"] * 100))
-    # step14000 from old data
+    rl_last_4b = None
     if not rl4b_df.empty:
-        sub = rl4b_df[
+        rl_sub_4b = rl4b_df[
             (rl4b_df["samples"] == samples)
             & (rl4b_df["temp"] == TARGET_TEMP)
-            & (rl4b_df["pt_step"] == 14000)
+            & (rl4b_df["num_rollouts"] == 32)
         ]
-        if not sub.empty:
-            row = sub.loc[sub["rl_step"].idxmax()]
-            combined_pts.append((14000, row["score"] * 100))
-
-    if combined_pts and base4b_token_at is not None:
-        combined_pts.sort()
-        dx_tok = np.array([p[0] for p in combined_pts]) * TOKEN_MULTIPLIER
-        rl_y = np.array([p[1] for p in combined_pts])
-        dy = rl_y - base4b_token_at(dx_tok)
+        if not rl_sub_4b.empty:
+            rl_last_4b = rl_sub_4b.loc[rl_sub_4b.groupby("pt_step")["rl_step"].idxmax()].sort_values("pt_step")
+    if rl_last_4b is not None and base4b_token_at is not None:
+        dx_tok = rl_last_4b["pt_step"].values * TOKEN_MULTIPLIER
+        dy = rl_last_4b["score"].values * 100 - base4b_token_at(dx_tok)
         all_diffs.extend(dy.tolist())
-        ax.plot(dx_tok, dy, **diff_styles["4B_new"], zorder=11)
+        ax.plot(dx_tok, dy, **diff_styles["4B"], zorder=11)
 
     # Formatting
     ax.axhline(0, color="black", linewidth=0.8, linestyle="--")
@@ -525,8 +481,8 @@ model_handles = [
            ls=diff_styles["50B"]["ls"], markersize=14, linewidth=2.5),
     Line2D([0, 1], [0, 0], color=diff_styles["60B"]["color"], marker=diff_styles["60B"]["marker"],
            ls=diff_styles["60B"]["ls"], markersize=14, linewidth=2.5),
-    Line2D([0, 1], [0, 0], color=diff_styles["4B_new"]["color"], marker=diff_styles["4B_new"]["marker"],
-           ls=diff_styles["4B_new"]["ls"], markersize=12, linewidth=2.5),
+    Line2D([0, 1], [0, 0], color=diff_styles["4B"]["color"], marker=diff_styles["4B"]["marker"],
+           ls=diff_styles["4B"]["ls"], markersize=12, linewidth=2.5),
 ]
 model_labels = [
     "N = 1B, D = 50B",

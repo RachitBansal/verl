@@ -20,7 +20,7 @@ CHECKPOINT_BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/OLMo2-4B-stage1-
 MODEL_NAME="4B-stage1-50B"
 
 # Specific checkpoint steps to evaluate (filters discovery to just these)
-CHECKPOINT_STEPS=(5000 14000)
+CHECKPOINT_STEPS=(2000 10000)
 
 # Base directory for verl
 BASE_DIR="/n/home05/sqin/rl_pretrain/verl/"
@@ -32,14 +32,14 @@ N_SAMPLES_LIST=(32)
 # SLURM Configuration
 SLURM_PARTITION="kempner_h100"
 SLURM_ACCOUNT="kempner_barak_lab"
-SLURM_TIME="20:00:00"
+SLURM_TIME="16:00:00"
 SLURM_NODES=1
 SLURM_GPUS_PER_NODE=2
 SLURM_CPUS_PER_TASK=24
 SLURM_MEM="250GB"
 
 # Evaluation flags (baked into each sbatch job at submission time)
-EVAL_GSM8K=true
+EVAL_GSM8K=false
 EVAL_MATH=true
 
 # Output directories

@@ -496,31 +496,40 @@ def build_table() -> pd.DataFrame:
 
 # ─── 4B math (custom) ────────────────────────────────────────────────────────
 # 4B base eval dirs lack omi_math_predictions.parquet, so we can't use
-# build_dataset_rows. Per user instruction:
-#   step5000 RL  -> new rmath ckpt (sft_0_ppo_50000_rmath)
-#   step14000 RL -> old olmo2_4b ckpt (omi)
+# build_dataset_rows. All direct-RL points use the omi_n32 family:
+#   olmo2_4b_step{pt}_omi_n32-step{rl}-rl-0shot-boxed-32samples-temp0.6
 MATH_4B_CFG = {
     "label": "MATH (4B / 50B-stage1)",
     "color": "#1A9641",   # green star (matches base_metric_rl_comparison)
     "marker": "*",
 }
 
-_MATH_4B_RL_PATTERNS = {
-    5000: re.compile(
-        r"OLMo2-4B_step5000_interleave_twoloader_n32_sft_0_ppo_50000_rmath"
-        r"-step(?P<rl_step>\d+)-rl-0shot-boxed-32samples-temp0\.6$"
-    ),
-    14000: re.compile(
-        r"olmo2_4b_step14000_omi_n\d+"
-        r"-step(?P<rl_step>\d+)-rl-0shot-boxed-32samples-temp0\.6$"
-    ),
-}
+_MATH_4B_RL_PATTERN = re.compile(
+    r"olmo2_4b_step(?P<pt_step>\d+)_omi_n32"
+    r"-step(?P<rl_step>\d+)-rl-0shot-boxed-32samples-temp0\.6$"
+)
 
 
 def build_math_4b_rows() -> list[dict]:
     base_template = "4B-stage1-50B-step{step}-8shot-32samples-temp0.6"
+
+    # Discover all (pt_step -> [(rl_step, path)]) matching the single pattern.
+    by_pt_step: dict[int, list[tuple[int, Path]]] = {}
+    for base in BASE_DIRS:
+        if not base.exists():
+            continue
+        for path in base.iterdir():
+            if not path.is_dir():
+                continue
+            m = _MATH_4B_RL_PATTERN.match(path.name)
+            if not m:
+                continue
+            by_pt_step.setdefault(int(m.group("pt_step")), []).append(
+                (int(m.group("rl_step")), path)
+            )
+
     rows = []
-    for pt_step, rl_re in _MATH_4B_RL_PATTERNS.items():
+    for pt_step in sorted(by_pt_step):
         base_dir = find_first(base_template.format(step=pt_step))
         if base_dir is None:
             print(f"  [math_4b skip step={pt_step}] no base eval dir")
@@ -530,20 +539,7 @@ def build_math_4b_rows() -> list[dict]:
             print(f"  [math_4b skip step={pt_step}] no base test majority")
             continue
 
-        candidates: list[tuple[int, Path]] = []
-        for base in BASE_DIRS:
-            if not base.exists():
-                continue
-            for path in base.iterdir():
-                if not path.is_dir():
-                    continue
-                m = rl_re.match(path.name)
-                if m:
-                    candidates.append((int(m.group("rl_step")), path))
-        if not candidates:
-            print(f"  [math_4b skip step={pt_step}] no RL eval dir")
-            continue
-        candidates.sort(key=lambda x: x[0], reverse=True)
+        candidates = sorted(by_pt_step[pt_step], key=lambda x: x[0], reverse=True)
         chosen = next((p for _s, p in candidates if (p / "math_majority_results.txt").exists()), None)
         if chosen is None:
             print(f"  [math_4b skip step={pt_step}] no RL test majority")

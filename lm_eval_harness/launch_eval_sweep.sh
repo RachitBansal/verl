@@ -25,11 +25,14 @@ set -u
 CHECKPOINT_BASE_DIR="/n/netscratch/dam_lab/Everyone/rl_pretrain/experiments"
 
 # Experiment pattern to match (glob)
-EXP_PATTERN="${EXP_PATTERN:-OLMo2-1B_step*_interleave_twoloader_n32_sft_50000_ppo_0_rgsm}"
+EXP_PATTERN="${EXP_PATTERN:-OLMo2-1B_step*_parallel_avg_n32_rl1e-6_sft1e-6_smbatch}"
+
+# Pretrain steps to skip (e.g. early-pretrain ckpts that aren't of interest).
+EXCLUDE_STEPS=(1000)
 
 # Task config + per-task limit (passed through to run_eval.py)
 TASK_CONFIG="${TASK_CONFIG:-eval_tasks_nonmath.yaml}"
-LIMIT="${LIMIT:-}"
+LIMIT="${LIMIT:-1000}"
 
 BASE_DIR="/n/home05/sqin/rl_pretrain/verl"
 
@@ -67,11 +70,21 @@ CHECKPOINT_NAMES=()
 echo "Discovering checkpoints (last step per experiment)..."
 for exp_dir in "${CHECKPOINT_BASE_DIR}"/${EXP_PATTERN}; do
     [ -d "${exp_dir}/hf_model" ] || continue
+    experiment_name=$(basename "${exp_dir}")
+    # Extract pretrain step number and skip if in EXCLUDE_STEPS.
+    pt_step=$(echo "${experiment_name}" | sed -nE 's/^OLMo2-1B_step([0-9]+)_.*/\1/p')
+    skip=0
+    for ex in "${EXCLUDE_STEPS[@]}"; do
+        [ "${pt_step}" = "${ex}" ] && skip=1 && break
+    done
+    if [ "${skip}" = "1" ]; then
+        echo "  ${experiment_name} -> SKIPPED (excluded pretrain step ${pt_step})"
+        continue
+    fi
     # Find the last (highest) step directory
     last_step=$(ls "${exp_dir}/hf_model/" | sort -t'p' -k2 -n | tail -1)
     [ -z "${last_step}" ] && continue
     checkpoint="${exp_dir}/hf_model/${last_step}"
-    experiment_name=$(basename "${exp_dir}")
     CHECKPOINT_PATHS+=("${checkpoint}")
     CHECKPOINT_NAMES+=("${experiment_name}_${last_step}")
     echo "  ${experiment_name} -> ${last_step}"

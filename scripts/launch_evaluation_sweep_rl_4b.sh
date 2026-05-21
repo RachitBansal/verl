@@ -28,7 +28,7 @@ N_SAMPLES_LIST=(32)
 # SLURM Configuration
 SLURM_PARTITION="kempner_h100"
 SLURM_ACCOUNT="kempner_barak_lab"
-SLURM_TIME="20:00:00"
+SLURM_TIME="36:00:00"
 SLURM_NODES=1
 SLURM_GPUS_PER_NODE=2
 SLURM_CPUS_PER_TASK=24
@@ -70,10 +70,10 @@ while IFS= read -r -d '' checkpoint; do
     CHECKPOINT_NAMES+=("${experiment_name}")
     CHECKPOINT_STEPS+=("${checkpoint_step}")
     echo "  Found: ${experiment_name} (${checkpoint_step_dir}) -> ${checkpoint}"
-done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 3 -type d -path "${CHECKPOINT_BASE_DIR}/OLMo2-4B_step*_interleave_twoloader_n32_sft_50000_ppo_0_math/hf_model/step*" -print0 | sort -z)
+done < <(find "${CHECKPOINT_BASE_DIR}" -maxdepth 3 -type d -path "${CHECKPOINT_BASE_DIR}/olmo2_4b_step*_omi_n32/hf_model/step*" -print0 | sort -z)
 
 if [ ${#CHECKPOINT_PATHS[@]} -eq 0 ]; then
-    echo "ERROR: No checkpoints found at ${CHECKPOINT_BASE_DIR}/OLMo2-4B_step*_interleave_twoloader_n32_sft_50000_ppo_0_math/hf_model/step*"
+    echo "ERROR: No checkpoints found at ${CHECKPOINT_BASE_DIR}/olmo2_4b_step*_omi_n32/hf_model/step*"
     exit 1
 fi
 

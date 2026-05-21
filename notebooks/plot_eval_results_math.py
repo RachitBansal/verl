@@ -522,24 +522,20 @@ plt.show()
 
 # --- Plot 5: 4B variant ----------------------------------------------------
 # Base:        4B-stage1-50B-step{step}-{shot}shot-{samples}samples-temp{temp}
-# Direct RL:   OLMo2-4B_step{pt}_interleave_twoloader_n32_sft_0_ppo_50000_rmath-step{rl}-...
+# Direct RL:   olmo2_4b_step{pt}_omi_n{r}-step{rl}-rl-0shot-boxed-{samples}samples-temp{temp}
 # SFT-Single:  OLMo2-4B_step{pt}_interleave_twoloader_n32_sft_50000_ppo_0_math-step{rl}-...
 
 pre4b_pattern = re.compile(
     r"4B-stage1-50B-step(?P<step>\d+)-(?P<shot>\d+)shot-(?P<samples>\d+)samples-temp(?P<temp>[\d.]+)$"
 )
 rl4b_pattern = re.compile(
-    r"OLMo2-4B_step(?P<pt_step>\d+)_interleave_twoloader_n(?P<num_rollouts>\d+)_sft_0_ppo_50000_rmath-step(?P<rl_step>\d+)-rl-0shot-boxed-(?P<samples>\d+)samples-temp(?P<temp>[\d.]+)$"
-)
-# Old 4B Direct RL: "olmo2_4b_step{pt}_omi_n{r}-step{rl}-rl-..." (used for step14000 fallback)
-rl4b_old_pattern = re.compile(
     r"olmo2_4b_step(?P<pt_step>\d+)_omi_n(?P<num_rollouts>\d+)-step(?P<rl_step>\d+)-rl-0shot-boxed-(?P<samples>\d+)samples-temp(?P<temp>[\d.]+)$"
 )
 sft4b_single_pattern = re.compile(
     r"OLMo2-4B_step(?P<pt_step>\d+)_interleave_twoloader_n(?P<num_rollouts>\d+)_sft_50000_ppo_0_math-step(?P<rl_step>\d+)-rl-0shot-boxed-(?P<samples>\d+)samples-temp(?P<temp>[\d.]+)$"
 )
 
-pre4b_rows, rl4b_rows, rl4b_old_rows, sft4b_single_rows = [], [], [], []
+pre4b_rows, rl4b_rows, sft4b_single_rows = [], [], []
 
 for BASE_DIR in BASE_DIRS:
     if not BASE_DIR.exists():
@@ -591,37 +587,19 @@ for BASE_DIR in BASE_DIRS:
                     "num_rollouts": int(m.group("num_rollouts")),
                     "score": score,
                 })
-            continue
-
-        m = rl4b_old_pattern.match(name)
-        if m:
-            samples = int(m.group("samples"))
-            result_file = "math_majority_results.txt" if samples > 1 else "math_results.txt"
-            for k, score in read_score(path / result_file, samples=samples).items():
-                rl4b_old_rows.append({
-                    "pt_step": int(m.group("pt_step")),
-                    "rl_step": int(m.group("rl_step")),
-                    "samples": k,
-                    "temp": float(m.group("temp")),
-                    "num_rollouts": int(m.group("num_rollouts")),
-                    "score": score,
-                })
 
 pre4b_df = pd.DataFrame(pre4b_rows)
 rl4b_df = pd.DataFrame(rl4b_rows)
-rl4b_old_df = pd.DataFrame(rl4b_old_rows)
 sft4b_single_df = pd.DataFrame(sft4b_single_rows)
 
 if not pre4b_df.empty:
     pre4b_df = pre4b_df.drop_duplicates(subset=["step", "shot", "samples", "temp"], keep="first")
 if not rl4b_df.empty:
     rl4b_df = rl4b_df.drop_duplicates(subset=["pt_step", "rl_step", "samples", "temp", "num_rollouts"], keep="first")
-if not rl4b_old_df.empty:
-    rl4b_old_df = rl4b_old_df.drop_duplicates(subset=["pt_step", "rl_step", "samples", "temp", "num_rollouts"], keep="first")
 if not sft4b_single_df.empty:
     sft4b_single_df = sft4b_single_df.drop_duplicates(subset=["pt_step", "rl_step", "samples", "temp", "num_rollouts"], keep="first")
 
-print(f"4B loaded: {len(pre4b_df)} pretrain, {len(rl4b_df)} RL(rmath), {len(rl4b_old_df)} RL(old), {len(sft4b_single_df)} SFT-Single")
+print(f"4B loaded: {len(pre4b_df)} pretrain, {len(rl4b_df)} RL, {len(sft4b_single_df)} SFT-Single")
 
 fig, axes = plt.subplots(1, 3, figsize=(18, 6), sharey=True)
 
@@ -637,32 +615,15 @@ for idx, samples in enumerate(PLOT_SAMPLES):
         if not pre_curve.empty:
             ax.plot(pre_curve["step"] * TOKEN_MULTIPLIER, pre_curve["score"] * 100, **styles["pretrain"])
 
-    # RL: combined series — step5000 from new rmath data, step14000 from old olmo2_4b data.
-    combined_rl_pts = []  # list of (pt_step, rl_score_pct)
     if not rl4b_df.empty:
-        sub = rl4b_df[
+        rl_subset = rl4b_df[
             (rl4b_df["samples"] == samples)
             & (rl4b_df["temp"] == TARGET_TEMP)
             & (rl4b_df["num_rollouts"] == 32)
-            & (rl4b_df["pt_step"] == 5000)
         ]
-        if not sub.empty:
-            row = sub.loc[sub["rl_step"].idxmax()]
-            combined_rl_pts.append((5000, row["score"] * 100))
-    if not rl4b_old_df.empty:
-        sub = rl4b_old_df[
-            (rl4b_old_df["samples"] == samples)
-            & (rl4b_old_df["temp"] == TARGET_TEMP)
-            & (rl4b_old_df["pt_step"] == 14000)
-        ]
-        if not sub.empty:
-            row = sub.loc[sub["rl_step"].idxmax()]
-            combined_rl_pts.append((14000, row["score"] * 100))
-    if combined_rl_pts:
-        combined_rl_pts.sort()
-        rl_x = [p[0] * TOKEN_MULTIPLIER for p in combined_rl_pts]
-        rl_y = [p[1] for p in combined_rl_pts]
-        ax.plot(rl_x, rl_y, **styles["rl"], zorder=10)
+        if not rl_subset.empty:
+            rl_last = rl_subset.loc[rl_subset.groupby("pt_step")["rl_step"].idxmax()].sort_values("pt_step")
+            ax.plot(rl_last["pt_step"] * TOKEN_MULTIPLIER, rl_last["score"] * 100, **styles["rl"], zorder=10)
 
     if not sft4b_single_df.empty:
         sft_single_subset = sft4b_single_df[
