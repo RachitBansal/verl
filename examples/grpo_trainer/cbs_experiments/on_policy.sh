@@ -23,6 +23,8 @@ experiment_name="n${N}_bsz${BSZ}"
 
 source /n/home03/cmohri/venvs/verl_env/bin/activate
 
+export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_JOB_ID}
+
 n_resp_per_prompt=${N}
 use_kl_loss=True
 kl_loss_coeff=0.001
@@ -35,8 +37,8 @@ train_prompt_mini_bsz=$((train_prompt_bsz * n_resp_per_prompt))
 gpu_memory_utilization=0.50
 gen_tp=1
 sp_size=1
-max_prompt_length=2048
-max_response_length=4096
+max_prompt_length=1024
+max_response_length=3072
 data_truncation='left'
 
 model_path=/n/netscratch/sham_lab/Everyone/cmohri/rl_cbs/models/Qwen2.5-Math-1.5B-Instruct
@@ -56,7 +58,8 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=${train_prompt_mini_bsz} \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.actor.use_dynamic_bsz=True \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=32768 \
     actor_rollout_ref.actor.use_kl_loss=${use_kl_loss} \
     actor_rollout_ref.actor.kl_loss_coef=${kl_loss_coeff} \
     actor_rollout_ref.actor.entropy_coeff=0 \
