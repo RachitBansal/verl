@@ -7,7 +7,7 @@
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=200G
-#SBATCH --time=5:00:00
+#SBATCH --time=25:00:00
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
 
@@ -19,9 +19,11 @@ set -xeuo pipefail
 ####################
 
 project_name="grpo_on_policy_cbs"
-experiment_name="n${N}_bsz${BSZ}"
+experiment_name="n${N}_bsz${BSZ}_lr${LR}"
 
 source /n/home03/cmohri/venvs/verl_env/bin/activate
+
+OUTPUT_DIR="/n/netscratch/sham_lab/Everyone/rl_cbs/experiments"
 
 export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_JOB_ID}
 
@@ -55,7 +57,7 @@ python3 -m verl.trainer.main_ppo \
     data.filter_overlong_prompts=True \
     data.truncation=${data_truncation} \
     actor_rollout_ref.model.path=${model_path} \
-    actor_rollout_ref.actor.optim.lr=1e-6 \
+    actor_rollout_ref.actor.optim.lr=${LR} \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=${train_prompt_mini_bsz} \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
@@ -82,8 +84,10 @@ python3 -m verl.trainer.main_ppo \
     trainer.logger='["console","wandb"]' \
     trainer.project_name=${project_name} \
     trainer.experiment_name=${experiment_name} \
+    trainer.default_local_dir="${OUTPUT_DIR}/${experiment_name}" \
     trainer.n_gpus_per_node=4 \
+    trainer.max_actor_ckpt_to_keep=1 \
     trainer.nnodes=1 \
-    trainer.save_freq=25 \
+    trainer.save_freq=100 \
     trainer.test_freq=25 \
     trainer.total_epochs=15
