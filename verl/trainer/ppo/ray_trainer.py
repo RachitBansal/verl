@@ -1200,6 +1200,40 @@ class RayPPOTrainer:
                             config=self.config.algorithm,
                         )
 
+                        # CBS downsample-rollouts study (Q: separate σ²_intra from
+                        # advantage-estimation noise). Advantages above are computed
+                        # over ALL rollout.n rollouts per prompt (high-quality, ~true
+                        # baseline). When trainer.downsample_update_k > 0 we then keep
+                        # only K of those rollouts per prompt for the actual gradient
+                        # update, carrying their rollout.n-based advantages. This holds
+                        # baseline quality fixed while varying the gradient sample count.
+                        downsample_k = self.config.trainer.get("downsample_update_k", 0)
+                        n_roll = self.config.actor_rollout_ref.rollout.n
+                        if downsample_k and 0 < downsample_k < n_roll:
+                            import numpy as _np
+
+                            uids = batch.non_tensor_batch["uid"]
+                            # rollouts of a prompt are contiguous (interleave=True), but
+                            # group by uid for robustness against ordering assumptions.
+                            idx_by_uid = {}
+                            for _i, _u in enumerate(uids):
+                                idx_by_uid.setdefault(_u, []).append(_i)
+                            # deterministic per step, varies across steps -> resamples
+                            _rng = _np.random.default_rng(self.global_steps)
+                            _sel = []
+                            for _u, _idxs in idx_by_uid.items():
+                                if len(_idxs) <= downsample_k:
+                                    _sel.extend(_idxs)
+                                else:
+                                    _sel.extend(
+                                        _rng.choice(_idxs, size=downsample_k, replace=False).tolist()
+                                    )
+                            _sel.sort()
+                            batch = batch.select_idxs(_sel)
+                            metrics["downsample/k"] = downsample_k
+                            metrics["downsample/n_rollouts_generated"] = n_roll
+                            metrics["downsample/rows_after"] = len(_sel)
+
                     # update critic
                     if self.use_critic:
                         with marked_timer("update_critic", timing_raw, color="pink"):
