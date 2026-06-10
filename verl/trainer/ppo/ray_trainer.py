@@ -1213,26 +1213,40 @@ class RayPPOTrainer:
                             import numpy as _np
 
                             uids = batch.non_tensor_batch["uid"]
-                            # rollouts of a prompt are contiguous (interleave=True), but
-                            # group by uid for robustness against ordering assumptions.
-                            idx_by_uid = {}
-                            for _i, _u in enumerate(uids):
-                                idx_by_uid.setdefault(_u, []).append(_i)
-                            # deterministic per step, varies across steps -> resamples
+                            n_prompts = len(uids) // n_roll
+
+                            # Sort by uid so same-prompt rollouts are contiguous, then
+                            # reshape to (n_prompts, n_roll) for vectorised operations.
+                            sort_order = _np.argsort(uids, kind="stable")
+                            grouped = sort_order.reshape(n_prompts, n_roll)  # (n_prompts, n_roll)
+
+                            # sequence-level scalar reward and advantage (one value per response)
+                            _resp_mask = batch.batch["response_mask"]
+                            _seq_rewards = batch.batch["token_level_rewards"].sum(dim=-1)
+                            _seq_len = _resp_mask.sum(dim=-1).clamp(min=1)
+                            _seq_adv = (batch.batch["advantages"] * _resp_mask).sum(dim=-1) / _seq_len
+
+                            # pre-downsample metrics
+                            _rewards_grouped = _seq_rewards.cpu().numpy()[sort_order].reshape(n_prompts, n_roll)
+                            _prompt_stds = _rewards_grouped.std(axis=1)
+                            metrics["downsample/pre/mean_reward"] = float(_seq_rewards.mean().item())
+                            metrics["downsample/pre/adv_magnitude"] = float(_seq_adv.abs().mean().item())
+                            metrics["downsample/pre/zero_sigma_frac"] = float((_prompt_stds < 1e-6).mean())
+
+                            # select K rollouts per prompt: shuffle each row, take first K columns
                             _rng = _np.random.default_rng(self.global_steps)
-                            _sel = []
-                            for _u, _idxs in idx_by_uid.items():
-                                if len(_idxs) <= downsample_k:
-                                    _sel.extend(_idxs)
-                                else:
-                                    _sel.extend(
-                                        _rng.choice(_idxs, size=downsample_k, replace=False).tolist()
-                                    )
-                            _sel.sort()
-                            batch = batch.select_idxs(_sel)
+                            sel = _np.sort(_rng.permuted(grouped, axis=1)[:, :downsample_k].ravel())
+                            batch = batch.select_idxs(sel)
+
+                            # post-downsample metrics
+                            _resp_mask_post = batch.batch["response_mask"]
+                            _seq_rewards_post = batch.batch["token_level_rewards"].sum(dim=-1)
+                            _seq_adv_post = (batch.batch["advantages"] * _resp_mask_post).sum(dim=-1) / _resp_mask_post.sum(dim=-1).clamp(min=1)
+                            metrics["downsample/post/mean_reward"] = float(_seq_rewards_post.mean().item())
+                            metrics["downsample/post/adv_magnitude"] = float(_seq_adv_post.abs().mean().item())
                             metrics["downsample/k"] = downsample_k
                             metrics["downsample/n_rollouts_generated"] = n_roll
-                            metrics["downsample/rows_after"] = len(_sel)
+                            metrics["downsample/rows_after"] = len(sel)
 
                     # update critic
                     if self.use_critic:

@@ -6,8 +6,8 @@ set -euo pipefail
 # Usage: N=16 bash sweep_on_policy.sh
 ####################
 
-BSZ_VALUES=(4   8     16    32    64     128    256)
-LR_VALUES=(1e-6 2e-6  4e-6  8e-6  1.6e-5 3.2e-5 6.4e-5)
+BSZ_VALUES=(8)
+LR_VALUES=(3e-6)
 
 N=${N:-16}
 

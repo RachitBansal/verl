@@ -36,7 +36,7 @@ use_kl_in_reward=False
 train_prompt_bsz=${BSZ}
 train_prompt_mini_bsz=$((train_prompt_bsz * n_resp_per_prompt))
 
-gpu_memory_utilization=0.50
+gpu_memory_utilization=0.7
 gen_tp=1
 sp_size=1
 max_prompt_length=1024
