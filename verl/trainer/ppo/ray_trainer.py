@@ -1232,10 +1232,29 @@ class RayPPOTrainer:
                             metrics["downsample/pre/mean_reward"] = float(_seq_rewards.mean().item())
                             metrics["downsample/pre/adv_magnitude"] = float(_seq_adv.abs().mean().item())
                             metrics["downsample/pre/zero_sigma_frac"] = float((_prompt_stds < 1e-6).mean())
+                            # Heaviest advantage in the batch. With N-sample normalisation the
+                            # positive tail reaches sqrt((N-k)/k) for k successes -- ~7.9 at N=64
+                            # vs ~3.9 at N=16 -- so this tracks the extra-weight "rare success"
+                            # samples that plain GRPO-16 would never see.
+                            metrics["downsample/pre/max_abs_adv"] = float(_seq_adv.abs().max().item())
 
                             # select K rollouts per prompt: shuffle each row, take first K columns
                             _rng = _np.random.default_rng(self.global_steps)
-                            sel = _np.sort(_rng.permuted(grouped, axis=1)[:, :downsample_k].ravel())
+                            sel_grouped = _rng.permuted(grouped, axis=1)[:, :downsample_k]  # (n_prompts, K)
+                            sel = _np.sort(sel_grouped.ravel())
+
+                            # Lost-cancellation term. Full GRPO has sum_i A_i == 0 within every
+                            # prompt; the kept subset does not, and its per-prompt mean advantage
+                            # is a random prompt-wide push with variance ~ (1/K)(1-K/N) on
+                            # non-degenerate prompts (0.047 -> std 0.217 at K=16, N=64). This is
+                            # the sigma^2_intra component the study is after; log its realised std.
+                            _prompt_mean_adv = _seq_adv.cpu().numpy()[sel_grouped].mean(axis=1)  # (n_prompts,)
+                            _nondeg = _prompt_stds >= 1e-6
+                            metrics["downsample/post/prompt_mean_adv_std"] = float(_prompt_mean_adv.std())
+                            metrics["downsample/post/prompt_mean_adv_std_nondeg"] = (
+                                float(_prompt_mean_adv[_nondeg].std()) if _nondeg.sum() > 1 else 0.0
+                            )
+
                             batch = batch.select_idxs(sel)
 
                             # post-downsample metrics
@@ -1244,6 +1263,7 @@ class RayPPOTrainer:
                             _seq_adv_post = (batch.batch["advantages"] * _resp_mask_post).sum(dim=-1) / _resp_mask_post.sum(dim=-1).clamp(min=1)
                             metrics["downsample/post/mean_reward"] = float(_seq_rewards_post.mean().item())
                             metrics["downsample/post/adv_magnitude"] = float(_seq_adv_post.abs().mean().item())
+                            metrics["downsample/post/max_abs_adv"] = float(_seq_adv_post.abs().max().item())
                             metrics["downsample/k"] = downsample_k
                             metrics["downsample/n_rollouts_generated"] = n_roll
                             metrics["downsample/rows_after"] = len(sel)

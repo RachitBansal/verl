@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=cbs_downsample
-#SBATCH --account=kempner_dam_lab
-#SBATCH --partition=kempner_h100
+#SBATCH --account=kempner_sham_lab
+#SBATCH --partition=kempner_h200
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=200G
-#SBATCH --time=72:00:00
+#SBATCH --time=2-00:00:00
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
 
@@ -18,40 +18,51 @@ set -xeuo pipefail
 # Generate N rollouts per prompt, compute GRPO advantages over ALL N (high-quality
 # baseline), then downsample DSK of them per prompt for the actual gradient update.
 # Decouples advantage-estimation quality (fixed at N) from gradient sample count (DSK).
-# Usage: BSZ=128 N=64 DSK=8 LR=1e-5 sbatch on_policy_downsample.sh
+# Usage (from the repo root, like on_policy.sh — verl resolves via cwd and logs/
+# is relative to it):
+#   BSZ=128 N=64 DSK=16 LR=3e-5 KL_COEF=1e-2 sbatch examples/grpo_trainer/cbs_experiments/on_policy_downsample.sh
+# Optional: TAG=v2 sbatch ... — distinguishes a rerun of the same config from an
+# earlier one so they don't share an experiment name / checkpoint dir.
+#
+# Runs from this repo (cmohri's venv imports verl from team_verl), so it picks up
+# the loss-normalisation fix in dp_actor.update_policy (micro-batch weights now
+# sum to 1 over the rows actually trained). Earlier downsample runs (brachit's
+# cbs_k1_runs) predate that fix; the experiment name carries an "_updated_scaling"
+# suffix so the two sets never mix within the shared grpo_on_policy_cbs project.
 ####################
 
+KL_COEF=${KL_COEF:-0.001}
+TAG=${TAG:-}
+
 project_name="grpo_on_policy_cbs"
-experiment_name="downsample_n${N}_dsk${DSK}_bsz${BSZ}_lr${LR}"
+experiment_name="downsample_n${N}_dsk${DSK}_bsz${BSZ}_lr${LR}_kl${KL_COEF}_updated_scaling"
+if [ -n "${TAG}" ]; then
+    experiment_name="${experiment_name}_${TAG}"
+fi
 
-source /n/holylabs/dam_lab/Lab/brachit/envs/bin/activate
-# verl is not pip-installed in this env; use the local source tree directly.
-export PYTHONPATH=/n/home08/brachit/cbs-experiments/verl:${PYTHONPATH:-}
+source /n/home03/cmohri/venvs/verl_env/bin/activate
 
-OUTPUT_DIR="/n/netscratch/dam_lab/Everyone/brachit/cbs_k1_runs"
+OUTPUT_DIR="/n/netscratch/sham_lab/Everyone/rl_cbs/experiments"
 
 export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_JOB_ID}
-# Project grpo_on_policy_cbs is owned by cmohri's entity; rachitbansal can't
-# write to it. Route via the shared harvardml team (matches cbs_sweep.sh).
-export WANDB_ENTITY=harvardml
 
 # /tmp/ray on these compute nodes is mode 777 and accumulates other users'
 # stale session_latest symlinks; ray.init() auto-attaches to those dead GCS
-# addresses and times out. Use a job-private ray temp dir + stop any local
-# ray we may have left behind.
-export RAY_TMPDIR=/tmp/ray_brachit_${SLURM_JOB_ID}
+# addresses and times out. Use a job-private ray temp dir.
+export RAY_TMPDIR=/tmp/ray_${USER}_${SLURM_JOB_ID}
 mkdir -p "${RAY_TMPDIR}"
-ray stop --force 2>/dev/null || true
-sleep 5
 
 n_resp_per_prompt=${N}
 use_kl_loss=True
-kl_loss_coeff=0.001
+kl_loss_coeff=${KL_COEF}
 adv_estimator=grpo
 use_kl_in_reward=False
 
 train_prompt_bsz=${BSZ}
-train_prompt_mini_bsz=$((train_prompt_bsz * n_resp_per_prompt))
+# ppo_mini_batch_size is denominated in PROMPTS (same unit as data.train_batch_size);
+# the worker multiplies by rollout.n itself. Setting it equal to train_batch_size
+# gives one optimizer step over the whole rollout batch (fully on-policy).
+train_prompt_mini_bsz=${train_prompt_bsz}
 
 gpu_memory_utilization=0.50
 gen_tp=1
@@ -60,9 +71,9 @@ max_prompt_length=1024
 max_response_length=3072
 data_truncation='left'
 
-model_path=/n/netscratch/sham_lab/Everyone/cmohri/rl_cbs/models/Qwen2.5-Math-1.5B-Instruct
-train_data=/n/netscratch/sham_lab/Everyone/cmohri/rl_cbs/data/dapo.parquet
-test_data=/n/netscratch/sham_lab/Everyone/cmohri/rl_cbs/data/aime1983_2024.parquet
+model_path=/n/holylabs/LABS/sham_lab/Everyone/rl_cbs/models/Qwen2.5-Math-1.5B-Instruct
+train_data=/n/holylabs/LABS/sham_lab/Everyone/rl_cbs/data/dapo.parquet
+test_data=/n/holylabs/LABS/sham_lab/Everyone/rl_cbs/data/aime1983_2024.parquet
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=${adv_estimator} \

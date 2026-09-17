@@ -412,10 +412,14 @@ class DataParallelPPOActor(BasePPOActor):
                     max_token_len = self.config.ppo_max_token_len_per_gpu * self.ulysses_sequence_parallel_size
                     micro_batches, _ = prepare_dynamic_batch(mini_batch, max_token_len=max_token_len)
                 else:
-                    self.gradient_accumulation = (
-                        self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
-                    )
                     micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
+
+                # Rows actually present in this mini-batch. Used (rather than the configured
+                # ppo_mini_batch_size) to normalise the accumulated gradient, so the per-micro-batch
+                # weights below sum to exactly 1 even when the mini-batch is short of the config
+                # value -- e.g. rows dropped after generation (trainer.downsample_update_k,
+                # rejection sampling) or ppo_mini_batch_size exceeding the available data.
+                mini_batch_size = len(mini_batch)
 
                 self.actor_optimizer.zero_grad()
 
@@ -430,10 +434,9 @@ class DataParallelPPOActor(BasePPOActor):
                     entropy_coeff = self.config.entropy_coeff
                     loss_agg_mode = self.config.loss_agg_mode
 
-                    if self.config.use_dynamic_bsz:
-                        loss_scale_factor = response_mask.shape[0] / self.config.ppo_mini_batch_size
-                    else:
-                        loss_scale_factor = 1 / self.gradient_accumulation
+                    # Row-weighted so that unequal (dynamic) micro-batch means combine into the
+                    # mini-batch mean; identical to 1/gradient_accumulation for equal micro-batches.
+                    loss_scale_factor = response_mask.shape[0] / mini_batch_size
 
                     # all return: (bsz, response_length)
                     calculate_entropy = False

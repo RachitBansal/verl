@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=cbs_on_policy
 #SBATCH --account=kempner_sham_lab
-#SBATCH --partition=kempner_h100
+#SBATCH --partition=kempner_h200
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
@@ -16,10 +16,23 @@ set -xeuo pipefail
 ####################
 # Fully on-policy training
 # Usage: BSZ=16 N=16 sbatch on_policy.sh
+# Optional: KL_COEF=0 sbatch on_policy.sh (defaults to 0.001)
+# Optional: TAG=v2 sbatch on_policy.sh — appended after _updated_scaling; distinguishes a rerun of the same
+# bsz/lr/kl from an earlier one so they don't share an experiment name /
+# checkpoint dir.
 ####################
 
+KL_COEF=${KL_COEF:-0.001}
+TAG=${TAG:-}
+TEST_FREQ=${TEST_FREQ:-25}   # validation interval in steps; 10 for bsz>=1024 where 50% arrives in ~25-50 steps
+
 project_name="grpo_on_policy_cbs"
-experiment_name="n${N}_bsz${BSZ}_lr${LR}"
+# _updated_scaling marks runs on the fixed dp_actor loss normalisation (2026-09-11);
+# pre-fix runs of the same config carry no suffix, so the two never share a name/dir.
+experiment_name="n${N}_bsz${BSZ}_lr${LR}_kl${KL_COEF}_updated_scaling"
+if [ -n "${TAG}" ]; then
+    experiment_name="${experiment_name}_${TAG}"
+fi
 
 source /n/home03/cmohri/venvs/verl_env/bin/activate
 
@@ -29,7 +42,7 @@ export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_JOB_ID}
 
 n_resp_per_prompt=${N}
 use_kl_loss=True
-kl_loss_coeff=0.001
+kl_loss_coeff=${KL_COEF}
 adv_estimator=grpo
 use_kl_in_reward=False
 
@@ -43,9 +56,9 @@ max_prompt_length=1024
 max_response_length=3072
 data_truncation='left'
 
-model_path=/n/netscratch/sham_lab/Everyone/cmohri/rl_cbs/models/Qwen2.5-Math-1.5B-Instruct
-train_data=/n/netscratch/sham_lab/Everyone/cmohri/rl_cbs/data/dapo.parquet
-test_data=/n/netscratch/sham_lab/Everyone/cmohri/rl_cbs/data/aime1983_2024.parquet
+model_path=/n/holylabs/LABS/sham_lab/Everyone/rl_cbs/models/Qwen2.5-Math-1.5B-Instruct
+train_data=/n/holylabs/LABS/sham_lab/Everyone/rl_cbs/data/dapo.parquet
+test_data=/n/holylabs/LABS/sham_lab/Everyone/rl_cbs/data/aime1983_2024.parquet
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=${adv_estimator} \
@@ -89,5 +102,5 @@ python3 -m verl.trainer.main_ppo \
     trainer.max_actor_ckpt_to_keep=1 \
     trainer.nnodes=1 \
     trainer.save_freq=100 \
-    trainer.test_freq=25 \
+    trainer.test_freq=${TEST_FREQ} \
     trainer.total_epochs=15
