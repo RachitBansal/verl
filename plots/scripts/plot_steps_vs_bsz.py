@@ -28,9 +28,10 @@ seed = int(sys.argv[3]) if len(sys.argv) > 3 else 0
 rng = np.random.default_rng(seed)
 
 df = pd.read_csv(csv_in).dropna(subset=["bsz", "lr"])
+COL = "steps_to_50_interp" if "steps_to_50_interp" in df else "steps_to_50"   # interpolated crossing when available
 df = df[(df["kl"].round(6) == 1e-3) & (df["n"] == 16)]
 # short runs are excluded only while they have not reached 50% (a hit is a hit)
-df = df[(df["last_val_step"].fillna(0) >= SHORT_STEPS) | df["steps_to_50"].notna()]
+df = df[(df["last_val_step"].fillna(0) >= SHORT_STEPS) | df[COL].notna()]
 df["bsz"] = df["bsz"].astype(int)
 
 # ---- collapse duplicates -----------------------------------------------------
@@ -38,12 +39,12 @@ rows, choices = [], []
 for (bsz, lr), s in df.groupby(["bsz", "lr"]):
     if len(s) > 1 and s["name"].str.contains("_v2").any():
         pick = s.iloc[rng.integers(len(s))]
-        choices.append((bsz, lr, len(s), pick["name"], pick["id"], pick["steps_to_50"]))
+        choices.append((bsz, lr, len(s), pick["name"], pick["id"], pick[COL]))
     elif len(s) > 1:
-        pick = s.sort_values("steps_to_50", na_position="last").iloc[0]
+        pick = s.sort_values(COL, na_position="last").iloc[0]
     else:
         pick = s.iloc[0]
-    rows.append(dict(bsz=bsz, lr=lr, steps=pick["steps_to_50"], run=pick["name"], id=pick["id"],
+    rows.append(dict(bsz=bsz, lr=lr, steps=pick[COL], run=pick["name"], id=pick["id"],
                      longest=pick["last_val_step"], n_candidates=len(s),
                      fixed="updated_scaling" in str(pick["name"])))
 g = pd.DataFrame(rows)
@@ -68,7 +69,7 @@ ax.scatter(fx["bsz"], fx["steps"], s=10, c=INK, zorder=7)
 b0, s0 = best["bsz"].iloc[0], best["steps"].iloc[0]
 xs = np.array([best["bsz"].min() / 1.3, best["bsz"].max() * 1.3])
 ax.plot(xs, s0 * b0 / xs, ls=":", lw=1.3, color=MUTED, zorder=2)
-ax.annotate("perfect scaling\n(steps ∝ 1/batch)", (xs[1], s0 * b0 / xs[1]), xytext=(-4, 8),
+ax.annotate("perfect scaling (steps ∝ 1/batch)", (xs[1], s0 * b0 / xs[1]), xytext=(-4, -6), va="top",
             textcoords="offset points", ha="right", fontsize=8.5, color=INK2)
 
 # headline curve: fastest LR per batch
@@ -77,7 +78,7 @@ ax.scatter(best["bsz"], best["steps"], s=120, facecolors=SURFACE, edgecolors=INK
            zorder=5)
 for i, (_, r) in enumerate(best.iterrows()):
     below = i == len(best) - 2   # second-to-last label goes under the point to avoid the last one
-    ax.annotate(f"{int(r['steps'])} steps\nlr {r['lr']:g}", (r["bsz"], r["steps"]),
+    ax.annotate(f"{r['steps']:.0f} steps\nlr {r['lr']:g}", (r["bsz"], r["steps"]),
                 xytext=(10, -28) if below else (10, 6),
                 textcoords="offset points", fontsize=8.2, color=INK, zorder=6)
 
@@ -85,7 +86,7 @@ ax.set_xscale("log", base=2); ax.set_yscale("log")
 ticks = sorted(g["bsz"].unique())
 ax.set_xticks(ticks); ax.set_xticklabels([str(t) for t in ticks])
 ax.set_xlabel("batch size (prompts per step)", color=INK2, fontsize=10)
-ax.set_ylabel("training steps to reach 50% AIME 1983-2024", color=INK2, fontsize=10)
+ax.set_ylabel("steps to 50% AIME 1983-2024 (interpolated)", color=INK2, fontsize=10)
 for s in ("top", "right"):
     ax.spines[s].set_visible(False)
 for s in ("left", "bottom"):

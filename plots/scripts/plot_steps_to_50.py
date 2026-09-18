@@ -3,7 +3,8 @@
 Input: CSV produced by pull_steps_to_50.py (one row per wandb run).
 Runs with identical (n, bsz, lr) are collapsed to the fastest one.
 
-Usage: python plot_steps_to_50.py steps_to_50.csv out.png
+Usage: python plot_steps_to_50.py steps_to_50.csv out.png [pct] [--by-n]
+  --by-n: x-axis = rollouts per prompt n at batch 128 (the rollout sweep) instead of batch size at n = 16
 """
 import sys, os
 import numpy as np
@@ -21,14 +22,20 @@ CMAP = LinearSegmentedColormap.from_list("blue_rev", RAMP[::-1])
 MISSING = "#a8a7a2"
 SHORT_STEPS = 200  # runs with fewer validated steps than this are "too early to tell"
 
-csv_in, png_out = sys.argv[1], sys.argv[2]
-PCT = int(sys.argv[3]) if len(sys.argv) > 3 else 50   # accuracy threshold in percent
-COL = f"steps_to_{PCT}"
+BY_N = "--by-n" in sys.argv
+args = [a for a in sys.argv[1:] if a != "--by-n"]
+csv_in, png_out = args[0], args[1]
+PCT = int(args[2]) if len(args) > 2 else 50   # accuracy threshold in percent
 df = pd.read_csv(csv_in)
+# interpolated crossing when the pull provides it (breaks 25-step ties), else first checkpoint
+COL = f"steps_to_{PCT}_interp" if f"steps_to_{PCT}_interp" in df else f"steps_to_{PCT}"
 df = df.dropna(subset=["bsz", "lr"])
 if "kl" in df:
     df = df[df["kl"].round(6) == 1e-3]
-df = df[df["n"] == 16]   # accuracy plots use n = 16 rollouts per prompt only
+if BY_N:
+    df = df[df["bsz"] == 128]   # rollout sweep: every n at batch 128
+else:
+    df = df[df["n"] == 16]   # batch sweep: n = 16 rollouts per prompt only
 # runs on the fixed dp_actor loss normalisation (2026-09-11) carry _updated_scaling in the name
 df["fixed"] = df["name"].str.contains("updated_scaling", na=False)
 
@@ -85,7 +92,7 @@ def panel(ax, sub, xcol, xlabel):
     # labels alternate above/below the ring so neighbours never collide
     for i, (_, r) in enumerate(best.iterrows()):
         dy = 11 if i % 2 == 0 else -17
-        ax.annotate(f"{int(r['steps'])}", (r[xcol], r["lr"]), xytext=(0, dy),
+        ax.annotate(f"{r['steps']:.0f}", (r[xcol], r["lr"]), xytext=(0, dy),
                     textcoords="offset points", ha="center", fontsize=8.5, color=INK, zorder=5)
 
     # global best on this panel: star (all ties)
@@ -104,13 +111,18 @@ def panel(ax, sub, xcol, xlabel):
 
 fig, ax = plt.subplots(figsize=(10.5, 6.2), facecolor=SURFACE)
 
-best_a, gb_a = panel(ax, g, "bsz", "batch size (prompts per step)")
-ax.set_title("n = 16 rollouts per prompt, no downsampling", loc="left",
-             fontsize=11.5, color=INK, pad=10)
+if BY_N:
+    best_a, gb_a = panel(ax, g, "n", "rollouts per prompt (n), batch 128 prompts")
+    ax.set_title("batch 128, no downsampling. Pre-fix runs at n = 32 / 64 stepped at 0.69× / 0.46× their nominal LR (Adam ε regime)",
+                 loc="left", fontsize=10.5, color=INK, pad=10)
+else:
+    best_a, gb_a = panel(ax, g, "bsz", "batch size (prompts per step)")
+    ax.set_title("n = 16 rollouts per prompt, no downsampling", loc="left",
+                 fontsize=11.5, color=INK, pad=10)
 
 sm = plt.cm.ScalarMappable(norm=norm, cmap=CMAP); sm.set_array([])
 cb = fig.colorbar(sm, ax=ax, fraction=0.035, pad=0.02)
-cb.set_label(f"training steps to reach {PCT}% AIME 1983-2024 (darker = fewer)",
+cb.set_label(f"steps to {PCT}% AIME 1983-2024, interpolated (darker = fewer)",
              color=INK2, fontsize=9.5)
 cb.ax.tick_params(colors=INK2, labelsize=8.5, length=0)
 cb.outline.set_visible(False)
@@ -129,10 +141,11 @@ legend = [
 ]
 fig.legend(handles=legend, loc="lower center", ncol=3, frameon=False, fontsize=8.8,
            labelcolor=INK2, bbox_to_anchor=(0.45, -0.07))
-fig.suptitle(f"GRPO on-policy, KL coef 1e-3: how fast each (batch size, LR) hits {PCT}% val accuracy",
+fig.suptitle(f"GRPO on-policy, KL coef 1e-3: how fast each ({'rollout count' if BY_N else 'batch size'}, LR) hits {PCT}% val accuracy",
              x=0.02, ha="left", fontsize=12.5, color=INK, y=1.0)
 fig.savefig(png_out, dpi=170, bbox_inches="tight", facecolor=SURFACE)
 
-print("per-bsz fastest:\n", best_a[["bsz", "lr", "steps", "n_runs"]].to_string(index=False))
-print("overall fastest:\n", gb_a[["bsz", "lr", "steps"]].to_string(index=False))
+xc = "n" if BY_N else "bsz"
+print(f"per-{xc} fastest:\n", best_a[[xc, "lr", "steps", "n_runs"]].to_string(index=False))
+print("overall fastest:\n", gb_a[[xc, "lr", "steps"]].to_string(index=False))
 print("wrote", png_out)

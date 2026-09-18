@@ -28,8 +28,9 @@ KL_STYLE = {
 
 csv_in, png_out = sys.argv[1], sys.argv[2]
 PCT = int(sys.argv[3]) if len(sys.argv) > 3 else 50   # accuracy threshold in percent
-COL = f"steps_to_{PCT}"
 df = pd.read_csv(csv_in).dropna(subset=["bsz", "lr"])
+# interpolated crossing when the pull provides it (breaks 25-step ties), else first checkpoint
+COL = f"steps_to_{PCT}_interp" if f"steps_to_{PCT}_interp" in df else f"steps_to_{PCT}"
 df = df[df["n"] == 16]
 df["kl"] = df["kl"].round(6)
 # runs on the fixed dp_actor loss normalisation (2026-09-11) carry _updated_scaling in the name
@@ -78,7 +79,7 @@ for kl, st in KL_STYLE.items():
     for i, (_, r) in enumerate(best.iterrows()):
         # 1e-3 labels sit above-left, 1e-2 labels below-right, so the two series never collide
         dx, dy = (-6, 12) if kl == 1e-3 else (6, -18)
-        ax.annotate(f"{int(r['steps'])}", (r["x"], r["lr"]), xytext=(dx, dy),
+        ax.annotate(f"{r['steps']:.0f}", (r["x"], r["lr"]), xytext=(dx, dy),
                     textcoords="offset points", ha="center", fontsize=8.5, color=INK, zorder=5)
 
 # overall fastest across both KLs: star(s)
@@ -104,7 +105,7 @@ ax.set_title("n = 16 rollouts per prompt, no downsampling", loc="left", fontsize
 
 sm = plt.cm.ScalarMappable(norm=norm, cmap=CMAP); sm.set_array([])
 cb = fig.colorbar(sm, ax=ax, fraction=0.035, pad=0.02)
-cb.set_label(f"training steps to reach {PCT}% AIME 1983-2024 (darker = fewer)", color=INK2, fontsize=9.5)
+cb.set_label(f"steps to {PCT}% AIME 1983-2024, interpolated (darker = fewer)", color=INK2, fontsize=9.5)
 cb.ax.tick_params(colors=INK2, labelsize=8.5, length=0)
 cb.outline.set_visible(False); cb.ax.invert_yaxis()
 

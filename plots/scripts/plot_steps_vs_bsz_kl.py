@@ -34,9 +34,10 @@ seed = int(sys.argv[3]) if len(sys.argv) > 3 else 0
 rng = np.random.default_rng(seed)
 
 df = pd.read_csv(csv_in).dropna(subset=["bsz", "lr"])
+COL = "steps_to_50_interp" if "steps_to_50_interp" in df else "steps_to_50"   # interpolated crossing when available
 df = df[df["n"] == 16]
 # short runs are excluded only while they have not reached 50% (a hit is a hit)
-df = df[(df["last_val_step"].fillna(0) >= SHORT_STEPS) | df["steps_to_50"].notna()]
+df = df[(df["last_val_step"].fillna(0) >= SHORT_STEPS) | df[COL].notna()]
 df["bsz"] = df["bsz"].astype(int)
 df["kl"] = df["kl"].round(6)
 
@@ -44,12 +45,12 @@ rows, choices = [], []
 for (kl, bsz, lr), s in df.groupby(["kl", "bsz", "lr"]):
     if len(s) > 1 and s["name"].str.contains("_v2").any():
         pick = s.iloc[rng.integers(len(s))]
-        choices.append((kl, bsz, lr, len(s), pick["name"], pick["steps_to_50"]))
+        choices.append((kl, bsz, lr, len(s), pick["name"], pick[COL]))
     elif len(s) > 1:
-        pick = s.sort_values("steps_to_50", na_position="last").iloc[0]
+        pick = s.sort_values(COL, na_position="last").iloc[0]
     else:
         pick = s.iloc[0]
-    rows.append(dict(kl=kl, bsz=bsz, lr=lr, steps=pick["steps_to_50"], run=pick["name"],
+    rows.append(dict(kl=kl, bsz=bsz, lr=lr, steps=pick[COL], run=pick["name"],
                      id=pick["id"], n_candidates=len(s),
                      fixed="updated_scaling" in str(pick["name"])))
 g = pd.DataFrame(rows)
@@ -73,7 +74,7 @@ for kl, st in SERIES.items():
     ax.scatter(best["bsz"], best["steps"], s=120, marker=st["marker"], facecolors=SURFACE,
                edgecolors=st["color"], linewidths=2, zorder=5)
     for _, r in best.iterrows():
-        ax.annotate(f"{int(r['steps'])}", (r["bsz"], r["steps"]), xytext=st["off"],
+        ax.annotate(f"{r['steps']:.0f}", (r["bsz"], r["steps"]), xytext=st["off"],
                     textcoords="offset points", ha=st["ha"], fontsize=8.2,
                     color=st["color"], zorder=6)
 
@@ -86,14 +87,14 @@ b3 = bests[1e-3]
 b0, s0 = b3["bsz"].iloc[0], b3["steps"].iloc[0]
 xs = np.array([b3["bsz"].min() / 1.3, b3["bsz"].max() * 1.3])
 ax.plot(xs, s0 * b0 / xs, ls=":", lw=1.3, color=MUTED, zorder=2)
-ax.annotate("perfect scaling\n(steps ∝ 1/batch)", (xs[1], s0 * b0 / xs[1]), xytext=(-4, 8),
+ax.annotate("perfect scaling (steps ∝ 1/batch)", (xs[1], s0 * b0 / xs[1]), xytext=(-4, -6), va="top",
             textcoords="offset points", ha="right", fontsize=8.5, color=INK2)
 
 ax.set_xscale("log", base=2); ax.set_yscale("log")
 ticks = sorted(g["bsz"].unique())
 ax.set_xticks(ticks); ax.set_xticklabels([str(t) for t in ticks])
 ax.set_xlabel("batch size (prompts per step)", color=INK2, fontsize=10)
-ax.set_ylabel("training steps to reach 50% AIME 1983-2024", color=INK2, fontsize=10)
+ax.set_ylabel("steps to 50% AIME 1983-2024 (interpolated)", color=INK2, fontsize=10)
 for sp in ("top", "right"):
     ax.spines[sp].set_visible(False)
 for sp in ("left", "bottom"):

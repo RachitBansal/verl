@@ -15,17 +15,22 @@ PLOT=/n/home03/cmohri/team_verl/.venv/bin/python
 cd plots
 
 # batch-size sweep (plain GRPO, n = 16)
-$PULL scripts/pull_steps_to_50.py csv/steps_to_50_kl.csv "1e-3,1e-2"
+$PULL scripts/pull_steps_to_50.py csv/steps_to_50_kl.csv "1e-3,1e-2"          # add --incremental to re-fetch only new/running runs
 $PLOT scripts/plot_steps_to_50.py    csv/steps_to_50_kl.csv png/steps_to_50.png        # LR x batch grid, KL 1e-3
+$PLOT scripts/plot_steps_to_50.py    csv/steps_to_50_kl.csv png/steps_to_50_n.png --by-n   # LR x rollout-count grid at batch 128
 $PLOT scripts/plot_steps_to_50_kl.py csv/steps_to_50_kl.csv png/steps_to_50_kl.png     # ... KL 1e-3 vs 1e-2
 $PLOT scripts/plot_steps_vs_bsz.py   csv/steps_to_50_kl.csv png/steps_vs_bsz.png       # steps to 50% vs batch
 $PLOT scripts/plot_steps_vs_bsz_kl.py csv/steps_to_50_kl.csv png/steps_vs_bsz_kl.png
-# (append 60 as a 3rd arg to plot_steps_to_50*.py for the 60% threshold)
 
 # downsampling vs plain GRPO on a sequences-per-step axis
 $PULL scripts/pull_steps_to_50_seqs.py csv/steps_to_50_seqs.csv
 $PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs.png
 $PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_prefix.png --prefix   # + pre-fix downsample runs
+$PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_nsweep.png --nsweep   # + rollout sweep (bsz 128, n varied; n<=16 only)
+
+# critical batch size vs target accuracy (30%..55% in 0.5% steps), from the full val curves
+$PLOT scripts/plot_cbs_vs_target.py csv/val_curves_n16.json png/cbs_vs_target.png                     # first batch off the 1/batch line
+$PLOT scripts/plot_cbs_vs_target.py csv/val_curves_n16.json png/cbs_vs_target_sustained.png --rule sustained   # first batch from which all larger batches are off
 
 # reward curves: downsample 64->K vs plain GRPO with n = K rollouts (bsz 128)
 $PULL scripts/pull_curves_downsample_vs_n.py csv/curves_downsample_vs_n.csv
@@ -33,7 +38,9 @@ $PLOT scripts/plot_curves_downsample_vs_n.py csv/curves_downsample_vs_n.csv png/
 ```
 
 Conventions: n = 16 only and KL from config for the batch-sweep plots; runs named `*_updated_scaling`
-are on the fixed dp_actor loss normalisation (2026-09-11) and are marked with a centre dot.
+are on the fixed dp_actor loss normalisation (2026-09-11) and are marked with a centre dot. Steps-to-threshold is
+the crossing interpolated between the two bracketing validation readings (`steps_to_<pct>_interp`); the first
+checkpoint at/above the threshold is kept alongside as `steps_to_<pct>`.
 ```bash
 
 # interactive: pick a target accuracy, see steps-to-target vs batch size (KL 1e-3 vs 1e-2)
