@@ -953,6 +953,25 @@ class RayPPOTrainer:
         )
         metrics.update(global_balance_stats)
 
+    def _val_reached_stop_threshold(self, val_metrics: dict) -> bool:
+        """True when trainer.stop_val_threshold is set and the chosen validation metric has reached it."""
+        thr = self.config.trainer.get("stop_val_threshold", None)
+        if thr is None or not val_metrics:
+            return False
+        key = self.config.trainer.get("stop_val_metric", None)
+        if key is None:
+            cands = sorted(k for k in val_metrics if k.startswith("val-core/") and "/mean@" in k)
+            if not cands:
+                return False
+            key = cands[0]
+        val = val_metrics.get(key)
+        if val is None:
+            return False
+        if val >= thr:
+            print(f"Stopping: {key}={val:.4f} >= trainer.stop_val_threshold={thr} at step {self.global_steps}")
+            return True
+        return False
+
     def fit(self):
         """
         The training loop of PPO.
@@ -1318,8 +1337,11 @@ class RayPPOTrainer:
                 ):
                     with marked_timer("testing", timing_raw, color="green"):
                         val_metrics: dict = self._validate()
-                        if is_last_step:
-                            last_val_metrics = val_metrics
+                    if self._val_reached_stop_threshold(val_metrics):
+                        is_last_step = True   # save the final checkpoint and return via the last-step path below
+                        metrics["training/stopped_at_val_threshold"] = 1
+                    if is_last_step:
+                        last_val_metrics = val_metrics
                     metrics.update(val_metrics)
 
                 # Check if the ESI (Elastic Server Instance)/training plan is close to expiration.

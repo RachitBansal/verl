@@ -32,6 +32,7 @@ set -xeuo pipefail
 ####################
 
 KL_COEF=${KL_COEF:-0.001}
+STOP_AT=${STOP_AT:-0.52}      # end the run once AIME val >= this; STOP_AT=null to disable
 TAG=${TAG:-}
 
 project_name="grpo_on_policy_cbs"
@@ -119,4 +120,5 @@ python3 -m verl.trainer.main_ppo \
     trainer.nnodes=1 \
     trainer.save_freq=100 \
     trainer.test_freq=25 \
+    trainer.stop_val_threshold=${STOP_AT} \
     trainer.total_epochs=15

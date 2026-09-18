@@ -180,6 +180,13 @@ trainer:
   # Validation frequency (in training iterations)
   test_freq: -1
 
+  # Stop training once a validation metric reaches this value (null = never). The final
+  # checkpoint is saved and the last validation is logged before the trainer returns.
+  stop_val_threshold: null
+
+  # Metric compared against stop_val_threshold; null = the first val-core/.../mean@N metric
+  stop_val_metric: null
+
   # Number of iterations to warm up the critic before updating policy
   critic_warmup: 0
 

@@ -24,6 +24,7 @@ set -xeuo pipefail
 
 KL_COEF=${KL_COEF:-0.001}
 TAG=${TAG:-}
+STOP_AT=${STOP_AT:-0.52}      # end the run once AIME val >= this (brackets the 50% crossing); STOP_AT=null to disable
 TEST_FREQ=${TEST_FREQ:-25}   # validation interval in steps; 10 for bsz>=1024 where 50% arrives in ~25-50 steps
 
 project_name="grpo_on_policy_cbs"
@@ -103,4 +104,5 @@ python3 -m verl.trainer.main_ppo \
     trainer.nnodes=1 \
     trainer.save_freq=100 \
     trainer.test_freq=${TEST_FREQ} \
+    trainer.stop_val_threshold=${STOP_AT} \
     trainer.total_epochs=15
