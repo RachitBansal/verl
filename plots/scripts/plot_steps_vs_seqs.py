@@ -98,10 +98,20 @@ if len(nsw_all):
     nsw_never = nsw_all[nsw_all["n"].isin(_never_n)].sort_values("last", ascending=False).drop_duplicates("n")
 else:
     nsw_best = nsw_never = nsw_all
+# pre-fix-only rollout sweep (every n, including the eps-regime n=32/64 runs), fastest LR per n
+nsw_pre_src = df[(~df["downsample"]) & (df["bsz"] == 128) & (~df["fixed"]) & long_enough] if SHOW_NSWEEP else df.iloc[0:0]
+nsw_pre_all = collapse(nsw_pre_src, ["n", "lr"], "nsweep_prefix") if len(nsw_pre_src) else collapse(df.iloc[0:0], ["n", "lr"], "nsweep_prefix")
+if len(nsw_pre_all):
+    nsw_pre_all["k"] = nsw_pre_all["n"].astype(int)
+    _ph = nsw_pre_all.dropna(subset=["steps"])
+    nsw_pre_best = _ph.loc[_ph.groupby("n")["steps"].idxmin()].sort_values("seqs")
+else:
+    nsw_pre_best = nsw_pre_all
 
 pd.concat([best.assign(role="plain_fastest_lr"), matched.assign(role="plain_lr1e-5"),
            pfix.assign(role="plain_fixed_scaling"), ds.assign(role="downsample_fixed"),
-           pre.assign(role="downsample_prefix"), nsw_all.assign(role="plain_nsweep_bsz128")]).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_table.csv")), index=False)
+           pre.assign(role="downsample_prefix"), nsw_all.assign(role="plain_nsweep_bsz128"),
+           nsw_pre_all.assign(role="plain_nsweep_bsz128_prefix")]).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_table.csv")), index=False)
 
 # ---- plot -------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(9.5, 6), facecolor=SURFACE)
@@ -181,6 +191,13 @@ if SHOW_PREFIX:
                linewidths=1.6, zorder=5)
 
 # rollout sweep (violet pentagons): fastest LR per n at bsz 128; n with no crossing as open pentagon at its longest run
+if SHOW_NSWEEP and len(nsw_pre_best):
+    ax.plot(nsw_pre_best["seqs"], nsw_pre_best["steps"], lw=1.6, ls="--", color=VIOLET, zorder=4)
+    ax.scatter(nsw_pre_best["seqs"], nsw_pre_best["steps"], s=110, marker="p", facecolors=SURFACE, edgecolors=VIOLET,
+               linewidths=1.6, zorder=4.5)
+    for _, r in nsw_pre_best[nsw_pre_best["n"].isin([32, 64])].iterrows():   # the two n where pre-fix and fixed differ
+        ax.annotate(f"n={int(r['n'])} pre-fix", (r["seqs"], r["steps"]), xytext=(9, 4), textcoords="offset points",
+                    ha="left", fontsize=7.4, color=VIOLET, alpha=0.85, zorder=7)
 if SHOW_NSWEEP and len(nsw_best):
     ax.plot(nsw_best["seqs"], nsw_best["steps"], lw=2, color=VIOLET, zorder=5)
     ax.scatter(nsw_best["seqs"], nsw_best["steps"], s=120, marker="p", color=VIOLET, edgecolors=SURFACE, linewidths=1.5, zorder=6)
@@ -213,7 +230,7 @@ title = "Downsampling (64 generated → K trained, 128 prompts) vs plain GRPO (1
 if SHOW_PREFIX:
     title += "\ngreen = pre-fix downsample runs (effective LR ≈ 0.1–0.3× the nominal LR shown)"
 if SHOW_NSWEEP:
-    title += "\nviolet = plain GRPO at batch 128 with n rollouts varied (n=32/64: fixed-code reruns only)"
+    title += "\nviolet = plain GRPO at batch 128 with n rollouts varied (solid: fixed-code reruns at n=32/64; dashed: pre-fix runs only)"
 ax.set_title(title, loc="left", fontsize=11, color=INK, pad=10)
 
 legend = [
@@ -225,7 +242,8 @@ legend = [
 if SHOW_PREFIX:
     legend.append(Line2D([], [], marker="D", ls="", ms=7, color=PREFIX, mec=SURFACE, label="downsample N=64→K — pre-fix scaling (nominal LR labelled)"))
 if SHOW_NSWEEP:
-    legend.append(Line2D([], [], marker="p", ls="-", lw=2, ms=9, color=VIOLET, mec=SURFACE, label="plain GRPO, bsz 128, n varied — fastest LR per n"))
+    legend.append(Line2D([], [], marker="p", ls="-", lw=2, ms=9, color=VIOLET, mec=SURFACE, label="plain GRPO, bsz 128, n varied — fastest LR per n (n=32/64 fixed scaling)"))
+    legend.append(Line2D([], [], marker="p", ls="--", lw=1.6, ms=9, color=VIOLET, mfc=SURFACE, mec=VIOLET, label="plain GRPO, bsz 128, n varied — pre-fix scaling only"))
 legend += [
     Line2D([], [], marker="^", ls="", ms=8, mfc=SURFACE, mec=INK2, mew=1.6, label="not yet at 50% — shown at last validated step"),
     Line2D([], [], ls=":", lw=1.2, color=MUTED, label="perfect 1/sequences scaling"),

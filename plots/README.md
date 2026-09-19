@@ -26,7 +26,7 @@ $PLOT scripts/plot_steps_vs_bsz_kl.py csv/steps_to_50_kl.csv png/steps_vs_bsz_kl
 $PULL scripts/pull_steps_to_50_seqs.py csv/steps_to_50_seqs.csv
 $PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs.png
 $PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_prefix.png --prefix   # + pre-fix downsample runs
-$PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_nsweep.png --nsweep   # + rollout sweep (bsz 128, n varied; n<=16 only)
+$PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_nsweep.png --nsweep   # + rollout sweep (bsz 128, n varied; solid = fixed-code at n=32/64, dashed = pre-fix only)
 
 # critical batch size vs target accuracy (30%..55% in 0.5% steps), from the full val curves
 $PLOT scripts/plot_cbs_vs_target.py csv/val_curves_n16.json png/cbs_vs_target.png                     # batch reached by the first doubling that fails to halve steps (--ratio 0.5)
