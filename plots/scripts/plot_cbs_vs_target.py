@@ -13,13 +13,15 @@ For each target T (30% .. 55% in 0.5% steps) and each KL coef:
           point is censored at "> largest batch that reached T".
 Default rule (--rule slope): for each tested batch B, least-squares slope of log2(steps) vs log2(batch) over
 the forward window [B, B*2^WINDOW] (WINDOW = 2 doublings); CBS = the first B whose window slope is shallower
-than -1 + SLOPE_TOL (SLOPE_TOL = 0.4, i.e. slope > -0.6). Averaging over a window keeps one noisy doubling
-from triggering it. --rule first / sustained are the per-doubling rules above.
+than -1 + SLOPE_TOL (SLOPE_TOL = 0.3, i.e. slope > -0.7). Averaging over a window keeps one noisy doubling
+from triggering it. Outliers: batches below MIN_BSZ (8) are ignored, and a batch whose fastest run is slower
+than the next-smaller batch's is dropped (--keep-nonmonotone disables). --rule first / sustained are the per-doubling rules above.
 An orange line adds the McCandlish-style fit B_crit from E(B) = B*S(B) = E_min*(1 + B/B_crit)
 (least squares in log E; needs >= 4 batches).
 
 Usage: python plot_cbs_vs_target.py csv/val_curves_n16.json png/cbs_vs_target.png
-         [--rule slope|first|sustained] [--window 2] [--slope-tol 0.4] [--ratio 0.7] [--streak 1]
+         [--rule slope|first|sustained] [--window 2] [--slope-tol 0.3] [--min-bsz 8] [--keep-nonmonotone]
+         [--ratio 0.7] [--streak 1]
 """
 import sys, os, json
 import numpy as np, pandas as pd
@@ -37,7 +39,9 @@ args = [a for a in sys.argv[1:] if not a.startswith("--")]
 json_in, png_out = args[0], args[1]
 RULE = sys.argv[sys.argv.index("--rule") + 1] if "--rule" in sys.argv else "slope"
 WINDOW = int(sys.argv[sys.argv.index("--window") + 1]) if "--window" in sys.argv else 2          # doublings per slope window
-SLOPE_TOL = float(sys.argv[sys.argv.index("--slope-tol") + 1]) if "--slope-tol" in sys.argv else 0.4   # off the line when slope > -1 + tol
+SLOPE_TOL = float(sys.argv[sys.argv.index("--slope-tol") + 1]) if "--slope-tol" in sys.argv else 0.3   # off the line when slope > -1 + tol
+MIN_BSZ = int(sys.argv[sys.argv.index("--min-bsz") + 1]) if "--min-bsz" in sys.argv else 8              # ignore tiny, single-run batches
+DROP_NONMONO = "--keep-nonmonotone" not in sys.argv     # drop a batch that is slower than the next-smaller batch (outlier)
 RATIO = float(sys.argv[sys.argv.index("--ratio") + 1]) if "--ratio" in sys.argv else 0.7
 STREAK = int(sys.argv[sys.argv.index("--streak") + 1]) if "--streak" in sys.argv else 1   # consecutive failing doublings required
 
@@ -82,6 +86,13 @@ for kl in KLS:
                 S[b] = min(c)
         if len(S) < 2:
             continue
+        S = {b: v for b, v in S.items() if b >= MIN_BSZ}
+        if DROP_NONMONO:                     # a larger batch that needs MORE steps than the next-smaller one is an outlier
+            for b1, b2 in zip(sorted(S)[:-1], sorted(S)[1:]):
+                if S.get(b2, 0) >= S.get(b1, np.inf):
+                    S.pop(b2, None)
+        if len(S) < 2:
+            continue
         Bs = sorted(S)
         maxB = max(Bs)                       # largest batch that actually reached this target
         # per-doubling step ratio for each adjacent pair, normalised when a batch is missing
@@ -116,7 +127,7 @@ for kl in KLS:
                     cbs = b2
                     break
         ratio_at = next((r for (_, b2, r) in pairs if b2 == cbs), None)
-        rows.append(dict(kl=kl, target=t, rule=RULE, ratio_threshold=RATIO, streak=STREAK, window=WINDOW, slope_tol=SLOPE_TOL,
+        rows.append(dict(kl=kl, target=t, rule=RULE, ratio_threshold=RATIO, streak=STREAK, window=WINDOW, slope_tol=SLOPE_TOL, min_bsz=MIN_BSZ,
                          cbs=cbs, step_ratio_at_cbs=ratio_at, slope_at_cbs=slope_at,
                          censored=cbs is None, max_bsz_tested=maxB, bcrit_fit=fit_bcrit(S), n_bsz=len(Bs),
                          steps_by_bsz=" ".join(f"{b}:{S[b]:.0f}" for b in Bs),
@@ -168,7 +179,8 @@ fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False, fontsize=
            bbox_to_anchor=(0.5, 0.0), columnspacing=2.5)
 rule_txt = ((f"first of {STREAK} consecutive doublings that stop paying off" if STREAK > 1 else "first doubling that stops paying off")
             if RULE == "first" else "first doubling from which no later doubling pays off" if RULE == "sustained"
-            else f"first batch where the {WINDOW}-doubling average slope of steps vs batch leaves -1 by more than {SLOPE_TOL:g}")
+            else f"first batch where the {WINDOW}-doubling average slope of steps vs batch leaves -1 by more than {SLOPE_TOL:g}"
+                 f"  (batches < {MIN_BSZ}" + (" and non-monotone outliers" if DROP_NONMONO else "") + " ignored)")
 fig.suptitle("GRPO on-policy, n = 16 rollouts: critical batch size vs target accuracy", color=INK, fontsize=13, x=0.02, ha="left")
 fig.text(0.02, 0.925, rule_txt if RULE == "slope" else f"{rule_txt};  a doubling pays off when it " + ("halves steps-to-target" if abs(RATIO - 0.5) < 1e-9 else f"cuts steps-to-target by at least {pct}%"),
          color=INK2, fontsize=10, ha="left")
