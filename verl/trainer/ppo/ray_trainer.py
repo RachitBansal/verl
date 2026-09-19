@@ -1417,6 +1417,8 @@ class RayPPOTrainer:
                 if is_last_step:
                     pprint(f"Final validation metrics: {last_val_metrics}")
                     progress_bar.close()
+                    if hasattr(logger, "finish"):
+                        logger.finish()   # flush the last steps before Ray tears the actor down
                     return
 
                 # this is experimental and may be changed/removed in the future

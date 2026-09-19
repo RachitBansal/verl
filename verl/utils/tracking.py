@@ -155,7 +155,13 @@ class Tracking:
             if backend is None or default_backend in backend:
                 logger_instance.log(data=data, step=step)
 
-    def __del__(self):
+    def finish(self):
+        """Flush and close every backend. Call this explicitly at the end of training: relying on
+        __del__ is not enough when the process is torn down by Ray, which can drop the last
+        buffered steps (wandb then shows the run as crashed)."""
+        if getattr(self, "_finished", False):
+            return
+        self._finished = True
         if "wandb" in self.logger:
             self.logger["wandb"].finish(exit_code=0)
         if "swanlab" in self.logger:
@@ -168,6 +174,12 @@ class Tracking:
             self.logger["clearml"].finish()
         if "trackio" in self.logger:
             self.logger["trackio"].finish()
+
+    def __del__(self):
+        try:
+            self.finish()
+        except Exception:
+            pass
         if "file" in self.logger:
             self.logger["file"].finish()
 
