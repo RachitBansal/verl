@@ -5,16 +5,17 @@ For each target T (30% .. 55% in 0.5% steps) and each KL coef:
   For each pair of adjacent tested batches B1 < B2 (normally a doubling), perfect scaling
   would give S(B2) = S(B1) * B1 / B2, i.e. steps halve per doubling.  The doubling "fails"
   when steps fall by less than the required fraction:  S(B2) / S(B1) > RATIO per doubling
-  (RATIO = 0.5 by default: doubling the batch fails to halve the steps).  Gaps
-  larger than one doubling are normalised per doubling.
-  CBS   = B2 of the first failing doubling (--rule first, default), or the smallest B2 from
+  (RATIO = 0.7 by default: a doubling "pays off" only if it cuts steps by >= 30%; 0.5 is the
+  strict "must halve" rule).  Gaps larger than one doubling are normalised per doubling.
+  CBS   = B2 of the first doubling that starts STREAK consecutive failures (--rule first, default;
+          --streak 1 by default; --streak 2 requires two noisy doublings in a row), or the smallest B2 from
           which every later doubling fails (--rule sustained).  If no doubling fails the
           point is censored at "> largest batch that reached T".
 An orange line adds the McCandlish-style fit B_crit from E(B) = B*S(B) = E_min*(1 + B/B_crit)
 (least squares in log E; needs >= 4 batches).
 
 Usage: python plot_cbs_vs_target.py csv/val_curves_n16.json png/cbs_vs_target.png
-         [--rule first|sustained] [--ratio 0.5]
+         [--rule first|sustained] [--ratio 0.7] [--streak 1]
 """
 import sys, os, json
 import numpy as np, pandas as pd
@@ -31,7 +32,8 @@ TARGETS = np.round(np.arange(0.30, 0.55 + 1e-9, 0.005), 3)
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 json_in, png_out = args[0], args[1]
 RULE = sys.argv[sys.argv.index("--rule") + 1] if "--rule" in sys.argv else "first"
-RATIO = float(sys.argv[sys.argv.index("--ratio") + 1]) if "--ratio" in sys.argv else 0.5
+RATIO = float(sys.argv[sys.argv.index("--ratio") + 1]) if "--ratio" in sys.argv else 0.7
+STREAK = int(sys.argv[sys.argv.index("--streak") + 1]) if "--streak" in sys.argv else 1   # consecutive failing doublings required
 
 runs = json.load(open(json_in))
 
@@ -84,15 +86,18 @@ for kl in KLS:
             pairs.append((b1, b2, per_doubling))
         fails = [r > RATIO for _, _, r in pairs]
         cbs = None
-        if RULE == "first":
-            cbs = next((b2 for (_, b2, _), f in zip(pairs, fails) if f), None)
+        if RULE == "first":   # first doubling that starts a run of STREAK consecutive failures (noise guard)
+            for i in range(len(pairs)):
+                if all(fails[i:i + STREAK]) and len(fails[i:i + STREAK]) == STREAK:
+                    cbs = pairs[i][1]
+                    break
         else:   # sustained: first b2 such that this and every later doubling fails
             for i, (_, b2, _) in enumerate(pairs):
                 if all(fails[i:]):
                     cbs = b2
                     break
         ratio_at = next((r for (_, b2, r) in pairs if b2 == cbs), None)
-        rows.append(dict(kl=kl, target=t, ratio_threshold=RATIO, cbs=cbs, step_ratio_at_cbs=ratio_at,
+        rows.append(dict(kl=kl, target=t, ratio_threshold=RATIO, streak=STREAK, cbs=cbs, step_ratio_at_cbs=ratio_at,
                          censored=cbs is None, max_bsz_tested=maxB, bcrit_fit=fit_bcrit(S), n_bsz=len(Bs),
                          steps_by_bsz=" ".join(f"{b}:{S[b]:.0f}" for b in Bs),
                          step_ratio_by_doubling=" ".join(f"{b1}->{b2}:{r:.2f}" for b1, b2, r in pairs)))
@@ -137,8 +142,8 @@ handles = [Line2D([], [], marker="o", color=BLUE, lw=0, markersize=7,
            Line2D([], [], color=ORANGE, lw=2, label="B_crit fit: batch x steps = E_min (1 + batch/B_crit)")]
 fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False, fontsize=9, labelcolor=INK2,
            bbox_to_anchor=(0.5, 0.0), columnspacing=2.5)
-rule_txt = ("first doubling that stops paying off" if RULE == "first"
-            else "first doubling from which no later doubling pays off")
+rule_txt = ((f"first of {STREAK} consecutive doublings that stop paying off" if STREAK > 1 else "first doubling that stops paying off")
+            if RULE == "first" else "first doubling from which no later doubling pays off")
 fig.suptitle("GRPO on-policy, n = 16 rollouts: critical batch size vs target accuracy", color=INK, fontsize=13, x=0.02, ha="left")
 fig.text(0.02, 0.925, f"{rule_txt};  a doubling pays off when it " + ("halves steps-to-target" if abs(RATIO - 0.5) < 1e-9 else f"cuts steps-to-target by at least {pct}%"),
          color=INK2, fontsize=10, ha="left")
@@ -148,6 +153,6 @@ print("wrote", png_out)
 
 for kl in KLS:
     d = tab[np.isclose(tab["kl"], kl)].sort_values("target")
-    print(f"\nKL {kl:g}  rule={RULE} ratio={RATIO}")
+    print(f"\nKL {kl:g}  rule={RULE} ratio={RATIO} streak={STREAK}")
     print("  " + " ".join(f"{t*100:g}%->{'>' + str(int(m)) if c else int(b)}"
                           for t, b, c, m in zip(d["target"], d["cbs"].fillna(0), d["censored"], d["max_bsz_tested"])))
