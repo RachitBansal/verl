@@ -38,7 +38,7 @@ MATCHED_LR = 1e-5
 csv_in, png_out = sys.argv[1], sys.argv[2]
 SHOW_PREFIX = "--prefix" in sys.argv[3:]
 SHOW_NSWEEP = "--nsweep" in sys.argv[3:]      # add the rollout sweep: plain GRPO, bsz 128, n varied
-VALID_N = {1, 2, 4, 8, 16}                    # n=32/64 pre-fix runs sat in Adam's eps regime (step factor 0.69/0.46) -> excluded
+VALID_N = {1, 2, 4, 8, 16}                    # pre-fix runs usable here; n=32/64 pre-fix sat in Adam's eps regime (0.69/0.46) -> fixed-code reruns only
 df = pd.read_csv(csv_in)
 COL = "steps_to_50_interp" if "steps_to_50_interp" in df else "steps_to_50"   # interpolated crossing when available
 df = df[np.isclose(df["kl"].astype(float), 1e-3)]
@@ -88,7 +88,7 @@ pre_hit = pre.dropna(subset=["steps"])
 pre_cens = pre[pre["steps"].isna()]
 
 # ---- rollout sweep: plain GRPO at bsz 128 with n varied (optional) ----------------------
-nsw_src = df[(~df["downsample"]) & (df["bsz"] == 128) & df["n"].isin(VALID_N) & long_enough] if SHOW_NSWEEP else df.iloc[0:0]
+nsw_src = df[(~df["downsample"]) & (df["bsz"] == 128) & (df["n"].isin(VALID_N) | (df["fixed"] & df["n"].isin({32, 64}))) & long_enough] if SHOW_NSWEEP else df.iloc[0:0]
 nsw_all = collapse(nsw_src, ["n", "lr"], "nsweep") if len(nsw_src) else collapse(df.iloc[0:0], ["n", "lr"], "nsweep")
 if len(nsw_all):
     nsw_all["k"] = nsw_all["n"].astype(int)
@@ -155,6 +155,8 @@ for _, r in ds_cens.iterrows():
     ax.scatter([r["seqs"]], [r["last"]], s=85, marker="^", facecolors=SURFACE, edgecolors=ORANGE,
                linewidths=1.8, zorder=6)
     pos = CENS_POS.get(int(r["k"]), dict(xytext=(10, 2), ha="left"))
+    if SHOW_NSWEEP and r["lr"] < MATCHED_LR:   # low-LR censored runs sit where the n=32/64 labels go: label them to the left
+        pos = dict(xytext=(-10, -3), ha="right")
     lr_txt = "" if np.isclose(r["lr"], MATCHED_LR) else f", lr {r['lr']:g}"
     ax.annotate(f"K={r['k']}{lr_txt}: {r['max_val']:.0%} @ {int(r['last'])}", (r["seqs"], r["last"]),
                 textcoords="offset points", fontsize=7.4, color=INK2, zorder=7, **pos)
@@ -182,12 +184,13 @@ if SHOW_PREFIX:
 if SHOW_NSWEEP and len(nsw_best):
     ax.plot(nsw_best["seqs"], nsw_best["steps"], lw=2, color=VIOLET, zorder=5)
     ax.scatter(nsw_best["seqs"], nsw_best["steps"], s=120, marker="p", color=VIOLET, edgecolors=SURFACE, linewidths=1.5, zorder=6)
-    NSW_POS = {2: dict(xytext=(10, 4), ha="left"), 4: dict(xytext=(-9, -3), ha="right"), 8: dict(xytext=(10, 6), ha="left")}
+    NSW_POS = {2: dict(xytext=(10, 4), ha="left"), 4: dict(xytext=(-9, -3), ha="right"), 8: dict(xytext=(10, 6), ha="left"),
+               32: dict(xytext=(-9, 7), ha="right"), 64: dict(xytext=(9, -13), ha="left")}
     for _, r in nsw_best.iterrows():
         if int(r["n"]) == 16:   # same run as the blue headline point at 2048 sequences; already labelled
             continue
         pos = NSW_POS.get(int(r["n"]), dict(xytext=(10, 6), ha="left"))
-        lab = f"n={int(r['n'])}" if int(r["n"]) == 4 else f"n={int(r['n'])}, lr {r['lr']:g}"   # n=4 shares its x with K=4; short label fits left of it
+        lab = f"n={int(r['n'])}" if int(r["n"]) in (4, 32, 64) else f"n={int(r['n'])}, lr {r['lr']:g}"   # short labels where the neighbourhood is crowded
         ax.annotate(lab, (r["seqs"], r["steps"]), textcoords="offset points",
                     fontsize=7.8, color=VIOLET, zorder=7, **pos)
     for _, r in nsw_never.iterrows():
@@ -210,7 +213,7 @@ title = "Downsampling (64 generated → K trained, 128 prompts) vs plain GRPO (1
 if SHOW_PREFIX:
     title += "\ngreen = pre-fix downsample runs (effective LR ≈ 0.1–0.3× the nominal LR shown)"
 if SHOW_NSWEEP:
-    title += "\nviolet = plain GRPO at batch 128 with n rollouts varied (pre-fix; n=32/64 excluded, eps-regime)"
+    title += "\nviolet = plain GRPO at batch 128 with n rollouts varied (n=32/64: fixed-code reruns only)"
 ax.set_title(title, loc="left", fontsize=11, color=INK, pad=10)
 
 legend = [

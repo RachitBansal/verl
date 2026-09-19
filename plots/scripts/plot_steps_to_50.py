@@ -113,7 +113,7 @@ fig, ax = plt.subplots(figsize=(10.5, 6.2), facecolor=SURFACE)
 
 if BY_N:
     best_a, gb_a = panel(ax, g, "n", "rollouts per prompt (n), batch 128 prompts")
-    ax.set_title("batch 128, no downsampling. Pre-fix runs at n = 32 / 64 stepped at 0.69× / 0.46× their nominal LR (Adam ε regime)",
+    ax.set_title("batch 128, no downsampling. n = 32 / 64: centre-dot points are fixed-code reruns; pre-fix runs there stepped at 0.69× / 0.46× nominal LR",
                  loc="left", fontsize=10.5, color=INK, pad=10)
 else:
     best_a, gb_a = panel(ax, g, "bsz", "batch size (prompts per step)")

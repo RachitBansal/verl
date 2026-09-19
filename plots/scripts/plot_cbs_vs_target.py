@@ -2,18 +2,19 @@
 
 For each target T (30% .. 55% in 0.5% steps) and each KL coef:
   S(B)  = fastest interpolated steps-to-T over all runs at batch B (any LR)
-  line  = perfect 1/batch scaling S_perf(B) = S(B0) * B0 / B through the anchor batch B0
-  CBS   = the smallest B > B0 whose S(B) exceeds tol * S_perf(B), i.e. the first point
-          that leaves the 1/batch line; if no tested batch leaves it, CBS is censored at
-          "> largest batch tested".
-Rule (--rule): "first" (default) = the literal first batch above the anchor that leaves the line;
-"sustained" = the smallest batch from which every larger tested batch is off the line (ignores an
-isolated under-tuned batch). An orange line adds the McCandlish-style fit B_crit from
-E(B) = B*S(B) = E_min * (1 + B/B_crit) (least squares in log E; needs >= 4 batches).
-Anchor (--anchor): "min" (default) = the most prompt-efficient batch (smallest B*S(B)),
-"smallest" = the smallest batch that reaches T (matches the dotted line in steps_vs_bsz*.png).
+  For each pair of adjacent tested batches B1 < B2 (normally a doubling), perfect scaling
+  would give S(B2) = S(B1) * B1 / B2, i.e. steps halve per doubling.  The doubling "fails"
+  when steps fall by less than the required fraction:  S(B2) / S(B1) > RATIO per doubling
+  (RATIO = 0.5 by default: doubling the batch fails to halve the steps).  Gaps
+  larger than one doubling are normalised per doubling.
+  CBS   = B2 of the first failing doubling (--rule first, default), or the smallest B2 from
+          which every later doubling fails (--rule sustained).  If no doubling fails the
+          point is censored at "> largest batch that reached T".
+An orange line adds the McCandlish-style fit B_crit from E(B) = B*S(B) = E_min*(1 + B/B_crit)
+(least squares in log E; needs >= 4 batches).
 
-Usage: python plot_cbs_vs_target.py csv/val_curves_n16.json png/cbs_vs_target.png [--anchor min|smallest] [--rule first|sustained]
+Usage: python plot_cbs_vs_target.py csv/val_curves_n16.json png/cbs_vs_target.png
+         [--rule first|sustained] [--ratio 0.5]
 """
 import sys, os, json
 import numpy as np, pandas as pd
@@ -23,17 +24,27 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 SURFACE, INK, INK2, GRID, MUTED = "#fcfcfb", "#0b0b0b", "#52514e", "#e6e5e1", "#a8a7a2"
-RAMP = ["#9ec5f0", "#2a78d6", "#0d3a7a"]          # blue sequential: loose -> strict tolerance
-TOLS = [2.0, 1.5, 1.25]                            # "not near" = steps > tol x perfect-line steps
-MARK = {2.0: "o", 1.5: "s", 1.25: "D"}
+BLUE, ORANGE = "#2a78d6", "#eb6834"
 KLS = [1e-3, 1e-2]
 TARGETS = np.round(np.arange(0.30, 0.55 + 1e-9, 0.005), 3)
 
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 json_in, png_out = args[0], args[1]
-ANCHOR = sys.argv[sys.argv.index("--anchor") + 1] if "--anchor" in sys.argv else "min"
 RULE = sys.argv[sys.argv.index("--rule") + 1] if "--rule" in sys.argv else "first"
-ORANGE = "#eb6834"
+RATIO = float(sys.argv[sys.argv.index("--ratio") + 1]) if "--ratio" in sys.argv else 0.5
+
+runs = json.load(open(json_in))
+
+
+def crossing(steps, vals, t):
+    for i, v in enumerate(vals):
+        if v >= t:
+            if i == 0:
+                return float(steps[0])
+            s0, s1, v0, v1 = steps[i - 1], steps[i], vals[i - 1], vals[i]
+            return float(s1) if v1 == v0 else s0 + (s1 - s0) * (t - v0) / (v1 - v0)
+    return None
+
 
 def fit_bcrit(S):
     """E(B) = E_min (1 + B/B_crit): grid over log B_crit, closed-form E_min in log space."""
@@ -49,22 +60,11 @@ def fit_bcrit(S):
             best = (res, bc)
     return best[1]
 
-runs = json.load(open(json_in))
-
-def crossing(steps, vals, t):
-    for i, v in enumerate(vals):
-        if v >= t:
-            if i == 0:
-                return float(steps[0])
-            s0, s1, v0, v1 = steps[i - 1], steps[i], vals[i - 1], vals[i]
-            return float(s1) if v1 == v0 else s0 + (s1 - s0) * (t - v0) / (v1 - v0)
-    return None
 
 rows = []
 for kl in KLS:
     rs = [r for r in runs if abs(r["kl"] - kl) < 1e-12]
     bszs = sorted({r["bsz"] for r in rs})
-    maxB = max(bszs)
     for t in TARGETS:
         S = {}
         for b in bszs:
@@ -75,24 +75,27 @@ for kl in KLS:
         if len(S) < 2:
             continue
         Bs = sorted(S)
-        b0 = min(Bs, key=lambda b: b * S[b]) if ANCHOR == "min" else Bs[0]
-        bcrit = fit_bcrit(S)
-        above = [b for b in Bs if b > b0]
-        ratio = {b: S[b] / (S[b0] * b0 / b) for b in above}   # actual steps / perfect-line steps
-        for tol in TOLS:
-            off = [ratio[b] > tol for b in above]
-            cbs = None
-            if RULE == "first":
-                cbs = next((b for b, o in zip(above, off) if o), None)
-            else:   # sustained: smallest b such that every tested batch >= b is off the line
-                for i, b in enumerate(above):
-                    if all(off[i:]):
-                        cbs = b
-                        break
-            rows.append(dict(kl=kl, target=t, tol=tol, anchor_bsz=b0, anchor_steps=S[b0],
-                             cbs=cbs, ratio_at_cbs=ratio.get(cbs), censored=cbs is None, max_bsz_tested=maxB,
-                             bcrit_fit=bcrit, n_bsz=len(Bs),
-                             steps_by_bsz=" ".join(f"{b}:{S[b]:.0f}" for b in Bs)))
+        maxB = max(Bs)                       # largest batch that actually reached this target
+        # per-doubling step ratio for each adjacent pair, normalised when a batch is missing
+        pairs = []
+        for b1, b2 in zip(Bs[:-1], Bs[1:]):
+            n_doublings = np.log2(b2 / b1)
+            per_doubling = (S[b2] / S[b1]) ** (1.0 / n_doublings)
+            pairs.append((b1, b2, per_doubling))
+        fails = [r > RATIO for _, _, r in pairs]
+        cbs = None
+        if RULE == "first":
+            cbs = next((b2 for (_, b2, _), f in zip(pairs, fails) if f), None)
+        else:   # sustained: first b2 such that this and every later doubling fails
+            for i, (_, b2, _) in enumerate(pairs):
+                if all(fails[i:]):
+                    cbs = b2
+                    break
+        ratio_at = next((r for (_, b2, r) in pairs if b2 == cbs), None)
+        rows.append(dict(kl=kl, target=t, ratio_threshold=RATIO, cbs=cbs, step_ratio_at_cbs=ratio_at,
+                         censored=cbs is None, max_bsz_tested=maxB, bcrit_fit=fit_bcrit(S), n_bsz=len(Bs),
+                         steps_by_bsz=" ".join(f"{b}:{S[b]:.0f}" for b in Bs),
+                         step_ratio_by_doubling=" ".join(f"{b1}->{b2}:{r:.2f}" for b1, b2, r in pairs)))
 tab = pd.DataFrame(rows)
 tab.to_csv(os.path.join(os.path.dirname(os.path.abspath(json_in)),
                         os.path.basename(png_out).replace(".png", "_table.csv")), index=False)
@@ -101,28 +104,21 @@ tab.to_csv(os.path.join(os.path.dirname(os.path.abspath(json_in)),
 fig, axes = plt.subplots(1, 2, figsize=(12, 5.4), sharey=True, facecolor=SURFACE)
 for ax, kl in zip(axes, KLS):
     ax.set_facecolor(SURFACE)
-    d = tab[np.isclose(tab["kl"], kl)]
+    d = tab[np.isclose(tab["kl"], kl)].sort_values("target")
     maxB = int(d["max_bsz_tested"].max())
     cens_y = maxB * 2
-    for tol, col in zip(TOLS, RAMP):
-        s = d[d["tol"] == tol].sort_values("target")
-        hit = s[~s["censored"]]
-        cen = s[s["censored"]]
-        # slight horizontal stagger so coincident tolerances stay visible
-        dx = {2.0: -0.0012, 1.5: 0.0, 1.25: 0.0012}[tol]
-        ax.plot(hit["target"] * 100 + dx * 100, hit["cbs"], color=col, lw=1.4, alpha=0.55, zorder=2)
-        ax.scatter(hit["target"] * 100 + dx * 100, hit["cbs"], s=44, marker=MARK[tol], color=col,
-                   edgecolors=SURFACE, linewidths=0.8, zorder=4)
-        ax.scatter(cen["target"] * 100 + dx * 100, [cens_y] * len(cen), s=44, marker=MARK[tol],
-                   facecolors=SURFACE, edgecolors=col, linewidths=1.4, zorder=4)
-    f = d[d["tol"] == TOLS[0]].sort_values("target").dropna(subset=["bcrit_fit"])
+    hit, cen = d[~d["censored"]], d[d["censored"]]
+    ax.plot(hit["target"] * 100, hit["cbs"], color=BLUE, lw=1.4, alpha=0.55, zorder=2)
+    ax.scatter(hit["target"] * 100, hit["cbs"], s=44, color=BLUE, edgecolors=SURFACE, linewidths=0.8, zorder=4)
+    ax.scatter(cen["target"] * 100, [cens_y] * len(cen), s=44, facecolors=SURFACE, edgecolors=BLUE,
+               linewidths=1.4, zorder=4)
+    f = d.dropna(subset=["bcrit_fit"])
     ax.plot(f["target"] * 100, f["bcrit_fit"], color=ORANGE, lw=2, zorder=3)
     ax.axhline(cens_y, color=GRID, lw=1, ls=":", zorder=1)
-    ax.text(30.2, cens_y * 1.12, f"hollow = still on the line at batch {maxB} (largest tested)",
+    ax.text(30.2, cens_y * 1.12, f"hollow = every doubling up to batch {maxB} pays off",
             color=INK2, fontsize=9, va="bottom")
     ax.set_yscale("log", base=2)
-    yt = [2 ** k for k in range(2, int(np.log2(cens_y)) + 1)]
-    yt.append(cens_y * 2)
+    yt = [2 ** k for k in range(2, int(np.log2(cens_y)) + 1)] + [cens_y * 2]
     ax.set_yticks(yt)
     ax.set_yticklabels([str(v) if v < cens_y else (f"> {maxB}" if v == cens_y else f"{v} (fit only)") for v in yt])
     ax.set_ylim(3, cens_y * 2.6)
@@ -133,30 +129,25 @@ for ax, kl in zip(axes, KLS):
     for sp in ax.spines.values():
         sp.set_visible(False)
     ax.tick_params(colors=INK2, length=0)
-    # anchor batch as a thin grey trace along the bottom, for context
-    a = d[d["tol"] == TOLS[0]].sort_values("target")
-    ax.plot(a["target"] * 100, a["anchor_bsz"], color=MUTED, lw=1, ls="--", zorder=1)
 axes[0].set_ylabel("critical batch size (prompts per step)", color=INK2)
-handles = [Line2D([], [], marker=MARK[t], color=c, lw=0, markersize=7,
-                  label=f"steps > {t:g}x the line") for t, c in zip(TOLS, RAMP)]
-handles.append(Line2D([], [], color=ORANGE, lw=2, label="B_crit fit: batch x steps = E_min (1 + batch/B_crit)"))
-handles.append(Line2D([], [], color=MUTED, lw=1, ls="--",
-                      label=("anchor batch (most prompt-efficient)" if ANCHOR == "min" else "anchor batch (smallest that reaches target)")))
-fig.legend(handles=handles, loc="lower center", ncol=3, frameon=False, fontsize=9, labelcolor=INK2, bbox_to_anchor=(0.5, 0.0), columnspacing=2.5)
-anchor_txt = ("1/batch line through the most prompt-efficient batch (min batch x steps)" if ANCHOR == "min"
-              else "1/batch line through the smallest batch that reaches the target")
-rule_txt = "first batch off the line" if RULE == "first" else "first batch from which every larger batch is off the line"
+pct = int(round((1 - RATIO) * 100))
+what = "fails to halve steps-to-target" if abs(RATIO - 0.5) < 1e-9 else f"cuts steps-to-target by less than {pct}%"
+handles = [Line2D([], [], marker="o", color=BLUE, lw=0, markersize=7,
+                  label=f"CBS: batch reached by the first doubling that {what}  (steps(2B) > {RATIO:g} x steps(B))"),
+           Line2D([], [], color=ORANGE, lw=2, label="B_crit fit: batch x steps = E_min (1 + batch/B_crit)")]
+fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False, fontsize=9, labelcolor=INK2,
+           bbox_to_anchor=(0.5, 0.0), columnspacing=2.5)
+rule_txt = ("first doubling that stops paying off" if RULE == "first"
+            else "first doubling from which no later doubling pays off")
 fig.suptitle("GRPO on-policy, n = 16 rollouts: critical batch size vs target accuracy", color=INK, fontsize=13, x=0.02, ha="left")
-fig.text(0.02, 0.925, f"{rule_txt};  {anchor_txt}", color=INK2, fontsize=10, ha="left")
-fig.tight_layout(rect=(0, 0.09, 1, 0.92))
+fig.text(0.02, 0.925, f"{rule_txt};  a doubling pays off when it " + ("halves steps-to-target" if abs(RATIO - 0.5) < 1e-9 else f"cuts steps-to-target by at least {pct}%"),
+         color=INK2, fontsize=10, ha="left")
+fig.tight_layout(rect=(0, 0.07, 1, 0.92))
 fig.savefig(png_out, dpi=150, facecolor=SURFACE)
 print("wrote", png_out)
 
-# console summary
 for kl in KLS:
-    d = tab[np.isclose(tab["kl"], kl)]
-    print(f"\nKL {kl:g}  (anchor={ANCHOR})")
-    for tol in TOLS:
-        s = d[d["tol"] == tol].sort_values("target")
-        print(f"  tol {tol:g}x: " + " ".join(f"{int(t*100+0.5) if abs(t*100-round(t*100))<1e-6 else t*100:g}%->{'>' + str(int(m)) if c else int(b)}"
-                                              for t, b, c, m in zip(s["target"], s["cbs"].fillna(0), s["censored"], s["max_bsz_tested"])))
+    d = tab[np.isclose(tab["kl"], kl)].sort_values("target")
+    print(f"\nKL {kl:g}  rule={RULE} ratio={RATIO}")
+    print("  " + " ".join(f"{t*100:g}%->{'>' + str(int(m)) if c else int(b)}"
+                          for t, b, c, m in zip(d["target"], d["cbs"].fillna(0), d["censored"], d["max_bsz_tested"])))

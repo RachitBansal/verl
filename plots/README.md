@@ -29,8 +29,8 @@ $PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_p
 $PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_nsweep.png --nsweep   # + rollout sweep (bsz 128, n varied; n<=16 only)
 
 # critical batch size vs target accuracy (30%..55% in 0.5% steps), from the full val curves
-$PLOT scripts/plot_cbs_vs_target.py csv/val_curves_n16.json png/cbs_vs_target.png                     # first batch off the 1/batch line
-$PLOT scripts/plot_cbs_vs_target.py csv/val_curves_n16.json png/cbs_vs_target_sustained.png --rule sustained   # first batch from which all larger batches are off
+$PLOT scripts/plot_cbs_vs_target.py csv/val_curves_n16.json png/cbs_vs_target.png                     # batch reached by the first doubling that fails to halve steps (--ratio 0.5)
+$PLOT scripts/plot_cbs_vs_target.py csv/val_curves_n16.json png/cbs_vs_target_sustained.png --rule sustained   # first doubling from which no later doubling pays off
 
 # reward curves: downsample 64->K vs plain GRPO with n = K rollouts (bsz 128)
 $PULL scripts/pull_curves_downsample_vs_n.py csv/curves_downsample_vs_n.csv
