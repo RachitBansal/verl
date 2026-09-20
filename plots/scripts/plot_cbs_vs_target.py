@@ -141,8 +141,8 @@ fig, axes = plt.subplots(1, 2, figsize=(12, 5.4), sharey=True, facecolor=SURFACE
 for ax, kl in zip(axes, KLS):
     ax.set_facecolor(SURFACE)
     d = tab[np.isclose(tab["kl"], kl)].sort_values("target")
-    maxB = int(d["max_bsz_tested"].max())
-    cens_y = maxB * 2
+    maxB = int(d["max_bsz_tested"].max())            # this panel's largest batch that reached any target
+    cens_y = int(tab["max_bsz_tested"].max()) * 2    # shared censor row across panels (y axis is shared)
     hit, cen = d[~d["censored"]], d[d["censored"]]
     ax.plot(hit["target"] * 100, hit["cbs"], color=BLUE, lw=1.4, alpha=0.55, zorder=2)
     ax.scatter(hit["target"] * 100, hit["cbs"], s=44, color=BLUE, edgecolors=SURFACE, linewidths=0.8, zorder=4)
@@ -156,7 +156,7 @@ for ax, kl in zip(axes, KLS):
     ax.set_yscale("log", base=2)
     yt = [2 ** k for k in range(2, int(np.log2(cens_y)) + 1)] + [cens_y * 2]
     ax.set_yticks(yt)
-    ax.set_yticklabels([str(v) if v < cens_y else (f"> {maxB}" if v == cens_y else f"{v} (fit only)") for v in yt])
+    ax.set_yticklabels([str(v) if v < cens_y else ("beyond tested" if v == cens_y else f"{v} (fit only)") for v in yt])
     ax.set_ylim(3, cens_y * 2.6)
     ax.set_xlim(29.5, 55.5)
     ax.set_xlabel("target AIME 1983-2024 accuracy (%)", color=INK2)
