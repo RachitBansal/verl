@@ -25,7 +25,7 @@ SURFACE, INK, INK2, GRID, MUTED = "#ffffff", "#0b0b0b", "#52514e", "#e6e5e1", "#
 RAMP = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"]
 CMAP = LinearSegmentedColormap.from_list("blue_rev", RAMP[::-1])          # dark = fewest steps
 SHORT_STEPS = 200
-FIXED_ONLY_N = {32, 64}
+FIXED_ONLY_N = {32, 64, 128}
 KL_STYLE = {1e-3: dict(marker="o", nudge=-0.10, ls="--", s=95, lab_off=(-9, 9), lab_ha="right"),
             1e-2: dict(marker="D", nudge=+0.10, ls=":", s=75, lab_off=(9, -14), lab_ha="left")}
 

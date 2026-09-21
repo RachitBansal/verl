@@ -20,7 +20,7 @@ SURFACE, INK, INK2, GRID, MUTED = "#ffffff", "#0b0b0b", "#52514e", "#e6e5e1", "#
 BLUE, VIOLET = "#2a78d6", "#4a3aa7"
 SHORT_STEPS = 200
 VALID_N_PREFIX = {1, 2, 4, 8, 16}          # n where a pre-fix run is an honest measurement
-FIXED_ONLY_N = {32, 64}                    # n where only fixed-code reruns count
+FIXED_ONLY_N = {32, 64, 128}               # n where only fixed-code reruns count
 
 csv_in, png_out = sys.argv[1], sys.argv[2]
 df = pd.read_csv(csv_in)

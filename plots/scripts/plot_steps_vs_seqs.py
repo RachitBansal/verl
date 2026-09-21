@@ -88,7 +88,7 @@ pre_hit = pre.dropna(subset=["steps"])
 pre_cens = pre[pre["steps"].isna()]
 
 # ---- rollout sweep: plain GRPO at bsz 128 with n varied (optional) ----------------------
-nsw_src = df[(~df["downsample"]) & (df["bsz"] == 128) & (df["n"].isin(VALID_N) | (df["fixed"] & df["n"].isin({32, 64}))) & long_enough] if SHOW_NSWEEP else df.iloc[0:0]
+nsw_src = df[(~df["downsample"]) & (df["bsz"] == 128) & (df["n"].isin(VALID_N) | (df["fixed"] & df["n"].isin({32, 64, 128}))) & long_enough] if SHOW_NSWEEP else df.iloc[0:0]
 nsw_all = collapse(nsw_src, ["n", "lr"], "nsweep") if len(nsw_src) else collapse(df.iloc[0:0], ["n", "lr"], "nsweep")
 if len(nsw_all):
     nsw_all["k"] = nsw_all["n"].astype(int)
@@ -195,19 +195,19 @@ if SHOW_NSWEEP and len(nsw_pre_best):
     ax.plot(nsw_pre_best["seqs"], nsw_pre_best["steps"], lw=1.6, ls="--", color=VIOLET, zorder=4)
     ax.scatter(nsw_pre_best["seqs"], nsw_pre_best["steps"], s=110, marker="p", facecolors=SURFACE, edgecolors=VIOLET,
                linewidths=1.6, zorder=4.5)
-    for _, r in nsw_pre_best[nsw_pre_best["n"].isin([32, 64])].iterrows():   # the two n where pre-fix and fixed differ
+    for _, r in nsw_pre_best[nsw_pre_best["n"].isin([32, 64, 128])].iterrows():   # the two n where pre-fix and fixed differ
         ax.annotate(f"n={int(r['n'])} pre-fix", (r["seqs"], r["steps"]), xytext=(9, 4), textcoords="offset points",
                     ha="left", fontsize=7.4, color=VIOLET, alpha=0.85, zorder=7)
 if SHOW_NSWEEP and len(nsw_best):
     ax.plot(nsw_best["seqs"], nsw_best["steps"], lw=2, color=VIOLET, zorder=5)
     ax.scatter(nsw_best["seqs"], nsw_best["steps"], s=120, marker="p", color=VIOLET, edgecolors=SURFACE, linewidths=1.5, zorder=6)
     NSW_POS = {2: dict(xytext=(10, 4), ha="left"), 4: dict(xytext=(-9, -3), ha="right"), 8: dict(xytext=(10, 6), ha="left"),
-               32: dict(xytext=(-9, 7), ha="right"), 64: dict(xytext=(9, -13), ha="left")}
+               32: dict(xytext=(-9, 7), ha="right"), 64: dict(xytext=(9, -13), ha="left"), 128: dict(xytext=(9, -13), ha="left")}
     for _, r in nsw_best.iterrows():
         if int(r["n"]) == 16:   # same run as the blue headline point at 2048 sequences; already labelled
             continue
         pos = NSW_POS.get(int(r["n"]), dict(xytext=(10, 6), ha="left"))
-        lab = f"n={int(r['n'])}" if int(r["n"]) in (4, 32, 64) else f"n={int(r['n'])}, lr {r['lr']:g}"   # short labels where the neighbourhood is crowded
+        lab = f"n={int(r['n'])}" if int(r["n"]) in (4, 32, 64, 128) else f"n={int(r['n'])}, lr {r['lr']:g}"   # short labels where the neighbourhood is crowded
         ax.annotate(lab, (r["seqs"], r["steps"]), textcoords="offset points",
                     fontsize=7.8, color=VIOLET, zorder=7, **pos)
     for _, r in nsw_never.iterrows():
