@@ -52,4 +52,6 @@ checkpoint at/above the threshold is kept alongside as `steps_to_<pct>`.
 $PULL scripts/pull_val_curves.py csv/val_curves_n16.json                  # full val curve per n=16 run
 $PLOT scripts/build_steps_vs_bsz_interactive.py csv/val_curves_n16.json html/steps_vs_bsz_interactive.html
 # then republish html/steps_vs_bsz_interactive.html to https://claude.ai/artifact/GhSHS36AsHoVcctvwfPDwn
+$PLOT scripts/build_lr_grid_interactive.py csv/val_curves_n16.json html/lr_grid_interactive.html   # (batch, LR) grid with target slider + bracket status
+# then republish html/lr_grid_interactive.html to https://claude.ai/artifact/7E7Y5QAMBp9hJavaHhC9X2
 ```
