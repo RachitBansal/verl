@@ -151,16 +151,24 @@ for _, grp in pf_hit.groupby("seqs"):
         ax.annotate(f"lr {r['lr']:g}", (r["seqs"], r["steps"]), xytext=(10, 4 if i % 2 == 0 else -11),
                     textcoords="offset points", fontsize=7.4, color=INK2, zorder=7)
 
-# downsample, fixed scaling
-ax.plot(ds_hit["seqs"], ds_hit["steps"], lw=2, color=ORANGE, zorder=5)
-ax.scatter(ds_hit["seqs"], ds_hit["steps"], s=95, color=ORANGE, edgecolors=SURFACE, linewidths=1.5, zorder=6)
-HIT_POS = {4: dict(xytext=(10, 2), ha="left"), 16: dict(xytext=(-10, -4), ha="right")}
-for _, r in ds_hit.iterrows():
+# downsample, fixed scaling: the headline line joins the LR-matched (1e-5) crossings only; crossings at other LRs
+# are drawn as unconnected diamonds, and censored runs at other LRs only once they have logged >= 300 steps
+ds_line = ds_hit[np.isclose(ds_hit["lr"], MATCHED_LR)].sort_values("seqs")
+ds_other = ds_hit[~np.isclose(ds_hit["lr"], MATCHED_LR)]
+ax.plot(ds_line["seqs"], ds_line["steps"], lw=2, color=ORANGE, zorder=5)
+ax.scatter(ds_line["seqs"], ds_line["steps"], s=95, color=ORANGE, edgecolors=SURFACE, linewidths=1.5, zorder=6)
+ax.scatter(ds_other["seqs"], ds_other["steps"], s=70, marker="D", color=ORANGE, edgecolors=SURFACE, linewidths=1.3, zorder=6)
+HIT_POS = {4: dict(xytext=(10, 2), ha="left"), 8: dict(xytext=(10, 2), ha="left"), 16: dict(xytext=(-10, -4), ha="right")}
+for _, r in ds_line.iterrows():
     pos = HIT_POS.get(int(r["k"]), dict(xytext=(0, 9), ha="center"))
     ax.annotate(f"K={r['k']}, lr {r['lr']:g}", (r["seqs"], r["steps"]), textcoords="offset points",
                 fontsize=7.8, color=INK, zorder=7, **pos)
-CENS_POS = {2: dict(xytext=(0, -13), ha="center") if (SHOW_PREFIX or SHOW_NSWEEP) else dict(xytext=(-10, -3), ha="right"),
-            8: dict(xytext=(10, -3), ha="left"), 16: dict(xytext=(10, 2), ha="left")}
+for _, r in ds_other.iterrows():
+    ax.annotate(f"K={r['k']}, lr {r['lr']:g}", (r["seqs"], r["steps"]), xytext=(10, 4), textcoords="offset points",
+                ha="left", fontsize=7.4, color=INK2, zorder=7)
+ds_cens = ds_cens[np.isclose(ds_cens["lr"], MATCHED_LR) | (ds_cens["last"] >= 300)]
+CENS_POS = {1: dict(xytext=(-10, -3), ha="right"), 2: dict(xytext=(0, 9), ha="center"),
+            4: dict(xytext=(-10, -12), ha="right"), 8: dict(xytext=(10, -3), ha="left"), 16: dict(xytext=(10, 2), ha="left")}
 for _, r in ds_cens.iterrows():
     ax.scatter([r["seqs"]], [r["last"]], s=85, marker="^", facecolors=SURFACE, edgecolors=ORANGE,
                linewidths=1.8, zorder=6)
@@ -238,6 +246,7 @@ legend = [
     Line2D([], [], marker="o", ls="--", lw=1.4, ms=8, color=BLUE, mfc=SURFACE, mec=BLUE, mew=1.8, label="plain GRPO n=16 — lr 1e-5 (pre-fix scaling)"),
     Line2D([], [], marker="s", ls="", ms=8, color=BLUE, mec=SURFACE, label="plain GRPO n=16 — fixed scaling (LR labelled)"),
     Line2D([], [], marker="o", ls="-", lw=2, ms=8, color=ORANGE, mec=SURFACE, label="downsample N=64→K — lr 1e-5, fixed scaling"),
+    Line2D([], [], marker="D", ls="", ms=7, color=ORANGE, mec=SURFACE, label="downsample N=64→K — other LR, fixed scaling"),
 ]
 if SHOW_PREFIX:
     legend.append(Line2D([], [], marker="D", ls="", ms=7, color=PREFIX, mec=SURFACE, label="downsample N=64→K — pre-fix scaling (nominal LR labelled)"))
