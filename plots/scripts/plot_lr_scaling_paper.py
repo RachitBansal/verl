@@ -8,7 +8,8 @@ colour scale, darker = fewer). Hollow grey markers never reached 50%. The ringed
 column is the fastest LR at that B or n, labelled with its step count, and the rings are joined.
 The fastest run per configuration is used regardless of code version, except that at n = 32/64 only
 the fixed-loss-scaling reruns are eligible (the earlier runs there sat in Adam's eps regime).
-Runs with fewer than SHORT_STEPS validated steps that never crossed are omitted. Writes PNG and PDF.
+A run that never crossed is drawn hollow if it finished and ran at least as long as the fastest crossing in its
+column (so early-stopped brackets at large B count); shorter or still-running non-crossers are omitted. Writes PNG and PDF.
 
 Usage: python plot_lr_scaling_paper.py csv/steps_to_50_kl.csv png/lr_scaling_paper.png
 """
@@ -34,7 +35,17 @@ COL = "steps_to_50_interp" if "steps_to_50_interp" in df else "steps_to_50"
 df = df[~df["name"].str.startswith("downsample")].copy()
 df["fixed"] = df["name"].str.contains("updated_scaling", na=False)
 df["kl"] = df["kl"].astype(float).round(6)
-df = df[(df["last_val_step"].fillna(0) >= SHORT_STEPS) | df[COL].notna()]   # short runs count only once they crossed
+# A run that never crossed counts as "did not reach 50%" only if it is finished and ran at least as long as the
+# fastest crossing at its (kl, bsz) or (n) column, so the big-batch brackets we stopped early (they had already
+# been beaten) show up as hollow markers while a run killed after a handful of steps does not. Columns with no
+# crossing at all fall back to SHORT_STEPS.
+df["last_val_step"] = df["last_val_step"].fillna(0)
+best_b = df[df["n"] == 16].groupby(["kl", "bsz"])[COL].min().rename("best_b")
+best_n = df[df["bsz"] == 128].groupby(["kl", "n"])[COL].min().rename("best_n")
+df = df.join(best_b, on=["kl", "bsz"]).join(best_n, on=["kl", "n"])
+ref = df[["best_b", "best_n"]].min(axis=1).fillna(SHORT_STEPS)
+long_enough = (df["last_val_step"] >= np.minimum(ref, SHORT_STEPS)) & (df["state"] != "running")
+df = df[df[COL].notna() | long_enough].drop(columns=["best_b", "best_n"])
 
 
 def collapse(src, keys):
@@ -108,7 +119,7 @@ cb.outline.set_visible(False)
 legend = [
     Line2D([], [], marker="o", ls="--", ms=9, mfc=RAMP[4], mec=SURFACE, color=INK2, label="KL coef 1e-3; dashed line joins the fastest LR at each B or n"),
     Line2D([], [], marker="D", ls=":", ms=7.5, mfc=RAMP[4], mec=SURFACE, color=INK2, label="KL coef 1e-2; dotted line joins the fastest LR at each B"),
-    Line2D([], [], marker="o", ls="", ms=8, mfc="none", mec=MUTED, mew=1.4, label="never reached 50%"),
+    Line2D([], [], marker="o", ls="", ms=8, mfc="none", mec=MUTED, mew=1.4, label="did not reach 50% (ran at least as long as the fastest LR in its column)"),
     Line2D([], [], marker="o", ls="", ms=11, mfc="none", mec=INK, mew=1.7, label="fastest LR at that B or n, steps to 50% labelled"),
 ]
 fig.legend(handles=legend, loc="lower center", ncol=2, frameon=False, labelcolor=INK, bbox_to_anchor=(0.47, -0.005), columnspacing=3.0)
