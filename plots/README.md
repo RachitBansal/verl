@@ -4,6 +4,7 @@
 scripts/   pull_*.py (wandb -> CSV) and plot_*.py (CSV -> PNG)
 csv/       pulled data and the *_table.csv each plot script emits alongside its figure
 png/       figures only
+paper/     paper-ready PDFs (vector), written by the *_paper.py scripts
 html/      interactive pages (built from csv/, published as artifacts)
 ```
 

@@ -5,7 +5,7 @@
 
 Both series use KL coef 1e-3 and the fastest available run per point (pre-fix or fixed loss scaling;
 for n = 32/64 only the fixed-code reruns are eligible because the pre-fix runs sat in Adam's eps regime).
-No pre/post-fix comparison, no downsampling series. Writes PNG and PDF.
+No pre/post-fix comparison, no downsampling series. Writes the PNG next to the other figures and the PDF to plots/paper/.
 
 Usage: python plot_steps_vs_seqs_paper.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_paper.png
 """
@@ -103,8 +103,11 @@ legend = [
 ax.legend(handles=legend, loc="upper right", frameon=False, labelcolor=INK)
 fig.tight_layout()
 fig.savefig(png_out, dpi=200, facecolor=SURFACE)
-fig.savefig(png_out.replace(".png", ".pdf"), facecolor=SURFACE)
-print("wrote", png_out, "and .pdf")
+pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper")   # plots/paper/
+os.makedirs(pdf_dir, exist_ok=True)
+pdf_out = os.path.join(pdf_dir, os.path.basename(png_out).replace(".png", ".pdf"))
+fig.savefig(pdf_out, facecolor=SURFACE)
+print("wrote", png_out, "and", pdf_out)
 print("\nbatch sweep:\n", batch[["key", "seqs", "lr", "steps", "run"]].to_string(index=False))
 print("\nrollout sweep:\n", roll[["key", "seqs", "lr", "steps", "run"]].to_string(index=False))
 print("\nrollout sweep, never:\n", roll_never[["key", "seqs", "last", "max_val"]].to_string(index=False))

@@ -9,7 +9,7 @@ column is the fastest LR at that B or n, labelled with its step count, and the r
 The fastest run per configuration is used regardless of code version, except that at n = 32/64 only
 the fixed-loss-scaling reruns are eligible (the earlier runs there sat in Adam's eps regime).
 A run that never crossed is drawn hollow if it finished and ran at least as long as the fastest crossing in its
-column (so early-stopped brackets at large B count); shorter or still-running non-crossers are omitted. Writes PNG and PDF.
+column (so early-stopped brackets at large B count); shorter or still-running non-crossers are omitted. Writes the PNG next to the other figures and the PDF to plots/paper/.
 
 Usage: python plot_lr_scaling_paper.py csv/steps_to_50_kl.csv png/lr_scaling_paper.png
 """
@@ -125,8 +125,11 @@ legend = [
 fig.legend(handles=legend, loc="lower center", ncol=2, frameon=False, labelcolor=INK, bbox_to_anchor=(0.47, -0.005), columnspacing=3.0)
 fig.subplots_adjust(left=0.06, right=0.9, top=0.92, bottom=0.25)
 fig.savefig(png_out, dpi=200, facecolor=SURFACE)
-fig.savefig(png_out.replace(".png", ".pdf"), facecolor=SURFACE)
-print("wrote", png_out, "and .pdf")
+pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper")   # plots/paper/
+os.makedirs(pdf_dir, exist_ok=True)
+pdf_out = os.path.join(pdf_dir, os.path.basename(png_out).replace(".png", ".pdf"))
+fig.savefig(pdf_out, facecolor=SURFACE)
+print("wrote", png_out, "and", pdf_out)
 for name, d, xcol in [("batch sweep", left, "bsz"), ("rollout sweep", right, "n")]:
     ok = d.dropna(subset=["steps"])
     b = ok.loc[ok.groupby([c for c in ("kl", xcol) if c in ok])["steps"].idxmin()]
