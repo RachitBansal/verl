@@ -30,6 +30,7 @@ $PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_p
 $PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_nsweep.png --nsweep   # + rollout sweep (bsz 128, n varied; solid = fixed-code at n=32/64, dashed = pre-fix only)
 $PLOT scripts/plot_steps_vs_seqs_paper.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_paper.png   # paper figure: batch sweep vs rollout sweep only (PNG + PDF)
 $PLOT scripts/plot_lr_scaling_paper.py csv/steps_to_50_kl.csv png/lr_scaling_paper.png            # paper figure: best LR vs batch size (KL 1e-3/1e-2) and vs rollouts (PNG + PDF)
+$PLOT scripts/plot_lr_slope_vs_target.py csv/val_curves_n16.json png/lr_slope_vs_target.png      # exponent of best LR vs batch size, per target accuracy and KL
 
 # critical batch size vs target accuracy (30%..55% in 0.5% steps), from the full val curves
 $PLOT scripts/plot_cbs_vs_target.py csv/val_curves_n16.json png/cbs_vs_target.png                     # first batch whose 2-doubling average slope is shallower than -0.7; bsz < 8 and non-monotone outliers ignored
