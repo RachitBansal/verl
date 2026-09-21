@@ -10,6 +10,7 @@ Left panel: alpha vs target for both KLs (band = ±1 s.e.).  Right panel: the fi
 at a few targets, with the underlying best-LR points, to show what alpha summarises.
 
 Usage: python plot_lr_slope_vs_target.py csv/val_curves_n16.json png/lr_slope_vs_target.png [--min-bsz 8]
+       add --paper for the white, larger-type version (PNG + PDF in plots/paper/)
 """
 import sys, os, json
 import numpy as np, pandas as pd
@@ -29,6 +30,10 @@ RAMP = ["#9ec5f4", "#3987e5", "#184f95", "#0d366b"]
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 json_in, png_out = args[0], args[1]
 MIN_BSZ = int(sys.argv[sys.argv.index("--min-bsz") + 1]) if "--min-bsz" in sys.argv else 8
+PAPER = "--paper" in sys.argv          # white background, larger type, no figure title, PDF to plots/paper/
+if PAPER:
+    SURFACE = "#ffffff"
+    plt.rcParams.update({"font.size": 12.5, "axes.labelsize": 13, "legend.fontsize": 11, "axes.titlesize": 13})
 runs = json.load(open(json_in))
 
 
@@ -76,7 +81,7 @@ fit.to_csv(stem + "_table.csv", index=False)
 best_df.to_csv(stem + "_bestlr_table.csv", index=False)
 
 # ---------------------------------------------------------------- figure
-fig, (axL, axR) = plt.subplots(1, 2, figsize=(13, 5.2), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1], wspace=0.25))
+fig, (axL, axR) = plt.subplots(1, 2, figsize=(14, 5.4) if PAPER else (13, 5.2), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1], wspace=0.25))
 for ax in (axL, axR):
     ax.set_facecolor(SURFACE); ax.grid(True, color=GRID, lw=0.8); ax.tick_params(which="both", colors=INK2, length=0)
     for sp in ax.spines.values():
@@ -89,7 +94,7 @@ for kl, st in KLS.items():
     axL.scatter(f["target"] * 100, f["alpha"], color=st["color"], s=28, marker=st["marker"], edgecolors=SURFACE, linewidths=0.8, zorder=4)
 for ref, lab in [(1.0, "LR ∝ B  (linear)"), (0.5, "LR ∝ √B"), (0.0, "flat")]:
     axL.axhline(ref, color=MUTED, lw=1, ls=":", zorder=1)
-    axL.text(50.3, ref, lab, color=INK2, fontsize=9, va="center", ha="left")
+    axL.text(50.3, ref, lab, color=INK2, fontsize=10 if PAPER else 9, va="center", ha="left")
 axL.set_xlim(34.5, 53.5); axL.set_xlabel("target AIME 1983–2024 accuracy (%)", color=INK2)
 axL.set_ylabel("exponent α in  best LR ∝ batch^α", color=INK2)
 axL.set_title("how fast the best LR grows with batch size", loc="left", color=INK, fontsize=12)
@@ -116,11 +121,20 @@ axR.legend(handles=[Line2D([], [], color=RAMP[i], lw=2, label=f"target {int(t * 
            + [Line2D([], [], color=INK2, lw=1.5, ls="-", marker="o", mec=SURFACE, label="KL 1e-3"),
               Line2D([], [], color=INK2, lw=1.5, ls="--", marker="D", mec=SURFACE, label="KL 1e-2")],
            loc="lower right", frameon=False, fontsize=9, labelcolor=INK2, ncol=2)
-fig.suptitle(f"GRPO on-policy, n = 16: scaling of the best learning rate with batch size, by target accuracy  (batches ≥ {MIN_BSZ})",
-             color=INK, fontsize=12.5, x=0.02, ha="left")
-fig.subplots_adjust(left=0.06, right=0.97, top=0.88, bottom=0.12, wspace=0.25)
-fig.savefig(png_out, dpi=150, facecolor=SURFACE)
+if PAPER:
+    fig.subplots_adjust(left=0.06, right=0.97, top=0.92, bottom=0.13, wspace=0.25)
+else:
+    fig.suptitle(f"GRPO on-policy, n = 16: scaling of the best learning rate with batch size, by target accuracy  (batches ≥ {MIN_BSZ})",
+                 color=INK, fontsize=12.5, x=0.02, ha="left")
+    fig.subplots_adjust(left=0.06, right=0.97, top=0.88, bottom=0.12, wspace=0.25)
+fig.savefig(png_out, dpi=200 if PAPER else 150, facecolor=SURFACE)
 print("wrote", png_out)
+if PAPER:
+    pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper")
+    os.makedirs(pdf_dir, exist_ok=True)
+    pdf_out = os.path.join(pdf_dir, os.path.basename(png_out).replace(".png", ".pdf"))
+    fig.savefig(pdf_out, facecolor=SURFACE)
+    print("wrote", pdf_out)
 for kl in KLS:
     f = fit[np.isclose(fit["kl"], kl)]
     print(f"\nKL {kl:g}: alpha (LR ∝ B^alpha), n batches")
