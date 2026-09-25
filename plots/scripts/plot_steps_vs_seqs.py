@@ -11,6 +11,7 @@ Series
      - headline: fastest LR at each batch size (filled blue circles, solid line)
      - matched-LR: the lr = 1e-5 run at each batch size (hollow blue, dashed)
   plain GRPO n = 16 on the FIXED loss scaling, any LR (filled blue squares, LR labelled)
+  plain GRPO n = 64 with batch varied (fixed loss scaling, KL 1e-3): fastest LR per batch (teal hexagons, B labelled)
   downsample (N = 64, K in {2,4,8,16}, bsz 128), fixed loss scaling, KL 1e-3 (orange).
   --prefix: also the PRE-FIX downsample runs (green diamonds). Their effective LR was
      ~0.10/0.13/0.18/0.30 x nominal for K = 1/2/4/16 (Adam eps regime), so the LR
@@ -32,6 +33,7 @@ SURFACE, INK, INK2, GRID, MUTED = "#fcfcfb", "#0b0b0b", "#52514e", "#e6e5e1", "#
 BLUE, ORANGE = "#2a78d6", "#eb6834"          # categorical slots 1 and 2 (validated pair)
 VIOLET = "#4a3aa7"                           # slot 7; passes the validator beside blue/orange (CVD dE 24.7)
 PREFIX = "#008300"                           # slot 6 green, requested for pre-fix runs; diamond shape is the secondary encoding
+TEAL = "#0b7a75"                             # plain GRPO with n = 64 and batch varied; hexagon shape is the secondary encoding
 SHORT_STEPS = 200
 MATCHED_LR = 1e-5
 
@@ -76,6 +78,16 @@ pfix = collapse(df[(~df["downsample"]) & (df["n"] == 16) & df["fixed"] & long_en
 all_plain_hit = pd.concat([plain_hit.assign(fixed=False), pfix.dropna(subset=["steps"]).assign(fixed=True)])
 best = all_plain_hit.loc[all_plain_hit.groupby("seqs")["steps"].idxmin()].sort_values("seqs")
 
+# ---- plain GRPO, n = 64, batch varied (fixed scaling only; the 2026-09-22.. sweep) ----------------------------
+# x = 64 * B. Fastest LR per batch; batches where no LR has crossed are listed in the table only.
+b64_all = collapse(df[(~df["downsample"]) & (df["n"] == 64) & df["fixed"] & long_enough], ["seqs", "lr"], "plain_n64")
+if len(b64_all):
+    b64_all["k"] = 64
+    _h64 = b64_all.dropna(subset=["steps"])
+    b64_best = _h64.loc[_h64.groupby("seqs")["steps"].idxmin()].sort_values("seqs")
+else:
+    b64_best = b64_all
+
 # ---- downsample, fixed scaling ----------------------------------------------
 ds = collapse(df[df["downsample"] & df["fixed"]], ["dsk", "lr"], "downsample", k_from="dsk")
 ds_hit = ds.dropna(subset=["steps"])
@@ -111,14 +123,14 @@ else:
 pd.concat([best.assign(role="plain_fastest_lr"), matched.assign(role="plain_lr1e-5"),
            pfix.assign(role="plain_fixed_scaling"), ds.assign(role="downsample_fixed"),
            pre.assign(role="downsample_prefix"), nsw_all.assign(role="plain_nsweep_bsz128"),
-           nsw_pre_all.assign(role="plain_nsweep_bsz128_prefix")]).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_table.csv")), index=False)
+           nsw_pre_all.assign(role="plain_nsweep_bsz128_prefix"), b64_all.assign(role="plain_n64_bsz_sweep")]).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_table.csv")), index=False)
 
 # ---- plot -------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(9.5, 6), facecolor=SURFACE)
 ax.set_facecolor(SURFACE)
 
 b0, s0 = best["seqs"].iloc[0], best["steps"].iloc[0]
-allx = pd.concat([plain["seqs"], ds["seqs"], pfix["seqs"], pre["seqs"], nsw_all["seqs"]])
+allx = pd.concat([plain["seqs"], ds["seqs"], pfix["seqs"], pre["seqs"], nsw_all["seqs"], b64_all["seqs"]])
 xs = np.array([allx.min() / 1.4, allx.max() * 1.4])
 ax.plot(xs, s0 * b0 / xs, ls=":", lw=1.2, color=MUTED, zorder=1)
 ax.annotate("perfect scaling (steps ∝ 1/sequences)", (xs[1], s0 * b0 / xs[1]), xytext=(-4, -6), va="top",
@@ -223,9 +235,20 @@ if SHOW_NSWEEP and len(nsw_best):
         ax.annotate(f"n={int(r['n'])}: never ({r['max_val']:.0%} max)", (r["seqs"], r["last"]), xytext=(-10, -12), textcoords="offset points",
                     ha="right", fontsize=7.4, color=VIOLET, zorder=7)
 
+# plain GRPO, n = 64, batch varied (teal hexagons): fastest LR per batch, labelled with B
+if len(b64_best):
+    ax.plot(b64_best["seqs"], b64_best["steps"], lw=2, color=TEAL, zorder=4.5)
+    ax.scatter(b64_best["seqs"], b64_best["steps"], s=120, marker="h", color=TEAL, edgecolors=SURFACE, linewidths=1.5, zorder=5.5)
+    for _, r in b64_best.iterrows():
+        if SHOW_NSWEEP and r["seqs"] == 8192:     # same run as the rollout sweep's n = 64 point, labelled there
+            continue
+        off = (0, 8) if r["seqs"] <= 4096 else (0, -13)
+        ax.annotate(f"B={int(r['seqs'] // 64)}, lr {r['lr']:g}", (r["seqs"], r["steps"]), xytext=off, textcoords="offset points",
+                    ha="center", fontsize=7.6, color=TEAL, zorder=7)
+
 ax.set_xscale("log", base=2); ax.set_yscale("log")
-ticks = sorted(set(pd.concat([plain["seqs"], ds["seqs"], pfix["seqs"], nsw_all["seqs"]]).unique()))
-ax.set_xticks(ticks); ax.set_xticklabels([f"{t:,}" for t in ticks])
+ticks = sorted(set(pd.concat([plain["seqs"], ds["seqs"], pfix["seqs"], nsw_all["seqs"], b64_all["seqs"]]).unique()))
+ax.set_xticks(ticks); ax.set_xticklabels([f"{t:,}" if t < 10000 else f"{t // 1024}k" for t in ticks])
 ax.set_xlabel("sequences trained per optimizer step  (prompts × rollouts kept per prompt)", color=INK2, fontsize=10)
 ax.set_ylabel("steps to 50% AIME 1983-2024 (interpolated)", color=INK2, fontsize=10)
 for sp in ("top", "right"):
@@ -239,6 +262,8 @@ if SHOW_PREFIX:
     title += "\ngreen = pre-fix downsample runs (effective LR ≈ 0.1–0.3× the nominal LR shown)"
 if SHOW_NSWEEP:
     title += "\nviolet = plain GRPO at batch 128 with n rollouts varied (solid: fixed-code reruns at n=32/64; dashed: pre-fix runs only)"
+if len(b64_best):
+    title += "\nteal = plain GRPO with n = 64 rollouts and batch varied (fixed scaling; B ≥ 1024 validated every 25 steps, crossings there are coarse)"
 ax.set_title(title, loc="left", fontsize=11, color=INK, pad=10)
 
 legend = [
@@ -253,6 +278,8 @@ if SHOW_PREFIX:
 if SHOW_NSWEEP:
     legend.append(Line2D([], [], marker="p", ls="-", lw=2, ms=9, color=VIOLET, mec=SURFACE, label="plain GRPO, bsz 128, n varied — fastest LR per n (n=32/64 fixed scaling)"))
     legend.append(Line2D([], [], marker="p", ls="--", lw=1.6, ms=9, color=VIOLET, mfc=SURFACE, mec=VIOLET, label="plain GRPO, bsz 128, n varied — pre-fix scaling only"))
+if len(b64_best):
+    legend.append(Line2D([], [], marker="h", ls="-", lw=2, ms=9, color=TEAL, mec=SURFACE, label="plain GRPO n=64, batch varied — fastest LR per batch (fixed scaling)"))
 legend += [
     Line2D([], [], marker="^", ls="", ms=8, mfc=SURFACE, mec=INK2, mew=1.6, label="not yet at 50% — shown at last validated step"),
     Line2D([], [], ls=":", lw=1.2, color=MUTED, label="perfect 1/sequences scaling"),
@@ -264,6 +291,8 @@ print("plain GRPO, fastest LR per sequences:\n", best[["seqs", "lr", "steps", "r
 print("\nplain GRPO at lr 1e-5 (pre-fix):\n", matched[["seqs", "steps", "last", "max_val", "run"]].to_string(index=False))
 print("\nplain GRPO, fixed scaling:\n", pfix[["seqs", "lr", "steps", "last", "max_val", "run"]].to_string(index=False))
 print("\ndownsample (fixed scaling):\n", ds[["seqs", "k", "lr", "steps", "last", "max_val", "run"]].to_string(index=False))
+if len(b64_all):
+    print("\nplain GRPO n=64, batch varied (fixed scaling):\n", b64_all[["seqs", "lr", "steps", "last", "max_val", "run"]].to_string(index=False))
 if SHOW_PREFIX:
     print("\ndownsample (pre-fix):\n", pre[["seqs", "k", "n", "lr", "steps", "last", "max_val", "run"]].to_string(index=False))
 print("wrote", png_out)

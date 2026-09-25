@@ -25,10 +25,10 @@ $PLOT scripts/plot_steps_vs_bsz_kl.py csv/steps_to_50_kl.csv png/steps_vs_bsz_kl
 
 # downsampling vs plain GRPO on a sequences-per-step axis
 $PULL scripts/pull_steps_to_50_seqs.py csv/steps_to_50_seqs.csv
-$PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs.png
+$PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs.png # plain n=16 sweep vs downsampling; teal = plain n=64 batch sweep (fixed code)
 $PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_prefix.png --prefix   # + pre-fix downsample runs
 $PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_nsweep.png --nsweep   # + rollout sweep (bsz 128, n varied; solid = fixed-code at n=32/64, dashed = pre-fix only)
-$PLOT scripts/plot_steps_vs_seqs_paper.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_paper.png   # paper figure: batch sweep vs rollout sweep only (PNG + PDF)
+$PLOT scripts/plot_steps_vs_seqs_paper.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_paper.png   # paper figure: n=16 batch sweep, rollout sweep, n=64 batch sweep (PNG + PDF)
 $PLOT scripts/plot_lr_scaling_paper.py csv/steps_to_50_kl.csv png/lr_scaling_paper.png            # paper figure: best LR vs batch size (KL 1e-3/1e-2) and vs rollouts (PNG + PDF)
 $PLOT scripts/plot_lr_slope_vs_target.py csv/val_curves_n16.json png/lr_slope_vs_target.png      # exponent of best LR vs batch size, per target accuracy and KL
 $PLOT scripts/plot_lr_slope_vs_target.py csv/val_curves_n16.json png/lr_slope_paper.png --paper  # paper version (PNG + PDF in paper/)
