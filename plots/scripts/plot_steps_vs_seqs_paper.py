@@ -86,8 +86,9 @@ table.to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)),
                           os.path.basename(png_out).replace(".png", "_table.csv")), index=False)
 
 # ------------------------------------------------------------------ figure
+TOKENS_PER_SEQ = 1024 + 3072       # data.max_prompt_length + data.max_response_length in on_policy*.sh: the token budget per sequence
 plt.rcParams.update({"font.size": 12.5, "axes.labelsize": 13, "legend.fontsize": 11.5})
-fig, ax = plt.subplots(figsize=(10, 5), facecolor=SURFACE)
+fig, ax = plt.subplots(figsize=(10, 5.6), facecolor=SURFACE)
 ax.set_facecolor(SURFACE)
 
 # perfect 1/sequences scaling through the smallest batch point
@@ -96,46 +97,40 @@ xmax = max(batch["seqs"].max(), roll["seqs"].max(), b64["seqs"].max() if len(b64
 xs = np.array([batch["seqs"].min() / 2.5, xmax * 1.6])
 ax.plot(xs, b0["steps"] * b0["seqs"] / xs, ls=":", lw=1.2, color=MUTED, zorder=1)
 
-# batch sweep at n = 64 (teal hexagons), drawn first so the two sweeps it shares points with sit on top
+# markers only (no joining lines); the fitted curves, when asked for, are the lines
 if len(b64):
-    ax.plot(b64["seqs"], b64["steps"], lw=2, color=TEAL, zorder=3)
     ax.scatter(b64["seqs"], b64["steps"], s=120, marker="h", color=TEAL, edgecolors=SURFACE, linewidths=1.2, zorder=4)
     for _, r in b64.iterrows():
-        if int(r["key"]) == 128:      # shared with the rollout sweep's n = 64 point, labelled there
+        if int(r["key"]) == 128:      # shared with the rollout sweep's K = 64 point, labelled there
             continue
-        # above the marker where the violet labels sit to the right (B <= 64), below it further out (B >= 256)
-        off = (0, 8) if int(r["key"]) <= 64 else (0, -15)
+        off = (0, 8) if int(r["key"]) <= 64 else (0, -15)     # above where the rollout labels sit to the right, below further out
         ax.annotate(f"B={int(r['key'])}", (r["seqs"], r["steps"]), xytext=off, textcoords="offset points",
                     ha="center", fontsize=10, color=TEAL, zorder=8)
-
-# rollout sweep (violet)
-ax.plot(roll["seqs"], roll["steps"], lw=2, color=VIOLET, zorder=4)
 ax.scatter(roll["seqs"], roll["steps"], s=120, marker="p", color=VIOLET, edgecolors=SURFACE, linewidths=1.2, zorder=5)
-# batch sweep (blue), drawn on top so the shared (B=128, n=16) point reads as part of both
-ax.plot(batch["seqs"], batch["steps"], lw=2, color=BLUE, zorder=6)
 ax.scatter(batch["seqs"], batch["steps"], s=90, marker="o", color=BLUE, edgecolors=SURFACE, linewidths=1.2, zorder=7)
 
-# direct labels: B on the blue series (below-left), n on the violet series (above-right)
+# direct labels: B on the blue series (below-left), K on the green series (above-right), each in its series colour
 for _, r in batch.iterrows():
     ax.annotate(f"B={int(r['key'])}", (r["seqs"], r["steps"]), xytext=(-8, -13), textcoords="offset points",
-                ha="right", fontsize=10, color=INK2, zorder=8)
+                ha="right", fontsize=10, color=BLUE, zorder=8)
 for _, r in roll.iterrows():
     if int(r["key"]) == 16:
         continue
-    ax.annotate(f"n={int(r['key'])}", (r["seqs"], r["steps"]), xytext=(9, 7), textcoords="offset points",
+    ax.annotate(f"K={int(r['key'])}", (r["seqs"], r["steps"]), xytext=(9, 7), textcoords="offset points",
                 ha="left", fontsize=10, color=VIOLET, zorder=8)
-# --fit: critical-batch fits per series, dashed in the series colour, with N* annotated
+
+# --fit: critical-batch fits per series, solid in the series colour, with N* annotated
 fits = []
 if FIT:
-    series = [("more prompts, n = 16", batch, BLUE, 16, "B*"), ("more rollouts, B = 128", roll, VIOLET, 128, "n*")]
+    series = [("more prompts, K = 16", batch, BLUE, 16, "B*"), ("more rollouts, B = 128", roll, VIOLET, 128, "K*")]
     if len(b64):
-        series.append(("more prompts, n = 64", b64, TEAL, 64, "B*"))
+        series.append(("more prompts, K = 64", b64, TEAL, 64, "B*"))
     for label, d, col, per, unit in series:
         smin, ns, rms = fit_cbs(d["seqs"], d["steps"])
         fits.append(dict(series=label, s_min=smin, n_star_seqs=ns, per=per, star_unit=unit, star=ns / per, rms_log=rms, n_points=len(d)))
         fx = np.geomspace(d["seqs"].min() / 1.5, d["seqs"].max() * 1.5, 200)
-        ax.plot(fx, smin * (1 + ns / fx), ls="--", lw=1.3, color=col, alpha=0.85, zorder=2)
-    y0 = 0.02 + 0.055 * (1 + (len(roll_never) > 0))
+        ax.plot(fx, smin * (1 + ns / fx), ls="-", lw=1.8, color=col, alpha=0.9, zorder=3)
+    y0 = 0.02
     ax.text(0.01, y0 + 0.05 * len(fits), "fit  S = S_min (1 + N*/N),  N = sequences per step", transform=ax.transAxes,
             fontsize=10, color=INK, ha="left", va="bottom", fontweight="medium")
     for i, f in enumerate(reversed(fits)):
@@ -144,29 +139,36 @@ if FIT:
                 transform=ax.transAxes, fontsize=9.5, color=col, ha="left", va="bottom")
     pd.DataFrame(fits).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_fit_table.csv")), index=False)
 
-notes = []
-if len(roll_never):   # n with no crossing (n = 1: every prompt's advantages are identically zero) -> footnote, not a marker
-    notes.append(", ".join(f"n = {int(r['key'])} (B = 128) never reaches 50% within {int(r['last']):,} steps" for _, r in roll_never.iterrows()))
-for i, note in enumerate(notes):
-    ax.text(0.01, 0.02 + 0.055 * i, note, transform=ax.transAxes, fontsize=9.5, color=[VIOLET, TEAL][min(i, 1)] if len(roll_never) else TEAL, ha="left", va="bottom")
-
 ax.set_xscale("log", base=2); ax.set_yscale("log")
 ticks = sorted(set(batch["seqs"]) | set(roll["seqs"]) | set(b64["seqs"]))
 ax.set_xticks(ticks); ax.set_xticklabels([f"{t:,}" if t < 10000 else f"{t // 1024}k" for t in ticks], fontsize=11)
-ax.set_xlabel("sequences per optimizer step  (prompts B × rollouts n)", color=INK)
+ax.set_xlabel("sequences per optimizer step  (prompts B × rollouts K)", color=INK)
 ax.set_ylabel("steps to 50% AIME 1983–2024", color=INK)
 ax.grid(True, which="major", color=GRID, lw=0.7)
 ax.tick_params(which="both", colors=INK2, length=0)
 for sp in ax.spines.values():
     sp.set_visible(False)
 
-legend = [Line2D([], [], marker="o", ls="-", lw=2, ms=7, color=BLUE, mec=SURFACE, label="more prompts: batch size B varied, rollout size n = 16")]
+
+def fmt_tokens(v):
+    return f"{v / 1e3:.0f}k" if v < 1e6 else (f"{v / 1e6:.1f}M" if v < 1e7 else f"{v / 1e6:.0f}M")
+
+
+# secondary x-axis: maximum tokens per optimizer step = sequences × (max prompt + max response length)
+top = ax.secondary_xaxis("top", functions=(lambda n: n * TOKENS_PER_SEQ, lambda t: t / TOKENS_PER_SEQ))
+top.set_xticks([t * TOKENS_PER_SEQ for t in ticks]); top.set_xticklabels([fmt_tokens(t * TOKENS_PER_SEQ) for t in ticks], fontsize=10)
+top.set_xlabel(f"maximum tokens per optimizer step  (sequences × {TOKENS_PER_SEQ:,} tokens)", color=INK2, fontsize=11.5)
+top.tick_params(which="both", colors=INK2, length=0)
+for sp in top.spines.values():
+    sp.set_visible(False)
+
+legend = [Line2D([], [], marker="o", ls="", ms=8, color=BLUE, mec=SURFACE, label="more prompts: batch size B varied, rollout size K = 16")]
 if len(b64):
-    legend.append(Line2D([], [], marker="h", ls="-", lw=2, ms=8, color=TEAL, mec=SURFACE, label="more prompts: batch size B varied, rollout size n = 64"))
-legend.append(Line2D([], [], marker="p", ls="-", lw=2, ms=8, color=VIOLET, mec=SURFACE, label="more rollouts: rollout size n varied, batch size B = 128"))
+    legend.append(Line2D([], [], marker="h", ls="", ms=9, color=TEAL, mec=SURFACE, label="more prompts: batch size B varied, rollout size K = 64"))
+legend.append(Line2D([], [], marker="p", ls="", ms=9, color=VIOLET, mec=SURFACE, label="more rollouts: rollout size K varied, batch size B = 128"))
 legend.append(Line2D([], [], ls=":", lw=1.2, color=MUTED, label="perfect scaling (steps ∝ 1/sequences)"))
 if FIT:
-    legend.append(Line2D([], [], ls="--", lw=1.3, color=INK2, label="fit  S = S_min (1 + N*/N)"))
+    legend.append(Line2D([], [], ls="-", lw=1.8, color=INK2, label="fit  S = S_min (1 + N*/N)"))
 ax.legend(handles=legend, loc="upper right", frameon=False, labelcolor=INK)
 fig.tight_layout()
 fig.savefig(png_out, dpi=200, facecolor=SURFACE)
@@ -179,7 +181,7 @@ print("\nbatch sweep:\n", batch[["key", "seqs", "lr", "steps", "run"]].to_string
 print("\nrollout sweep:\n", roll[["key", "seqs", "lr", "steps", "run"]].to_string(index=False))
 print("\nrollout sweep, never:\n", roll_never[["key", "seqs", "last", "max_val"]].to_string(index=False))
 if len(b64):
-    print("\nbatch sweep, n = 64:\n", b64[["key", "seqs", "lr", "steps", "run"]].to_string(index=False))
-    print("\nbatch sweep, n = 64, never:\n", b64_never[["key", "seqs", "last", "max_val"]].to_string(index=False))
+    print("\nbatch sweep, K = 64:\n", b64[["key", "seqs", "lr", "steps", "run"]].to_string(index=False))
+    print("\nbatch sweep, K = 64, never:\n", b64_never[["key", "seqs", "last", "max_val"]].to_string(index=False))
 if fits:
     print("\ncritical-batch fits S = S_min (1 + N*/N):\n", pd.DataFrame(fits).to_string(index=False))
