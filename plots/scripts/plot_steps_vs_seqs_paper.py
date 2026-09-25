@@ -101,18 +101,16 @@ ax.plot(xs, b0["steps"] * b0["seqs"] / xs, ls=":", lw=1.2, color=MUTED, zorder=1
 if len(b64):
     ax.scatter(b64["seqs"], b64["steps"], s=120, marker="h", color=TEAL, edgecolors=SURFACE, linewidths=1.2, zorder=4)
     for _, r in b64.iterrows():
-        if int(r["key"]) == 128:      # shared with the rollout sweep's K = 64 point, labelled there
-            continue
         off = (0, 8) if int(r["key"]) <= 64 else (0, -15)     # above where the rollout labels sit to the right, below further out
         ax.annotate(f"B={int(r['key'])}", (r["seqs"], r["steps"]), xytext=off, textcoords="offset points",
                     ha="center", fontsize=10, color=TEAL, zorder=8)
 ax.scatter(roll["seqs"], roll["steps"], s=120, marker="p", color=VIOLET, edgecolors=SURFACE, linewidths=1.2, zorder=5)
 ax.scatter(batch["seqs"], batch["steps"], s=90, marker="o", color=BLUE, edgecolors=SURFACE, linewidths=1.2, zorder=7)
 
-# direct labels: B on the blue series (below-left), K on the green series (above-right), each in its series colour
+# direct labels: B on the blue series (centred below), K on the green series (above-right), each in its series colour
 for _, r in batch.iterrows():
-    ax.annotate(f"B={int(r['key'])}", (r["seqs"], r["steps"]), xytext=(-8, -13), textcoords="offset points",
-                ha="right", fontsize=10, color=BLUE, zorder=8)
+    ax.annotate(f"B={int(r['key'])}", (r["seqs"], r["steps"]), xytext=(4, -15), textcoords="offset points",
+                ha="right", fontsize=10, color=BLUE, zorder=8)      # tucked under the marker, clear of the fit line that runs down-right
 for _, r in roll.iterrows():
     if int(r["key"]) == 16:
         continue
