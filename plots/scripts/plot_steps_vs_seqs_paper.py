@@ -87,7 +87,7 @@ table.to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)),
 
 # ------------------------------------------------------------------ figure
 TOKENS_PER_SEQ = 1024 + 3072       # data.max_prompt_length + data.max_response_length in on_policy*.sh: the token budget per sequence
-plt.rcParams.update({"font.size": 12.5, "axes.labelsize": 13, "legend.fontsize": 11.5})
+plt.rcParams.update({"font.size": 14, "axes.labelsize": 14.5, "legend.fontsize": 12.5})
 fig, ax = plt.subplots(figsize=(10, 5.6), facecolor=SURFACE)
 ax.set_facecolor(SURFACE)
 
@@ -103,19 +103,19 @@ if len(b64):
     for _, r in b64.iterrows():
         off = (0, 8) if int(r["key"]) <= 64 else (0, -15)     # above where the rollout labels sit to the right, below further out
         ax.annotate(f"B={int(r['key'])}", (r["seqs"], r["steps"]), xytext=off, textcoords="offset points",
-                    ha="center", fontsize=10, color=TEAL, zorder=8)
+                    ha="center", fontsize=11, color=TEAL, zorder=8)
 ax.scatter(roll["seqs"], roll["steps"], s=120, marker="p", color=VIOLET, edgecolors=SURFACE, linewidths=1.2, zorder=5)
 ax.scatter(batch["seqs"], batch["steps"], s=90, marker="o", color=BLUE, edgecolors=SURFACE, linewidths=1.2, zorder=7)
 
 # direct labels: B on the blue series (centred below), K on the green series (above-right), each in its series colour
 for _, r in batch.iterrows():
     ax.annotate(f"B={int(r['key'])}", (r["seqs"], r["steps"]), xytext=(4, -15), textcoords="offset points",
-                ha="right", fontsize=10, color=BLUE, zorder=8)      # tucked under the marker, clear of the fit line that runs down-right
+                ha="right", fontsize=11, color=BLUE, zorder=8)      # tucked under the marker, clear of the fit line that runs down-right
 for _, r in roll.iterrows():
     if int(r["key"]) == 16:
         continue
     ax.annotate(f"K={int(r['key'])}", (r["seqs"], r["steps"]), xytext=(9, 7), textcoords="offset points",
-                ha="left", fontsize=10, color=VIOLET, zorder=8)
+                ha="left", fontsize=11, color=VIOLET, zorder=8)
 
 # --fit: critical-batch fits per series, solid in the series colour, with N* annotated
 fits = []
@@ -128,18 +128,21 @@ if FIT:
         fits.append(dict(series=label, s_min=smin, n_star_seqs=ns, per=per, star_unit=unit, star=ns / per, rms_log=rms, n_points=len(d)))
         fx = np.geomspace(d["seqs"].min() / 1.5, d["seqs"].max() * 1.5, 200)
         ax.plot(fx, smin * (1 + ns / fx), ls="-", lw=1.8, color=col, alpha=0.9, zorder=3)
-    y0 = 0.02
-    ax.text(0.01, y0 + 0.05 * len(fits), "fit  S = S_min (1 + N*/N),  N = sequences per step", transform=ax.transAxes,
-            fontsize=10, color=INK, ha="left", va="bottom", fontweight="medium")
-    for i, f in enumerate(reversed(fits)):
+    # N* of each fit as a dotted vertical from the x-axis up to the fitted curve (where S = 2 S_min), labelled along the line
+    ymin = min(batch["steps"].min(), roll["steps"].min(), b64["steps"].min() if len(b64) else np.inf) / 4
+    for f in fits:
         col = {16: BLUE, 128: VIOLET, 64: TEAL}[f["per"]]
-        ax.text(0.01, y0 + 0.05 * i, f"{f['series']}:  N* ≈ {fmt_k(f['n_star_seqs'])} seq  ({f['star_unit']} ≈ {fmt_k(f['star'])}),  S_min ≈ {f['s_min']:.0f}",
-                transform=ax.transAxes, fontsize=9.5, color=col, ha="left", va="bottom")
+        ax.plot([f["n_star_seqs"]] * 2, [ymin, 2 * f["s_min"]], ls=":", lw=1.6, color=col, zorder=2.5)
+        # label just above the x-axis, to the left of the line except for the rightmost (K = 16) line, so labels never meet
+        left = f["per"] != 16
+        ax.text(f["n_star_seqs"] * (0.96 if left else 1.04), ymin * 1.12, f"N* ≈ {fmt_k(f['n_star_seqs'])}\n{f['star_unit']} ≈ {fmt_k(f['star'])}",
+                ha="right" if left else "left", va="bottom", fontsize=11, color=col, zorder=8, linespacing=1.1)
+    ax.set_ylim(bottom=ymin)
     pd.DataFrame(fits).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_fit_table.csv")), index=False)
 
 ax.set_xscale("log", base=2); ax.set_yscale("log")
 ticks = sorted(set(batch["seqs"]) | set(roll["seqs"]) | set(b64["seqs"]))
-ax.set_xticks(ticks); ax.set_xticklabels([f"{t:,}" if t < 10000 else f"{t // 1024}k" for t in ticks], fontsize=11)
+ax.set_xticks(ticks); ax.set_xticklabels([f"{t:,}" if t < 10000 else f"{t // 1024}k" for t in ticks], fontsize=12)
 ax.set_xlabel("sequences per optimizer step  (prompts B × rollouts K)", color=INK)
 ax.set_ylabel("steps to 50% AIME 1983–2024", color=INK)
 ax.grid(True, which="major", color=GRID, lw=0.7)
@@ -154,8 +157,8 @@ def fmt_tokens(v):
 
 # secondary x-axis: maximum tokens per optimizer step = sequences × (max prompt + max response length)
 top = ax.secondary_xaxis("top", functions=(lambda n: n * TOKENS_PER_SEQ, lambda t: t / TOKENS_PER_SEQ))
-top.set_xticks([t * TOKENS_PER_SEQ for t in ticks]); top.set_xticklabels([fmt_tokens(t * TOKENS_PER_SEQ) for t in ticks], fontsize=10)
-top.set_xlabel(f"maximum tokens per optimizer step  (sequences × {TOKENS_PER_SEQ:,} tokens)", color=INK2, fontsize=11.5)
+top.set_xticks([t * TOKENS_PER_SEQ for t in ticks]); top.set_xticklabels([fmt_tokens(t * TOKENS_PER_SEQ) for t in ticks], fontsize=11)
+top.set_xlabel(f"maximum tokens per optimizer step  (sequences × {TOKENS_PER_SEQ:,} tokens)", color=INK2, fontsize=12.5)
 top.tick_params(which="both", colors=INK2, length=0)
 for sp in top.spines.values():
     sp.set_visible(False)
@@ -167,6 +170,7 @@ legend.append(Line2D([], [], marker="p", ls="", ms=9, color=VIOLET, mec=SURFACE,
 legend.append(Line2D([], [], ls=":", lw=1.2, color=MUTED, label="perfect scaling (steps ∝ 1/sequences)"))
 if FIT:
     legend.append(Line2D([], [], ls="-", lw=1.8, color=INK2, label="fit  S = S_min (1 + N*/N)"))
+    legend.append(Line2D([], [], ls=":", lw=1.6, color=INK2, label="N*  (steps = 2 S_min)"))
 ax.legend(handles=legend, loc="upper right", frameon=False, labelcolor=INK)
 fig.tight_layout()
 fig.savefig(png_out, dpi=200, facecolor=SURFACE)
