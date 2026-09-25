@@ -135,7 +135,7 @@ if FIT:
         fits.append(dict(series=label, s_min=smin, n_star_seqs=ns, per=per, star_unit=unit, star=ns / per, rms_log=rms, n_points=len(d)))
         fx = np.geomspace(d["seqs"].min() / 1.5, d["seqs"].max() * 1.5, 200)
         ax.plot(fx, smin * (1 + ns / fx), ls="--", lw=1.3, color=col, alpha=0.85, zorder=2)
-    y0 = 0.02 + 0.055 * (1 + (len(roll_never) > 0) + int(len(b64) and (b64["key"] >= 1024).any()))
+    y0 = 0.02 + 0.055 * (1 + (len(roll_never) > 0))
     ax.text(0.01, y0 + 0.05 * len(fits), "fit  S = S_min (1 + N*/N),  N = sequences per step", transform=ax.transAxes,
             fontsize=10, color=INK, ha="left", va="bottom", fontweight="medium")
     for i, f in enumerate(reversed(fits)):
@@ -147,8 +147,6 @@ if FIT:
 notes = []
 if len(roll_never):   # n with no crossing (n = 1: every prompt's advantages are identically zero) -> footnote, not a marker
     notes.append(", ".join(f"n = {int(r['key'])} (B = 128) never reaches 50% within {int(r['last']):,} steps" for _, r in roll_never.iterrows()))
-if len(b64) and (b64["key"] >= 1024).any():
-    notes.append("n = 64, B ≥ 1024: validated every 25 steps and above 50% at the first check, so those crossings are interpolated from step 0")
 for i, note in enumerate(notes):
     ax.text(0.01, 0.02 + 0.055 * i, note, transform=ax.transAxes, fontsize=9.5, color=[VIOLET, TEAL][min(i, 1)] if len(roll_never) else TEAL, ha="left", va="bottom")
 
