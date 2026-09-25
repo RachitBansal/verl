@@ -162,12 +162,10 @@ ax.tick_params(which="both", colors=INK2, length=0)
 for sp in ax.spines.values():
     sp.set_visible(False)
 
-legend = [
-    Line2D([], [], marker="o", ls="-", lw=2, ms=7, color=BLUE, mec=SURFACE, label="more prompts: batch size B varied, n = 16"),
-    Line2D([], [], marker="p", ls="-", lw=2, ms=8, color=VIOLET, mec=SURFACE, label="more rollouts: n varied, B = 128"),
-]
+legend = [Line2D([], [], marker="o", ls="-", lw=2, ms=7, color=BLUE, mec=SURFACE, label="more prompts: batch size B varied, rollout size n = 16")]
 if len(b64):
-    legend.append(Line2D([], [], marker="h", ls="-", lw=2, ms=8, color=TEAL, mec=SURFACE, label="more prompts: batch size B varied, n = 64"))
+    legend.append(Line2D([], [], marker="h", ls="-", lw=2, ms=8, color=TEAL, mec=SURFACE, label="more prompts: batch size B varied, rollout size n = 64"))
+legend.append(Line2D([], [], marker="p", ls="-", lw=2, ms=8, color=VIOLET, mec=SURFACE, label="more rollouts: rollout size n varied, batch size B = 128"))
 legend.append(Line2D([], [], ls=":", lw=1.2, color=MUTED, label="perfect scaling (steps ∝ 1/sequences)"))
 if FIT:
     legend.append(Line2D([], [], ls="--", lw=1.3, color=INK2, label="fit  S = S_min (1 + N*/N)"))
