@@ -167,7 +167,7 @@ legend = [
     Line2D([], [], marker="p", ls="-", lw=2, ms=8, color=VIOLET, mec=SURFACE, label="more rollouts: n varied, B = 128"),
 ]
 if len(b64):
-    legend.append(Line2D([], [], marker="h", ls="-", lw=2, ms=8, color=TEAL, mec=SURFACE, label="more prompts at n = 64: batch size B varied"))
+    legend.append(Line2D([], [], marker="h", ls="-", lw=2, ms=8, color=TEAL, mec=SURFACE, label="more prompts: batch size B varied, n = 64"))
 legend.append(Line2D([], [], ls=":", lw=1.2, color=MUTED, label="perfect scaling (steps ∝ 1/sequences)"))
 if FIT:
     legend.append(Line2D([], [], ls="--", lw=1.3, color=INK2, label="fit  S = S_min (1 + N*/N)"))
