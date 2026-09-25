@@ -164,11 +164,13 @@ legend = [Line2D([], [], marker="o", ls="", ms=8, color=BLUE, mec=SURFACE, label
 if len(b64):
     legend.append(Line2D([], [], marker="h", ls="", ms=9, color=TEAL, mec=SURFACE, label="more prompts: vary B, K = 64" + nstar.get(64, "")))
 legend.append(Line2D([], [], marker="p", ls="", ms=9, color=VIOLET, mec=SURFACE, label="more rollouts: B = 128, vary K" + nstar.get(128, "")))
-legend.append(Line2D([], [], ls=":", lw=1.2, color=MUTED, label="perfect scaling (steps ∝ 1/sequences)"))
+# series in the upper right; reference lines (perfect scaling, fit, N*) in the lower left
+refs = [Line2D([], [], ls=":", lw=1.2, color=MUTED, label="perfect scaling (steps ∝ 1/sequences)")]
 if FIT:
-    legend.append(Line2D([], [], ls="-", lw=1.8, color=INK2, label="fit  S = S_min (1 + N*/N)"))
-    legend.append(Line2D([], [], ls=":", lw=1.6, color=INK2, label="N*  (steps = 2 S_min)"))
-ax.legend(handles=legend, loc="upper right", frameon=False, labelcolor=INK)
+    refs.append(Line2D([], [], ls="-", lw=1.8, color=INK2, label="fit  S = S_min (1 + N*/N)"))
+    refs.append(Line2D([], [], ls=":", lw=1.6, color=INK2, label="N*  (steps = 2 S_min)"))
+ax.add_artist(ax.legend(handles=legend, loc="upper right", frameon=False, labelcolor=INK))
+ax.legend(handles=refs, loc="lower left", frameon=False, labelcolor=INK)
 fig.tight_layout()
 fig.savefig(png_out, dpi=200, facecolor=SURFACE)
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper")   # plots/paper/
