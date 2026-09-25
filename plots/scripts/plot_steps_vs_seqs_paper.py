@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 SURFACE, INK, INK2, GRID, MUTED = "#ffffff", "#0b0b0b", "#52514e", "#e6e5e1", "#a8a7a2"
-BLUE, TEAL, VIOLET = "#1f77b4", "#ff7f0e", "#2ca02c"   # matplotlib defaults tab:blue / tab:orange / tab:green for the n=16 sweep, n=64 sweep, rollout sweep
+BLUE, TEAL, VIOLET = "#1f77b4", "#e8700a", "#2ca02c"   # tab:blue, a slightly darker tab:orange, tab:green for the n=16 sweep, n=64 sweep, rollout sweep
 SHORT_STEPS = 200
 VALID_N_PREFIX = {1, 2, 4, 8, 16}          # n where a pre-fix run is an honest measurement
 FIXED_ONLY_N = {32, 64, 128}               # n where only fixed-code reruns count
