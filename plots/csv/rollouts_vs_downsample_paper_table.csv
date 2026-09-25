@@ -1,0 +1,47 @@
+series,k,seqs,lr,steps,longest,max_val,verdict,is_best,bracket,attempts,run
+rollouts_n,1,128,1e-06,,400.0,0.2800429184549356,no crossing,False,no crossing,2,n1_bsz128_lr1e-6
+rollouts_n,1,128,3e-06,,2075.0,0.4431330472103004,no crossing,False,no crossing,4,n1_bsz128_lr3e-6_seed2
+rollouts_n,1,128,1e-05,,2075.0,0.361587982832618,no crossing,False,no crossing,1,n1_bsz128_lr1e-5
+rollouts_n,1,128,2e-05,,75.0,0.2832618025751073,no crossing,False,no crossing,1,n1_bsz128_lr2e-5
+rollouts_n,1,128,3e-05,,1550.0,0.2489270386266094,no crossing,False,no crossing,1,n1_bsz128_lr3e-5
+rollouts_n,1,128,0.0001,,1525.0,0.2414163090128755,no crossing,False,no crossing,1,n1_bsz128_lr1e-4
+rollouts_n,2,256,1e-06,,2075.0,0.4484978540772532,never,False,complete,1,n2_bsz128_lr1e-6
+rollouts_n,2,256,3e-06,1517.0,2075.0,0.5139484978540773,hit,True,complete,1,n2_bsz128_lr3e-6
+rollouts_n,2,256,1e-05,,2075.0,0.4324034334763948,never,False,complete,1,n2_bsz128_lr1e-5
+rollouts_n,4,512,1e-06,,2025.0,0.4935622317596566,never,False,complete,1,n4_bsz128_lr1e-6
+rollouts_n,4,512,3e-06,771.4285714285716,2075.0,0.5611587982832618,hit,True,complete,1,n4_bsz128_lr3e-6
+rollouts_n,4,512,1e-05,,800.0,0.463519313304721,never,False,complete,1,n4_bsz128_lr1e-5
+rollouts_n,8,1024,1e-06,,925.0,0.4281115879828326,never,False,complete,2,n8_bsz128_lr1e-6
+rollouts_n,8,1024,3e-06,470.6730769230769,2075.0,0.6201716738197425,hit,False,complete,2,n8_bsz128_lr3e-6
+rollouts_n,8,1024,1e-05,288.82978723404256,1200.0,0.5225321888412017,hit,True,complete,2,n8_bsz128_lr1e-5_seed123
+rollouts_n,8,1024,3e-05,,550.0,0.3422746781115879,never,False,complete,1,n8_bsz128_lr3e-5
+rollouts_n,8,1024,0.0001,,300.0,0.2274678111587982,never,False,complete,1,n8_bsz128_lr1e-4
+rollouts_n,16,2048,1e-06,,750.0,0.4334763948497854,never,False,complete,1,n16_bsz128_lr1e-6
+rollouts_n,16,2048,3e-06,421.6666666666666,2075.0,0.6587982832618026,hit,False,complete,1,n16_bsz128_lr3e-6
+rollouts_n,16,2048,1e-05,191.07142857142856,1300.0,0.628755364806867,hit,True,complete,3,n16_bsz128_lr1e-5_kl1e-3_v2
+rollouts_n,16,2048,3.2e-05,,1000.0,0.3969957081545064,never,False,complete,1,n16_bsz128_lr3.2e-5
+rollouts_n,32,4096,5e-06,156.66666666666666,200.0,0.5118025751072961,hit,False,complete,1,n32_bsz128_lr5e-6_kl0.001_updated_scaling
+rollouts_n,32,4096,1e-05,125.0,200.0,0.5171673819742489,hit,True,complete,1,n32_bsz128_lr1e-5_kl0.001_updated_scaling
+rollouts_n,32,4096,2e-05,261.60714285714283,300.0,0.5160944206008584,hit,False,complete,1,n32_bsz128_lr2e-5_kl0.001_updated_scaling
+rollouts_n,64,8192,5e-06,,125.0,0.4957081545064378,never,False,complete,1,n64_bsz128_lr5e-6_kl0.001_updated_scaling
+rollouts_n,64,8192,1e-05,86.95652173913042,125.0,0.5450643776824035,hit,True,complete,2,n64_bsz128_lr1e-5_kl0.001_updated_scaling
+rollouts_n,64,8192,2e-05,103.125,250.0,0.5150214592274678,hit,False,complete,1,n64_bsz128_lr2e-5_kl0.001_updated_scaling
+rollouts_n,128,16384,3e-06,,125.0,0.4431330472103004,never,False,complete,2,n128_bsz128_lr3e-6_kl0.001_updated_scaling
+rollouts_n,128,16384,1e-05,61.76470588235293,100.0,0.5418454935622318,hit,True,complete,3,n128_bsz128_lr1e-5_kl0.001_updated_scaling
+rollouts_n,128,16384,3e-05,,100.0,0.4216738197424893,never,False,complete,3,n128_bsz128_lr3e-5_kl0.001_updated_scaling
+downsample_K,1,128,3e-06,,725.0,0.4409871244635193,no crossing,False,no crossing,4,downsample_n64_dsk1_bsz128_lr3e-6_kl0.001_updated_scaling
+downsample_K,1,128,1e-05,,550.0,0.3991416309012875,no crossing,False,no crossing,21,downsample_n64_dsk1_bsz128_lr1e-5_kl0.001_updated_scaling
+downsample_K,2,256,3e-06,,650.0,0.463519313304721,no crossing,False,no crossing,30,downsample_n64_dsk2_bsz128_lr3e-6_kl0.001_updated_scaling
+downsample_K,2,256,1e-05,,1250.0,0.4291845493562232,no crossing,False,no crossing,11,downsample_n64_dsk2_bsz128_lr1e-5_kl0.001_updated_scaling
+downsample_K,4,512,3e-06,,750.0,0.4924892703862661,never,False,inconclusive,3,downsample_n64_dsk4_bsz128_lr3e-6_kl0.001_updated_scaling
+downsample_K,4,512,1e-05,750.0,950.0,0.5032188841201717,hit,True,inconclusive,14,downsample_n64_dsk4_bsz128_lr1e-5_kl1e-3_updated_scaling
+downsample_K,4,512,3e-05,,425.0,0.3111587982832618,inconclusive,False,inconclusive,1,downsample_n64_dsk4_bsz128_lr3e-5_kl0.001_updated_scaling
+downsample_K,8,1024,3e-06,487.5,650.0,0.5064377682403434,hit,False,complete,18,downsample_n64_dsk8_bsz128_lr3e-6_kl0.001_updated_scaling
+downsample_K,8,1024,1e-05,291.6666666666665,625.0,0.5182403433476395,hit,True,complete,4,downsample_n64_dsk8_bsz128_lr1e-5_kl0.001_updated_scaling
+downsample_K,8,1024,3e-05,,375.0,0.3605150214592275,never,False,complete,1,downsample_n64_dsk8_bsz128_lr3e-5_kl0.001_updated_scaling
+downsample_K,16,2048,3e-06,356.25000000000006,450.0,0.5118025751072961,hit,False,complete,9,downsample_n64_dsk16_bsz128_lr3e-6_kl0.001_updated_scaling
+downsample_K,16,2048,1e-05,164.28571428571428,950.0,0.575107296137339,hit,True,complete,5,downsample_n64_dsk16_bsz128_lr1e-5_kl0.001_updated_scaling
+downsample_K,16,2048,3e-05,,650.0,0.3873390557939914,never,False,complete,1,downsample_n64_dsk16_bsz128_lr3e-5_kl1e-3_updated_scaling
+downsample_K,32,4096,3e-06,294.2307692307692,375.0,0.5246781115879828,hit,False,complete,1,downsample_n64_dsk32_bsz128_lr3e-6_kl0.001_updated_scaling
+downsample_K,32,4096,1e-05,115.83333333333336,150.0,0.5225321888412017,hit,True,complete,1,downsample_n64_dsk32_bsz128_lr1e-5_kl0.001_updated_scaling
+downsample_K,32,4096,3e-05,,150.0,0.3851931330472103,never,False,complete,1,downsample_n64_dsk32_bsz128_lr3e-5_kl0.001_updated_scaling
