@@ -133,10 +133,6 @@ if FIT:
     for f in fits:
         col = {16: BLUE, 128: VIOLET, 64: TEAL}[f["per"]]
         ax.plot([f["n_star_seqs"]] * 2, [ymin, 2 * f["s_min"]], ls=":", lw=1.6, color=col, zorder=2.5)
-        # label just above the x-axis, to the left of the line except for the rightmost (K = 16) line, so labels never meet
-        left = f["per"] != 16
-        ax.text(f["n_star_seqs"] * (0.96 if left else 1.04), ymin * 1.12, f"N* ≈ {fmt_k(f['n_star_seqs'])}\n{f['star_unit']} ≈ {fmt_k(f['star'])}",
-                ha="right" if left else "left", va="bottom", fontsize=11, color=col, zorder=8, linespacing=1.1)
     ax.set_ylim(bottom=ymin)
     pd.DataFrame(fits).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_fit_table.csv")), index=False)
 
@@ -163,10 +159,11 @@ top.tick_params(which="both", colors=INK2, length=0)
 for sp in top.spines.values():
     sp.set_visible(False)
 
-legend = [Line2D([], [], marker="o", ls="", ms=8, color=BLUE, mec=SURFACE, label="more prompts: vary B, K = 16")]
+nstar = {f["per"]: f"   N* ≈ {fmt_k(f['n_star_seqs'])}" for f in fits}       # appended to the legend entries in --fit mode
+legend = [Line2D([], [], marker="o", ls="", ms=8, color=BLUE, mec=SURFACE, label="more prompts: vary B, K = 16" + nstar.get(16, ""))]
 if len(b64):
-    legend.append(Line2D([], [], marker="h", ls="", ms=9, color=TEAL, mec=SURFACE, label="more prompts: vary B, K = 64"))
-legend.append(Line2D([], [], marker="p", ls="", ms=9, color=VIOLET, mec=SURFACE, label="more rollouts: B = 128, vary K"))
+    legend.append(Line2D([], [], marker="h", ls="", ms=9, color=TEAL, mec=SURFACE, label="more prompts: vary B, K = 64" + nstar.get(64, "")))
+legend.append(Line2D([], [], marker="p", ls="", ms=9, color=VIOLET, mec=SURFACE, label="more rollouts: B = 128, vary K" + nstar.get(128, "")))
 legend.append(Line2D([], [], ls=":", lw=1.2, color=MUTED, label="perfect scaling (steps ∝ 1/sequences)"))
 if FIT:
     legend.append(Line2D([], [], ls="-", lw=1.8, color=INK2, label="fit  S = S_min (1 + N*/N)"))
