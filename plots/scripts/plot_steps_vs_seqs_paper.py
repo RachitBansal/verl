@@ -8,7 +8,11 @@ All series use KL coef 1e-3 and the fastest available run per point (pre-fix or 
 for n = 32/64/128 only the fixed-code reruns are eligible because the pre-fix runs sat in Adam's eps regime).
 No pre/post-fix comparison, no downsampling series. Writes the PNG next to the other figures and the PDF to plots/paper/.
 
-Usage: python plot_steps_vs_seqs_paper.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_paper.png
+--fit: least-squares fit (in log steps) of the critical-batch form  S(N) = S_min (1 + N*/N)  to each series, where N is
+sequences per step; the fitted curves are drawn dashed and N* (the critical number of sequences, at which steps are twice
+S_min) is annotated, also as B* = N*/n prompts for the batch sweeps and n* = N*/128 rollouts for the rollout sweep.
+
+Usage: python plot_steps_vs_seqs_paper.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_paper.png [--fit]
 """
 import sys, os
 import numpy as np, pandas as pd
@@ -24,7 +28,27 @@ VALID_N_PREFIX = {1, 2, 4, 8, 16}          # n where a pre-fix run is an honest 
 FIXED_ONLY_N = {32, 64, 128}               # n where only fixed-code reruns count
 
 csv_in, png_out = sys.argv[1], sys.argv[2]
+FIT = "--fit" in sys.argv[3:]
 df = pd.read_csv(csv_in)
+
+
+def fit_cbs(seqs, steps):
+    """S = S_min (1 + N*/N), least squares in log S. For fixed N* the optimal log S_min is the mean residual, so the fit
+    is a 1-D search over log N*. Returns (S_min, N*, rms log residual)."""
+    N = np.asarray(seqs, float); y = np.log(np.asarray(steps, float))
+    best = None
+    for ln_ns in np.linspace(np.log(8), np.log(2 ** 26), 6000):
+        g = np.log1p(np.exp(ln_ns) / N)
+        ln_smin = (y - g).mean()
+        rms = np.sqrt(((y - g - ln_smin) ** 2).mean())
+        if best is None or rms < best[2]:
+            best = (float(np.exp(ln_smin)), float(np.exp(ln_ns)), float(rms))
+    return best
+
+
+def fmt_k(v):
+    """two significant figures, thousands as k"""
+    return f"{v / 1000:.2g}k" if v >= 1000 else f"{float(f'{v:.2g}'):.0f}"
 COL = "steps_to_50_interp" if "steps_to_50_interp" in df else "steps_to_50"
 df = df[np.isclose(df["kl"].astype(float), 1e-3)].dropna(subset=["seqs", "lr"]).copy()
 df["seqs"] = df["seqs"].astype(int)
@@ -100,6 +124,26 @@ for _, r in roll.iterrows():
         continue
     ax.annotate(f"n={int(r['key'])}", (r["seqs"], r["steps"]), xytext=(9, 7), textcoords="offset points",
                 ha="left", fontsize=10, color=VIOLET, zorder=8)
+# --fit: critical-batch fits per series, dashed in the series colour, with N* annotated
+fits = []
+if FIT:
+    series = [("more prompts, n = 16", batch, BLUE, 16, "B*"), ("more rollouts, B = 128", roll, VIOLET, 128, "n*")]
+    if len(b64):
+        series.append(("more prompts, n = 64", b64, TEAL, 64, "B*"))
+    for label, d, col, per, unit in series:
+        smin, ns, rms = fit_cbs(d["seqs"], d["steps"])
+        fits.append(dict(series=label, s_min=smin, n_star_seqs=ns, per=per, star_unit=unit, star=ns / per, rms_log=rms, n_points=len(d)))
+        fx = np.geomspace(d["seqs"].min() / 1.5, d["seqs"].max() * 1.5, 200)
+        ax.plot(fx, smin * (1 + ns / fx), ls="--", lw=1.3, color=col, alpha=0.85, zorder=2)
+    y0 = 0.02 + 0.055 * (1 + (len(roll_never) > 0) + int(len(b64) and (b64["key"] >= 1024).any()))
+    ax.text(0.01, y0 + 0.05 * len(fits), "fit  S = S_min (1 + N*/N),  N = sequences per step", transform=ax.transAxes,
+            fontsize=10, color=INK, ha="left", va="bottom", fontweight="medium")
+    for i, f in enumerate(reversed(fits)):
+        col = {16: BLUE, 128: VIOLET, 64: TEAL}[f["per"]]
+        ax.text(0.01, y0 + 0.05 * i, f"{f['series']}:  N* ≈ {fmt_k(f['n_star_seqs'])} seq  ({f['star_unit']} ≈ {fmt_k(f['star'])}),  S_min ≈ {f['s_min']:.0f}",
+                transform=ax.transAxes, fontsize=9.5, color=col, ha="left", va="bottom")
+    pd.DataFrame(fits).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_fit_table.csv")), index=False)
+
 notes = []
 if len(roll_never):   # n with no crossing (n = 1: every prompt's advantages are identically zero) -> footnote, not a marker
     notes.append(", ".join(f"n = {int(r['key'])} (B = 128) never reaches 50% within {int(r['last']):,} steps" for _, r in roll_never.iterrows()))
@@ -125,6 +169,8 @@ legend = [
 if len(b64):
     legend.append(Line2D([], [], marker="h", ls="-", lw=2, ms=8, color=TEAL, mec=SURFACE, label="more prompts at n = 64: batch size B varied"))
 legend.append(Line2D([], [], ls=":", lw=1.2, color=MUTED, label="perfect scaling (steps ∝ 1/sequences)"))
+if FIT:
+    legend.append(Line2D([], [], ls="--", lw=1.3, color=INK2, label="fit  S = S_min (1 + N*/N)"))
 ax.legend(handles=legend, loc="upper right", frameon=False, labelcolor=INK)
 fig.tight_layout()
 fig.savefig(png_out, dpi=200, facecolor=SURFACE)
@@ -139,3 +185,5 @@ print("\nrollout sweep, never:\n", roll_never[["key", "seqs", "last", "max_val"]
 if len(b64):
     print("\nbatch sweep, n = 64:\n", b64[["key", "seqs", "lr", "steps", "run"]].to_string(index=False))
     print("\nbatch sweep, n = 64, never:\n", b64_never[["key", "seqs", "last", "max_val"]].to_string(index=False))
+if fits:
+    print("\ncritical-batch fits S = S_min (1 + N*/N):\n", pd.DataFrame(fits).to_string(index=False))

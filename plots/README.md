@@ -29,6 +29,7 @@ $PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs.p
 $PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_prefix.png --prefix   # + pre-fix downsample runs
 $PLOT scripts/plot_steps_vs_seqs.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_nsweep.png --nsweep   # + rollout sweep (bsz 128, n varied; solid = fixed-code at n=32/64, dashed = pre-fix only)
 $PLOT scripts/plot_steps_vs_seqs_paper.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_paper.png   # paper figure: n=16 batch sweep, rollout sweep, n=64 batch sweep (PNG + PDF)
+$PLOT scripts/plot_steps_vs_seqs_paper.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_fit.png --fit   # same, plus critical-batch fits S = S_min (1 + N*/N) per series, N* annotated (table: csv/steps_vs_seqs_fit_fit_table.csv)
 $PLOT scripts/plot_lr_scaling_paper.py csv/steps_to_50_kl.csv png/lr_scaling_paper.png            # paper figure: best LR vs batch size (KL 1e-3/1e-2) and vs rollouts (PNG + PDF)
 $PLOT scripts/plot_lr_slope_vs_target.py csv/val_curves_n16.json png/lr_slope_vs_target.png      # exponent of best LR vs batch size, per target accuracy and KL
 $PLOT scripts/plot_lr_slope_vs_target.py csv/val_curves_n16.json png/lr_slope_paper.png --paper  # paper version (PNG + PDF in paper/)
