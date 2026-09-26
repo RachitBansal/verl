@@ -29,6 +29,10 @@ FIXED_ONLY_N = {32, 64, 128}               # n where only fixed-code reruns coun
 
 csv_in, png_out = sys.argv[1], sys.argv[2]
 FIT = "--fit" in sys.argv[3:]
+# --knee TOL: the critical batch is where the fitted curve is TOL x the perfect-scaling asymptote S_min N*/N,
+# i.e. N_crit = (TOL - 1) N*. TOL = 2 recovers McCandlish's N* (steps = 2 S_min); the default 1.25 marks where
+# steps first exceed perfect scaling by 25%, the end of the linear regime as read off the plot.
+KNEE_TOL = float(sys.argv[sys.argv.index("--knee") + 1]) if "--knee" in sys.argv else 1.25
 df = pd.read_csv(csv_in)
 
 
@@ -100,22 +104,9 @@ ax.plot(xs, b0["steps"] * b0["seqs"] / xs, ls=":", lw=1.2, color=MUTED, zorder=1
 # markers only (no joining lines); the fitted curves, when asked for, are the lines
 if len(b64):
     ax.scatter(b64["seqs"], b64["steps"], s=120, marker="h", color=TEAL, edgecolors=SURFACE, linewidths=1.2, zorder=4)
-    for _, r in b64.iterrows():
-        off = (0, 8) if int(r["key"]) <= 64 else (0, -15)     # above where the rollout labels sit to the right, below further out
-        ax.annotate(f"B={int(r['key'])}", (r["seqs"], r["steps"]), xytext=off, textcoords="offset points",
-                    ha="center", fontsize=11, color=TEAL, zorder=8)
 ax.scatter(roll["seqs"], roll["steps"], s=120, marker="p", color=VIOLET, edgecolors=SURFACE, linewidths=1.2, zorder=5)
 ax.scatter(batch["seqs"], batch["steps"], s=90, marker="o", color=BLUE, edgecolors=SURFACE, linewidths=1.2, zorder=7)
 
-# direct labels: B on the blue series (centred below), K on the green series (above-right), each in its series colour
-for _, r in batch.iterrows():
-    ax.annotate(f"B={int(r['key'])}", (r["seqs"], r["steps"]), xytext=(4, -15), textcoords="offset points",
-                ha="right", fontsize=11, color=BLUE, zorder=8)      # tucked under the marker, clear of the fit line that runs down-right
-for _, r in roll.iterrows():
-    if int(r["key"]) == 16:
-        continue
-    ax.annotate(f"K={int(r['key'])}", (r["seqs"], r["steps"]), xytext=(9, 7), textcoords="offset points",
-                ha="left", fontsize=11, color=VIOLET, zorder=8)
 
 # --fit: critical-batch fits per series, solid in the series colour, with N* annotated
 fits = []
@@ -128,11 +119,19 @@ if FIT:
         fits.append(dict(series=label, s_min=smin, n_star_seqs=ns, per=per, star_unit=unit, star=ns / per, rms_log=rms, n_points=len(d)))
         fx = np.geomspace(d["seqs"].min() / 1.5, d["seqs"].max() * 1.5, 200)
         ax.plot(fx, smin * (1 + ns / fx), ls="-", lw=1.8, color=col, alpha=0.9, zorder=3)
-    # N* of each fit as a dotted vertical from the x-axis up to the fitted curve (where S = 2 S_min), labelled along the line
+    # critical batch of each series: the point on the fitted curve where steps are KNEE_TOL x perfect scaling,
+    # N_crit = (KNEE_TOL - 1) N*; marked on the curve, dotted vertical to the axis, labelled in the series colour
     ymin = min(batch["steps"].min(), roll["steps"].min(), b64["steps"].min() if len(b64) else np.inf) / 4
+    LABEL_OFF = {16: (-10, -22), 64: (14, 16), 128: (-14, -30)}     # keep the three labels clear of each other and the curves
     for f in fits:
         col = {16: BLUE, 128: VIOLET, 64: TEAL}[f["per"]]
-        ax.plot([f["n_star_seqs"]] * 2, [ymin, 2 * f["s_min"]], ls=":", lw=1.6, color=col, zorder=2.5)
+        n_c = (KNEE_TOL - 1) * f["n_star_seqs"]; s_c = f["s_min"] * (1 + f["n_star_seqs"] / n_c)
+        f["n_crit_seqs"] = n_c; f["crit"] = n_c / f["per"]
+        ax.plot([n_c] * 2, [ymin, s_c], ls=":", lw=1.6, color=col, zorder=2.5)
+        ax.plot([n_c], [s_c], marker="o", ms=13, mfc=SURFACE, mec=col, mew=2.2, ls="", zorder=9)
+        unit = "B" if f["per"] in (16, 64) else "K"
+        ax.annotate(f"$N_\\mathrm{{crit}}$ ≈ {fmt_k(n_c)}  (${unit}$ ≈ {fmt_k(f['crit'])})", (n_c, s_c), xytext=LABEL_OFF[f["per"]],
+                    textcoords="offset points", ha="left" if LABEL_OFF[f["per"]][0] > 0 else "right", fontsize=11.5, color=col, zorder=10)
     ax.set_ylim(bottom=ymin)
     pd.DataFrame(fits).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_fit_table.csv")), index=False)
 
@@ -159,7 +158,7 @@ top.tick_params(which="both", colors=INK2, length=0)
 for sp in top.spines.values():
     sp.set_visible(False)
 
-nstar = {f["per"]: f"   N* ≈ {fmt_k(f['n_star_seqs'])}" for f in fits}       # appended to the legend entries in --fit mode
+nstar = {}       # critical batches are annotated on the curves, not in the legend
 legend = [Line2D([], [], marker="o", ls="", ms=8, color=BLUE, mec=SURFACE, label="more prompts: vary B, K = 16" + nstar.get(16, ""))]
 if len(b64):
     legend.append(Line2D([], [], marker="h", ls="", ms=9, color=TEAL, mec=SURFACE, label="more prompts: vary B, K = 64" + nstar.get(64, "")))
@@ -168,7 +167,8 @@ legend.append(Line2D([], [], marker="p", ls="", ms=9, color=VIOLET, mec=SURFACE,
 refs = [Line2D([], [], ls=":", lw=1.2, color=MUTED, label="perfect scaling (steps ∝ 1/sequences)")]
 if FIT:
     refs.append(Line2D([], [], ls="-", lw=1.8, color=INK2, label="fit  S = S_min (1 + N*/N)"))
-    refs.append(Line2D([], [], ls=":", lw=1.6, color=INK2, label="N*  (steps = 2 S_min)"))
+    refs.append(Line2D([], [], marker="o", ms=9, mfc=SURFACE, mec=INK2, mew=1.8, ls=":", lw=1.6, color=INK2,
+                       label=f"critical batch: steps {int(round((KNEE_TOL - 1) * 100))}% above perfect scaling"))
 ax.add_artist(ax.legend(handles=legend, loc="upper right", frameon=False, labelcolor=INK))
 ax.legend(handles=refs, loc="lower left", frameon=False, labelcolor=INK)
 fig.tight_layout()
