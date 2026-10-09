@@ -65,6 +65,28 @@ policy_loss:
   # KL divergence penalty coefficient
   ppo_kl_coef: 0.1
 
+  # ---- Kimi-K2 squared-regression objective (loss_mode: kimi_k2), arXiv:2507.20534 ----
+  # L = mean_i (A_i - kimi_tau * log pi/pi_old(y_i))^2 ; target log-ratio per sequence = A_i / kimi_tau
+  kimi_tau: 0.01
+
+  # seq_sum (published, sum of token log-ratios) or seq_mean (length-normalised)
+  kimi_target_level: seq_sum
+
+  # squared (published) or gradient (same minimiser; loss rescaled by 1/(2 tau) so the first step equals the PG step)
+  kimi_form: squared
+
+  # optional per-token |log-ratio| guard: tokens beyond it keep their value but get no gradient (null = off)
+  kimi_logratio_clip: null
+
+  # solve tracking: number of training rows re-evaluated before/after the update (0 = off)
+  kimi_probe_num_seqs: 64
+
+  # rows removed from the update and used as a held-out regression loss (0 = off)
+  kimi_holdout_num_seqs: 0
+
+  # micro-batch size used for the probe / held-out forwards
+  kimi_probe_micro_bsz: 8
+
 # Constant C in Dual-clip PPO; clips when advantage < 0 and ratio > C
 clip_ratio_c: 3.0
 

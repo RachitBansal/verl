@@ -61,6 +61,13 @@ actor_rollout_ref:
       clip_cov_ub: 5.0
       kl_cov_ratio: 0.0002
       ppo_kl_coef: 0.1
+      kimi_tau: 0.01
+      kimi_target_level: seq_sum
+      kimi_form: squared
+      kimi_logratio_clip: null
+      kimi_probe_num_seqs: 64
+      kimi_holdout_num_seqs: 0
+      kimi_probe_micro_bsz: 8
     clip_ratio_c: 3.0
     loss_agg_mode: token-mean
     entropy_coeff: 0

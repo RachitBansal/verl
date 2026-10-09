@@ -27,7 +27,13 @@ from torch.distributed.tensor import DTensor
 
 import verl.utils.torch_functional as verl_F
 from verl import DataProto
-from verl.trainer.ppo.core_algos import agg_loss, get_policy_loss_fn, kl_penalty
+from verl.trainer.ppo.core_algos import (
+    agg_loss,
+    get_policy_loss_fn,
+    kimi_k2_regression_stats,
+    kimi_k2_summary_metrics,
+    kl_penalty,
+)
 from verl.utils.attention_utils import index_first_axis, pad_input, rearrange, unpad_input
 from verl.utils.device import get_device_id, get_device_name
 from verl.utils.fsdp_utils import FSDPModule, fsdp2_clip_grad_norm_
@@ -369,6 +375,59 @@ class DataParallelPPOActor(BasePPOActor):
         return log_probs, entropys
 
     @GPUMemoryLogger(role="dp actor", logger=logger)
+    @torch.no_grad()
+    def _kimi_regression_probe(self, probe: DataProto, temperature: float, prefix: str) -> dict[str, float]:
+        """Evaluate the Kimi-K2 regression loss of the *current* parameters on a fixed set of rows.
+
+        Called once before and once after the optimizer updates of a rollout batch (see
+        ``update_policy``) so that ``<prefix>/solve_ratio`` = loss_after / loss_before reports how much
+        of the inner regression was actually solved on those rows.  The log-ratio is always taken
+        against the stored ``old_log_probs`` (never the on-policy detach shortcut), so the "before"
+        value also exposes the recompute floor (``<prefix>/delta_rms`` at theta_t should be ~0).
+
+        Every DP rank runs the same number of forward calls (equal local batch sizes), which FSDP
+        requires.  Runs in eval mode like ``compute_log_prob`` and restores train mode afterwards.
+        """
+        pl = self.config.policy_loss
+        tau = float(pl.kimi_tau)
+        target_level = pl.get("kimi_target_level", "seq_sum")
+        micro_bsz = int(pl.get("kimi_probe_micro_bsz", 8))
+
+        was_training = self.actor_module.training
+        self.actor_module.eval()
+        stats_parts: list[dict[str, torch.Tensor]] = []
+        masks: list[torch.Tensor] = []
+        for micro_batch in probe.split(micro_bsz):
+            micro_batch = micro_batch.to(get_device_id())
+            model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
+            _, log_prob = self._forward_micro_batch(model_inputs, temperature=temperature, calculate_entropy=False)
+            st = kimi_k2_regression_stats(
+                old_log_prob=model_inputs["old_log_probs"],
+                log_prob=log_prob,
+                advantages=model_inputs["advantages"],
+                response_mask=model_inputs["response_mask"],
+                tau=tau,
+                target_level=target_level,
+            )
+            stats_parts.append({k: v.detach().float() for k, v in st.items()})
+            masks.append(model_inputs["response_mask"])
+        if was_training:
+            self.actor_module.train()
+
+        # concatenate per-sequence tensors; pad token-level ones to a common length for the k1/k3 estimate
+        max_t = max(m.shape[-1] for m in masks)
+
+        def _pad(x):
+            return torch.nn.functional.pad(x, (0, max_t - x.shape[-1]))
+
+        seq_keys = ("adv", "delta", "target", "resid", "loss_seq")
+        merged = {k: torch.cat([p[k] for p in stats_parts], dim=0) for k in seq_keys}
+        merged["d"] = torch.cat([_pad(p["d"]) for p in stats_parts], dim=0)
+        mask = torch.cat([_pad(m) for m in masks], dim=0)
+        metrics = kimi_k2_summary_metrics(merged, mask, prefix=prefix)
+        metrics[f"{prefix}/num_seqs"] = float(merged["adv"].shape[0])
+        return metrics
+
     def update_policy(self, data: DataProto):
         # make sure we are in training mode
         self.actor_module.train()
@@ -398,6 +457,26 @@ class DataParallelPPOActor(BasePPOActor):
         non_tensor_select_keys = ["multi_modal_inputs"] if has_multi_modal_inputs else []
 
         data = data.select(batch_keys=select_keys, non_tensor_batch_keys=non_tensor_select_keys)
+
+        # ---- Kimi-K2 solve tracking -------------------------------------------------------------
+        # probe rows: a fixed prefix of the training rows, re-evaluated before/after the update.
+        # held-out rows: removed from the update entirely (regression loss generalisation check).
+        kimi_tracking = self.config.policy_loss.get("loss_mode", "vanilla") == "kimi_k2"
+        probe_rows = holdout_rows = None
+        if kimi_tracking:
+            n_total = len(data)
+            n_hold = int(self.config.policy_loss.get("kimi_holdout_num_seqs", 0))
+            if 0 < n_hold < n_total:
+                holdout_rows = data.slice(n_total - n_hold, n_total)
+                data = data.slice(0, n_total - n_hold)
+            n_probe = int(self.config.policy_loss.get("kimi_probe_num_seqs", 0))
+            if n_probe > 0:
+                probe_rows = data.slice(0, min(n_probe, len(data)))
+        probe_before = holdout_before = None
+        if probe_rows is not None:
+            probe_before = self._kimi_regression_probe(probe_rows, temperature, prefix="kimi_probe")
+        if holdout_rows is not None:
+            holdout_before = self._kimi_regression_probe(holdout_rows, temperature, prefix="kimi_holdout")
 
         # Split to make minibatch iterator for updating the actor
         # See PPO paper for details. https://arxiv.org/abs/1707.06347
@@ -529,4 +608,24 @@ class DataParallelPPOActor(BasePPOActor):
                 mini_batch_metrics = {"actor/grad_norm": grad_norm.detach().item()}
                 append_to_dict(metrics, mini_batch_metrics)
         self.actor_optimizer.zero_grad()
+
+        # ---- Kimi-K2 solve tracking: evaluate the same rows at theta_{t+1} -------------------------
+        # Emitted exactly once per update (not per micro-batch), so the trainer's mean-reduction over
+        # the list is a no-op and the logged value is the true value on every rank.
+        for rows, before in ((probe_rows, probe_before), (holdout_rows, holdout_before)):
+            if rows is None:
+                continue
+            prefix = "kimi_probe" if rows is probe_rows else "kimi_holdout"
+            after = self._kimi_regression_probe(rows, temperature, prefix=prefix)
+            tracked = {}
+            for k, v in before.items():
+                tracked[k + "_before"] = v
+            for k, v in after.items():
+                tracked[k + "_after"] = v
+            lb, la = before[f"{prefix}/reg_loss"], after[f"{prefix}/reg_loss"]
+            l0 = before[f"{prefix}/reg_loss_at_zero_delta"]
+            tracked[f"{prefix}/solve_ratio"] = la / max(lb, 1e-12)
+            tracked[f"{prefix}/solve_ratio_vs_zero_delta"] = la / max(l0, 1e-12)
+            tracked[f"{prefix}/recompute_floor_share"] = (lb - l0) / max(l0, 1e-12)
+            append_to_dict(metrics, tracked)
         return metrics

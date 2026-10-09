@@ -41,6 +41,13 @@ class PolicyLossConfig(BaseConfig):
         clip_cov_ub (float): Upper bound for clip-cov loss.
         kl_cov_ratio (float): Ratio of tokens to be applied KL penalty for kl-cov loss.
         ppo_kl_coef (float): KL divergence penalty coefficient.
+        kimi_tau (float): Kimi-K2 regression temperature; target log-ratio per sequence is A_i / tau.
+        kimi_target_level (str): 'seq_sum' (published) or 'seq_mean' (length-normalised log-ratio).
+        kimi_form (str): 'squared' (published loss) or 'gradient' (same minimiser, PG-scaled).
+        kimi_logratio_clip (Optional[float]): detach token log-ratios beyond this magnitude.
+        kimi_probe_num_seqs (int): rows re-evaluated before/after the update to report the solve ratio.
+        kimi_holdout_num_seqs (int): rows excluded from the update and used as held-out regression loss.
+        kimi_probe_micro_bsz (int): micro-batch size for the probe forwards.
     """
 
     loss_mode: str = "vanilla"
@@ -49,6 +56,16 @@ class PolicyLossConfig(BaseConfig):
     clip_cov_ub: float = 5.0
     kl_cov_ratio: float = 0.0002
     ppo_kl_coef: float = 0.1
+    # --- Kimi-K2 squared-regression objective (loss_mode="kimi_k2"), see core_algos.compute_policy_loss_kimi_k2
+    kimi_tau: float = 0.01
+    kimi_target_level: str = "seq_sum"
+    kimi_form: str = "squared"
+    kimi_logratio_clip: Optional[float] = None
+    # Solve tracking (dp_actor.update_policy): regression loss on a fixed probe subset of the training
+    # rows before/after the update, and on rows held out of the update entirely. 0 disables.
+    kimi_probe_num_seqs: int = 64
+    kimi_holdout_num_seqs: int = 0
+    kimi_probe_micro_bsz: int = 8
 
 
 @dataclass

@@ -1350,6 +1350,185 @@ def compute_policy_loss_geo_mean(
     return pg_loss, pg_metrics
 
 
+def kimi_k2_regression_stats(
+    old_log_prob: torch.Tensor,
+    log_prob: torch.Tensor,
+    advantages: torch.Tensor,
+    response_mask: torch.Tensor,
+    tau: float,
+    target_level: str = "seq_sum",
+    logratio_clip: Optional[float] = None,
+) -> dict[str, torch.Tensor]:
+    """Per-sequence quantities of the Kimi-K2 squared-regression objective.
+
+    Shared by the ``kimi_k2`` policy loss and by the actor's solve-tracking probe so that the
+    loss that is optimised and the regression loss that is *reported* are the same function.
+
+    The published objective (Kimi Team 2025, "Kimi K2: Open Agentic Intelligence", Sec. 3.2.2; same
+    form as Kimi k1.5 Eq. 2 with the group mean replacing tau*log Z) is
+
+        L(theta) = E_x [ 1/K sum_i ( r(x, y_i) - rbar(x) - tau * log pi_theta(y_i|x) / pi_old(y_i|x) )^2 ],
+        y_i ~ pi_old,
+
+    with the *sequence-level* log-ratio.  Its exact minimiser is the mirror-descent iterate
+    pi_{t+1} ∝ pi_old * exp((r - rbar)/tau), i.e. per sequence  Delta_i := log pi/pi_old (y_i) = A_i / tau.
+
+    Args:
+        old_log_prob, log_prob: (B, T) token log-probs under pi_old and pi_theta.
+        advantages: (B, T) sequence-level advantage broadcast over tokens (GRPO-style estimators);
+            with ``norm_adv_by_std_in_grpo=False`` this is exactly r_i - rbar.
+        response_mask: (B, T).
+        tau: regression temperature; the target log-ratio is A_i / tau.
+        target_level: "seq_sum" (published: Delta_i = sum_t d_t) or "seq_mean" (Delta_i = mean_t d_t,
+            the GSPO/FlowRL length-normalised convention; the target is then A_i/tau *per token*).
+        logratio_clip: optional K2.5-style guard: tokens whose |d_t| exceeds this value contribute
+            their value but no gradient (detached), so a few extreme tokens cannot dominate the step.
+
+    Returns dict with per-sequence tensors ``adv`` (A_i), ``delta`` (Delta_i), ``target`` (A_i/tau),
+    ``resid`` (A_i - tau*Delta_i), ``loss_seq`` (resid^2) and token-level ``d`` (masked log-ratio).
+    """
+    assert target_level in ("seq_sum", "seq_mean"), f"unknown kimi_target_level={target_level}"
+    mask = response_mask.to(log_prob.dtype)
+    d = (log_prob - old_log_prob) * mask  # (B, T) token log-ratio, zero on padding
+    if logratio_clip is not None:
+        clipped = d.abs() > logratio_clip
+        d = torch.where(clipped, d.detach(), d)
+    seq_len = mask.sum(dim=-1).clamp(min=1.0)
+    delta = d.sum(dim=-1)
+    if target_level == "seq_mean":
+        delta = delta / seq_len
+    # advantage is constant over the response tokens -> masked mean recovers A_i exactly
+    adv = (advantages * mask).sum(dim=-1) / seq_len
+    target = adv / tau
+    resid = adv - tau * delta
+    return {
+        "d": d,
+        "adv": adv,
+        "delta": delta,
+        "target": target,
+        "resid": resid,
+        "loss_seq": resid.pow(2),
+        "seq_len": seq_len,
+    }
+
+
+def kimi_k2_summary_metrics(
+    stats: dict[str, torch.Tensor], response_mask: torch.Tensor, prefix: str
+) -> dict[str, float]:
+    """Scalar diagnostics of how far a batch is from solving the K2 regression.
+
+    ``s`` and ``rho`` decompose the realised log-ratio change Delta against the target A/tau:
+    solve_ratio = ||Delta - target||^2 / ||target||^2 = 1 - 2*s*rho + s^2 with s = ||Delta||/||target||,
+    rho = cos(Delta, target).  s ~ 1, rho ~ 1 means the regression is solved; s >> 1 is an overshoot;
+    s ~ 0 means the policy did not move on these sequences.
+    """
+    adv, delta, target, resid = stats["adv"], stats["delta"], stats["target"], stats["resid"]
+    eps = 1e-12
+    tgt_norm = target.pow(2).sum().sqrt()
+    del_norm = delta.pow(2).sum().sqrt()
+    # s / rho are undefined when every target in the batch is zero (all-equal-reward groups); report 0.
+    has_target = tgt_norm > 1e-8
+    s = torch.where(has_target, del_norm / (tgt_norm + eps), torch.zeros_like(tgt_norm))
+    rho = torch.where(has_target, (delta * target).sum() / (del_norm * tgt_norm + eps), torch.zeros_like(tgt_norm))
+    d = stats["d"]
+    mask = response_mask.to(d.dtype)
+    d_c = d.clamp(min=-20.0, max=20.0)
+    # k3 estimator of KL(pi_old || pi_theta) on the sampled tokens
+    k3 = verl_F.masked_mean(torch.exp(d_c) - d_c - 1.0, response_mask)
+    k1 = verl_F.masked_mean(-d, response_mask)
+    nonzero = (adv.abs() > 1e-8).to(adv.dtype)
+    out = {
+        f"{prefix}/reg_loss": stats["loss_seq"].mean().detach().item(),  # the published objective value
+        f"{prefix}/reg_loss_at_zero_delta": adv.pow(2).mean().detach().item(),  # loss if the policy had not moved
+        f"{prefix}/adv_rms": adv.pow(2).mean().sqrt().detach().item(),
+        f"{prefix}/target_rms": target.pow(2).mean().sqrt().detach().item(),  # nats (per seq or per token)
+        f"{prefix}/delta_rms": delta.pow(2).mean().sqrt().detach().item(),
+        f"{prefix}/delta_abs_max": delta.abs().max().detach().item(),
+        f"{prefix}/resid_rms": resid.pow(2).mean().sqrt().detach().item(),
+        f"{prefix}/s": s.detach().item(),
+        f"{prefix}/rho": rho.detach().item(),
+        f"{prefix}/frac_zero_adv": (1.0 - nonzero.mean()).detach().item(),
+        f"{prefix}/k1_to_old": k1.detach().item(),
+        f"{prefix}/k3_to_old": k3.detach().item(),
+        f"{prefix}/token_logratio_rms": (d.pow(2) * mask).sum().div(mask.sum().clamp(min=1.0)).sqrt().detach().item(),
+    }
+    return out
+
+
+@register_policy_loss("kimi_k2")
+def compute_policy_loss_kimi_k2(
+    old_log_prob: torch.Tensor,
+    log_prob: torch.Tensor,
+    advantages: torch.Tensor,
+    response_mask: torch.Tensor,
+    loss_agg_mode: str = "seq-mean-token-mean",
+    config: Optional[DictConfig | ActorConfig] = None,
+    rollout_is_weights: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, dict[str, Any]]:
+    """Kimi-K2 squared-regression policy objective (arXiv:2507.20534).
+
+        L(theta) = mean_i ( A_i - tau * Delta_i )^2,   A_i = r_i - rbar(x),  Delta_i = log pi_theta(y_i|x)/pi_old(y_i|x)
+
+    No importance ratio and no clipping: the quadratic term tau^2 Delta^2 is the proximal (trust-region)
+    term.  Use ``algorithm.adv_estimator=grpo`` with ``algorithm.norm_adv_by_std_in_grpo=False`` for the
+    published group-mean baseline.  Taking exactly one optimizer step per rollout batch makes this
+    REINFORCE with a group-mean baseline (Dr. GRPO); the regression is only "solved" when several steps
+    are taken on the same batch (``ppo_mini_batch_size`` < batch and/or ``ppo_epochs`` > 1).
+
+    Config (``actor.policy_loss``):
+        kimi_tau: tau.  Target log-ratio per sequence is A_i/tau (|A_i| <= 1 for binary rewards).
+        kimi_target_level: "seq_sum" (published) | "seq_mean".
+        kimi_form: "squared" (published, loss = mean resid^2) | "gradient" (loss = mean(-A Delta + tau/2 Delta^2),
+            identical minimiser and identical gradient direction, rescaled by 1/(2 tau) so that the step at
+            Delta=0 has the same magnitude as the plain policy gradient; useful when comparing lrs with GRPO).
+        kimi_logratio_clip: optional per-token |log-ratio| guard (gradient detached beyond it).
+
+    ``loss_agg_mode`` is ignored: the objective is a per-sequence regression and is averaged over sequences.
+    """
+    assert config is not None and getattr(config, "policy_loss", None) is not None
+    pl = config.policy_loss
+    tau = float(pl.kimi_tau)
+    assert tau > 0, "kimi_tau must be positive"
+    target_level = pl.get("kimi_target_level", "seq_sum")
+    form = pl.get("kimi_form", "squared")
+    logratio_clip = pl.get("kimi_logratio_clip", None)
+
+    stats = kimi_k2_regression_stats(
+        old_log_prob,
+        log_prob,
+        advantages,
+        response_mask,
+        tau=tau,
+        target_level=target_level,
+        logratio_clip=logratio_clip,
+    )
+    adv, delta = stats["adv"], stats["delta"]
+    if form == "squared":
+        losses = stats["loss_seq"]
+    elif form == "gradient":
+        losses = -adv * delta + 0.5 * tau * delta.pow(2)
+    else:
+        raise ValueError(f"unknown kimi_form={form}")
+
+    if rollout_is_weights is not None:
+        # token-level weights -> one weight per sequence (masked mean), detached upstream
+        mask = response_mask.to(losses.dtype)
+        seq_w = (rollout_is_weights * mask).sum(dim=-1) / mask.sum(dim=-1).clamp(min=1.0)
+        losses = losses * seq_w
+
+    loss = losses.mean()
+
+    metrics = kimi_k2_summary_metrics(stats, response_mask, prefix="kimi")
+    metrics.update(
+        {
+            "actor/ppo_kl": metrics["kimi/k1_to_old"],
+            "actor/pg_clipfrac": 0.0,
+            "actor/pg_clipfrac_lower": 0.0,
+        }
+    )
+    return loss, metrics
+
+
 def compute_entropy_loss(logits, response_mask, loss_agg_mode: str = "token-mean"):
     """Compute categorical entropy loss (For backward compatibility)
 
