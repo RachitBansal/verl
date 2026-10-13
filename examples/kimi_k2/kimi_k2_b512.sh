@@ -45,6 +45,7 @@ STD_ADV=${STD_ADV:-False}
 LOSS_MODE=${LOSS_MODE:-kimi_k2}
 PROBE=${PROBE:-64}
 HOLDOUT=${HOLDOUT:-64}
+TRACE=${TRACE:-True}     # kimi_probe_per_step: probe/held-out stats after every inner step
 LOGRATIO_CLIP=${LOGRATIO_CLIP:-null}
 TEST_FREQ=${TEST_FREQ:-25}
 SAVE_FREQ=${SAVE_FREQ:-100}
@@ -119,6 +120,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.policy_loss.kimi_logratio_clip=${LOGRATIO_CLIP} \
     actor_rollout_ref.actor.policy_loss.kimi_probe_num_seqs=${PROBE} \
     actor_rollout_ref.actor.policy_loss.kimi_holdout_num_seqs=${HOLDOUT} \
+    actor_rollout_ref.actor.policy_loss.kimi_probe_per_step=${TRACE} \
     actor_rollout_ref.actor.use_kl_loss=${use_kl_loss} \
     actor_rollout_ref.actor.kl_loss_coef=${KL_COEF} \
     actor_rollout_ref.actor.entropy_coeff=0 \

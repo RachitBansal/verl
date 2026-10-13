@@ -68,6 +68,7 @@ actor_rollout_ref:
       kimi_probe_num_seqs: 64
       kimi_holdout_num_seqs: 0
       kimi_probe_micro_bsz: 8
+      kimi_probe_per_step: false
     clip_ratio_c: 3.0
     loss_agg_mode: token-mean
     entropy_coeff: 0

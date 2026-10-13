@@ -48,6 +48,8 @@ class PolicyLossConfig(BaseConfig):
         kimi_probe_num_seqs (int): rows re-evaluated before/after the update to report the solve ratio.
         kimi_holdout_num_seqs (int): rows excluded from the update and used as held-out regression loss.
         kimi_probe_micro_bsz (int): micro-batch size for the probe forwards.
+        kimi_probe_per_step (bool): also re-evaluate probe/held-out rows after every inner optimizer step
+            (``kimi_probe_trace/*_s{k}``, ``kimi_holdout_trace/*_s{k}``); measurement only.
     """
 
     loss_mode: str = "vanilla"
@@ -66,6 +68,8 @@ class PolicyLossConfig(BaseConfig):
     kimi_probe_num_seqs: int = 64
     kimi_holdout_num_seqs: int = 0
     kimi_probe_micro_bsz: int = 8
+    # Per-inner-step trace: probe/held-out regression stats after each optimizer step (k = 1..K).
+    kimi_probe_per_step: bool = False
 
 
 @dataclass

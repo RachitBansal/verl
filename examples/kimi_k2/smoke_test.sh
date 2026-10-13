@@ -47,6 +47,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.policy_loss.kimi_tau=0.01 \
     actor_rollout_ref.actor.policy_loss.kimi_probe_num_seqs=16 \
     actor_rollout_ref.actor.policy_loss.kimi_holdout_num_seqs=8 \
+    actor_rollout_ref.actor.policy_loss.kimi_probe_per_step=True \
     actor_rollout_ref.actor.use_kl_loss=False \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \

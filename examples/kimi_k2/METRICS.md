@@ -53,6 +53,12 @@ The actor re-evaluates the regression on fixed rows **before** any optimizer ste
 
 How to read the pair: `kimi_probe/solve_ratio` well below 1 with `kimi_holdout/solve_ratio` ≈ 1 means the update interpolates the sampled advantages without moving unseen sequences in the direction of theirs (memorisation of noisy labels). Both below 1 means the regression has found a direction that transfers. `kimi_holdout/solve_ratio` > 1 with negative `rho_after` means the step actively moved held-out sequences against their own advantages.
 
+## Per-inner-step trace (`kimi_probe_trace/*_s{k}`, `kimi_holdout_trace/*_s{k}`), opt-in
+
+With `kimi_probe_per_step: true` (the b512 launch script sets it via `TRACE=True`), the same probe and held-out rows are also re-evaluated after **every** inner optimizer step, k = 1..K, where K = `ppo_epochs` × (rows per rank / `ppo_mini_batch_size` per rank). The keys are `<set>_trace/<metric>_s<k>` for `reg_loss`, `solve_ratio` (= `reg_loss` at step k / `reg_loss_before`), `s`, `rho`, `delta_rms`, `resid_rms`, `k3_to_old`. Step K coincides with the `_after` value of the once-per-batch block.
+
+Reading: `kimi_probe_trace/solve_ratio_s{k}` is the in-sample loss curve across the inner solve; `kimi_holdout_trace/solve_ratio_s{k}` is the hold-out curve, whose minimum over k locates the number of inner steps past which the extra steps only memorise the sampled residuals. In epoch 1 the probe rows (first `kimi_probe_num_seqs` rows) receive a direct step at k = 1 and indirect ones afterwards; held-out rows receive only indirect steps. Cost: K extra no-grad forwards of (probe + held-out) rows per batch, run in eval mode on every rank; the training path is unchanged.
+
 ## Companion metrics (existing verl keys)
 
 `rollout_corr/k3_kl`, `rollout_corr/chi2_token`: vLLM-vs-trainer log-prob mismatch (needs `rollout.calculate_log_probs=True`); a hidden off-policy floor. `actor/entropy`, `response_length/mean`, `actor/grad_norm`: collapse indicators. `critic/rewards/mean`: train reward. `val-core/aime-1983-2024/reward/mean@1`: the eval the GRPO controls use (T=1.0, one sample).

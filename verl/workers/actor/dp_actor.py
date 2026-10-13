@@ -477,6 +477,10 @@ class DataParallelPPOActor(BasePPOActor):
             probe_before = self._kimi_regression_probe(probe_rows, temperature, prefix="kimi_probe")
         if holdout_rows is not None:
             holdout_before = self._kimi_regression_probe(holdout_rows, temperature, prefix="kimi_holdout")
+        # per-inner-step trace: same rows re-evaluated after every optimizer step (k = 1..K)
+        kimi_trace = kimi_tracking and bool(self.config.policy_loss.get("kimi_probe_per_step", False))
+        kimi_trace_keys = ("reg_loss", "s", "rho", "delta_rms", "resid_rms", "k3_to_old")
+        inner_step = 0
 
         # Split to make minibatch iterator for updating the actor
         # See PPO paper for details. https://arxiv.org/abs/1707.06347
@@ -607,6 +611,17 @@ class DataParallelPPOActor(BasePPOActor):
                 grad_norm = self._optimizer_step()
                 mini_batch_metrics = {"actor/grad_norm": grad_norm.detach().item()}
                 append_to_dict(metrics, mini_batch_metrics)
+                if kimi_trace:
+                    inner_step += 1
+                    for rows, before in ((probe_rows, probe_before), (holdout_rows, holdout_before)):
+                        if rows is None:
+                            continue
+                        prefix = "kimi_probe" if rows is probe_rows else "kimi_holdout"
+                        cur = self._kimi_regression_probe(rows, temperature, prefix=prefix)
+                        trace = {f"{prefix}_trace/{k}_s{inner_step}": cur[f"{prefix}/{k}"] for k in kimi_trace_keys}
+                        lb = before[f"{prefix}/reg_loss"]
+                        trace[f"{prefix}_trace/solve_ratio_s{inner_step}"] = cur[f"{prefix}/reg_loss"] / max(lb, 1e-12)
+                        append_to_dict(metrics, trace)
         self.actor_optimizer.zero_grad()
 
         # ---- Kimi-K2 solve tracking: evaluate the same rows at theta_{t+1} -------------------------

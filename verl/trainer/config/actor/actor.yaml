@@ -87,6 +87,9 @@ policy_loss:
   # micro-batch size used for the probe / held-out forwards
   kimi_probe_micro_bsz: 8
 
+  # also evaluate probe / held-out rows after every inner optimizer step (kimi_*_trace/<metric>_s{k})
+  kimi_probe_per_step: false
+
 # Constant C in Dual-clip PPO; clips when advantage < 0 and ratio > C
 clip_ratio_c: 3.0
 
