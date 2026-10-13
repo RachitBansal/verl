@@ -50,6 +50,7 @@ LOGRATIO_CLIP=${LOGRATIO_CLIP:-null}
 TEST_FREQ=${TEST_FREQ:-25}
 SAVE_FREQ=${SAVE_FREQ:-100}
 TOTAL_STEPS=${TOTAL_STEPS:-400}
+TOTAL_EPOCHS=${TOTAL_EPOCHS:-15}   # dataloader epochs; must cover TOTAL_STEPS (17k prompts / BSZ per epoch)
 TAG=${TAG:-}
 
 project_name=${PROJECT:-"kimi_k2_cbs"}
@@ -150,4 +151,4 @@ python3 -m verl.trainer.main_ppo \
     trainer.save_freq=${SAVE_FREQ} \
     trainer.test_freq=${TEST_FREQ} \
     trainer.total_training_steps=${TOTAL_STEPS} \
-    trainer.total_epochs=15
+    trainer.total_epochs=${TOTAL_EPOCHS}
