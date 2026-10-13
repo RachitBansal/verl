@@ -24,7 +24,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cbs_data import load_runs, best_per_cell, fit_mccandlish
 
 # same palette as the other ICLR figures; large type because the panel is placed at half the text width
-BLUE, ORANGE, TEAL, INK = "#2B6CB0", "#E07A2F", "#1B9E77", "#222222"
+# series colours follow Figure 1: K=16 blue, K=64 orange (TEAL, historical name), B=128 green (ORANGE, historical name)
+BLUE, ORANGE, TEAL, INK = "#1f77b4", "#2ca02c", "#d66300", "#222222"
 BIG = dict(legend=19, annot=17)
 plt.rcParams.update({
     "font.family": "sans-serif", "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
@@ -53,12 +54,12 @@ runs = load_runs(args.traj, args.meta)
 DENSE_B = {r.meta["B"] for r in runs.values() if r.meta["kind"] == "std" and r.meta["K"] == 64 and "dense" in r.key}
 SER = {
     "prompts":   dict(sel=lambda r: r.meta["kind"] == "std" and r.meta["K"] == K0,
-                      seqs=lambda c: c[2] * K0, color=BLUE, marker="o", label=f"prompts varied ({K0} rollouts / prompt)"),
+                      seqs=lambda c: c[2] * K0, color=BLUE, marker="o", label=f"scaling prompts, fixed $K={K0}$"),
     "prompts64": dict(sel=lambda r: (r.meta["kind"] == "std" and r.meta["K"] == 64 and r.meta["upd"]
                                      and not (r.meta["B"] in DENSE_B and "dense" not in r.key)),
-                      seqs=lambda c: c[2] * 64, color=TEAL, marker="v", label="prompts varied (64 rollouts / prompt)"),
+                      seqs=lambda c: c[2] * 64, color=TEAL, marker="v", label="scaling prompts, fixed $K=64$"),
     "rollouts":  dict(sel=lambda r: r.meta["kind"] == "std" and r.meta["B"] == B0 and (r.meta["upd"] or (r.meta["K"] or 0) <= 16),
-                      seqs=lambda c: c[1] * B0, color=ORANGE, marker="s", label=f"rollouts varied ({B0} prompts)"),
+                      seqs=lambda c: c[1] * B0, color=ORANGE, marker="s", label=f"scaling rollouts, fixed $B={B0}$"),
 }
 
 # tokens per sequence: the fixed context budget, or the mean (prompt + response) length of the best runs at tau_max

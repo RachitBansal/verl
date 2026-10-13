@@ -29,7 +29,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cbs_data import load_runs, best_per_cell, fit_mccandlish
 
 # same palette / type as make_figs.py so the figure sits next to figs 1-4
-BLUE, ORANGE, TEAL, GREY, INK, INK2 = "#2B6CB0", "#E07A2F", "#1B9E77", "#9A9A9A", "#222222", "#55534f"
+# series colours follow Figure 1: K=16 blue, K=64 orange (TEAL, historical name), B=128 green (ORANGE, historical name)
+BLUE, ORANGE, TEAL, GREY, INK, INK2 = "#1f77b4", "#2ca02c", "#d66300", "#9A9A9A", "#222222", "#55534f"
 plt.rcParams.update({
     "font.family": "sans-serif", "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
     "font.size": 16, "axes.labelsize": 18, "axes.titlesize": 18, "legend.fontsize": 15,
@@ -58,9 +59,9 @@ SEL = {
                             and not (r.meta["B"] in DENSE_B and "dense" not in r.key)),
 }
 STYLE = {
-    "prompts":   dict(color=BLUE,   marker="o", ms=10, label=f"prompts varied ({K0} rollouts / prompt)"),
-    "prompts64": dict(color=TEAL,   marker="v", ms=10, label="prompts varied (64 rollouts / prompt)"),
-    "rollouts":  dict(color=ORANGE, marker="s", ms=9,  label=f"rollouts varied ({B0} prompts)"),
+    "prompts":   dict(color=BLUE,   marker="o", ms=10, label=f"scaling prompts, fixed $K={K0}$"),
+    "prompts64": dict(color=TEAL,   marker="v", ms=10, label="scaling prompts, fixed $K=64$"),
+    "rollouts":  dict(color=ORANGE, marker="s", ms=9,  label=f"scaling rollouts, fixed $B={B0}$"),
 }
 SER = {}
 for name, sel in SEL.items():
@@ -128,7 +129,7 @@ def frontier(ax, s, ykey):
 
 def label(ax, s, p, ykey, text, dx, dy, ha="center", va="center"):
     ax.annotate(text, (p["S"], p[ykey]), xytext=(dx, dy), textcoords="offset points",
-                ha=ha, va=va, fontsize=13, color=s["color"])
+                ha=ha, va=va, fontsize=16, color=s["color"])
 
 for ax, ykey in ((axE, "E"), (axP, "P")):
     for name in PLOT_SERIES:
@@ -159,8 +160,8 @@ axP.set_ylabel('prompts to target  (data)')
 axP.yaxis.set_major_locator(FixedLocator([1e4, 2e4, 5e4, 1e5, 2e5]))
 axP.set_ylim(5.5e3, 3.2e5); axP.set_xlim(4, 9000)
 axP.axhline(a.n_prompts, color=INK2, lw=1.4, ls=(0, (5, 4)), zorder=1)
-axP.text(8500, a.n_prompts / 1.06, f"one pass over the\ntraining set ({a.n_prompts/1e3:.1f}k)",
-         ha="right", va="top", fontsize=13, color=INK2, linespacing=1.1)
+axP.text(8500, a.n_prompts / 1.05, f"one pass over the training set ({a.n_prompts/1e3:.1f}k)",
+         ha="right", va="top", fontsize=15, color=INK2)
 label(axP, s16, p16[0], "P", f"$B={p16[0]['B']}$", 0, 14)
 label(axP, s16, p16[-1], "P", f"$B={fmt_B(p16[-1]['B'])}$", 10, 2, ha="left")
 label(axP, s64, p64[0], "P", f"$B={p64[0]['B']}$", 0, -18)
@@ -169,7 +170,7 @@ axP.set_title("(b) data: more rollouts per prompt spends fewer prompts", loc="le
 
 hnd = [Line2D([], [], marker=SER[n]["marker"], color=SER[n]["color"], ms=SER[n]["ms"], lw=0, mec="white", label=SER[n]["label"])
        for n in PLOT_SERIES[::-1]]
-hnd.append(Line2D([], [], ls="--", color=INK, lw=1.6, label=r"McCandlish fit  $S = S_{\min}(1 + N^*/N)$"))
+hnd.append(Line2D([], [], ls="--", color=INK, lw=1.6, label=r"fit, $S = S_{\min}(1 + N^*/N)$"))
 fig.legend(handles=hnd, loc="outside lower center", ncol=3, handletextpad=0.4, columnspacing=2.0, labelspacing=0.35)
 
 fig.get_layout_engine().set(w_pad=0.25, wspace=0.08)
@@ -200,8 +201,8 @@ for tag, ykey in (("a", "E"), ("b", "P")):
         ax.set_ylabel('prompts to target  (data)')
         ax.yaxis.set_major_locator(FixedLocator([1e4, 2e4, 5e4, 1e5, 2e5])); ax.set_ylim(5.5e3, 3.2e5)
         ax.axhline(a.n_prompts, color=INK2, lw=1.4, ls=(0, (5, 4)), zorder=1)
-        ax.text(8500, a.n_prompts / 1.06, f"one pass over the\ntraining set ({a.n_prompts/1e3:.1f}k)",
-                ha="right", va="top", fontsize=13, color=INK2, linespacing=1.1)
+        ax.text(8500, a.n_prompts / 1.05, f"one pass over the training set ({a.n_prompts/1e3:.1f}k)",
+                ha="right", va="top", fontsize=15, color=INK2)
         label(ax, s16, p16[0], "P", f"$B={p16[0]['B']}$", 0, 14)
         label(ax, s16, p16[-1], "P", f"$B={fmt_B(p16[-1]['B'])}$", 10, 2, ha="left")
         label(ax, s64, p64[0], "P", f"$B={p64[0]['B']}$", 0, -18)
@@ -215,7 +216,7 @@ for tag, ykey in (("a", "E"), ("b", "P")):
 # ---- legend strip for the paper: rendered at the width of the two panels side by side (2 x 7.4 in) and included at
 # \linewidth, so its type comes out at the same size as the panel labels; not cropped, so that scale is preserved
 fg = plt.figure(figsize=(14.8, 0.5))
-fg.legend(handles=hnd, loc="center", ncol=3, handletextpad=0.4, columnspacing=2.4, borderaxespad=0.0)
+fg.legend(handles=hnd, loc="center", ncol=3, fontsize=19, handletextpad=0.4, columnspacing=2.0, borderaxespad=0.0)
 plt.rcParams["savefig.bbox"] = None
 for ext in ("pdf", "png"):
     fg.savefig(os.path.join(a.out, f"{a.stem}_legend.{ext}"))

@@ -95,8 +95,8 @@ table.to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)),
 
 # ------------------------------------------------------------------ figure
 TOKENS_PER_SEQ = 1024 + 3072       # data.max_prompt_length + data.max_response_length in on_policy*.sh: the token budget per sequence
-plt.rcParams.update({"font.size": 14, "axes.labelsize": 14.5, "legend.fontsize": 12.5})
-fig, ax = plt.subplots(figsize=(10, 5.9), facecolor=SURFACE, layout="constrained")
+plt.rcParams.update({"font.size": 17, "axes.labelsize": 18, "legend.fontsize": 15})
+fig, ax = plt.subplots(figsize=(10.6, 6.3), facecolor=SURFACE, layout="constrained")
 ax.set_facecolor(SURFACE)
 
 # perfect 1/sequences scaling through the smallest batch point
@@ -133,7 +133,7 @@ if FIT:
     ymin = min(batch["steps"].min(), roll["steps"].min(), b64["steps"].min() if len(b64) else np.inf) / 4
     # label each critical batch in its own units, placed in open space and tied to the circle by an arrow;
     # position = (x factor, y factor) applied to the circle's coordinates
-    LABEL_AT = {16: (1.0, 0.16), 64: (2.2, 5.2), 128: (2.7, 2.1)}
+    LABEL_AT = {16: (0.5, 0.16), 64: (2.2, 5.2), 128: (2.7, 2.1)}
     for f in fits:
         col = {16: BLUE, 128: VIOLET, 64: TEAL}[f["per"]]
         n_c = (KNEE_TOL - 1) * f["n_star_seqs"]; s_c = f["s_min"] * (1 + f["n_star_seqs"] / n_c)
@@ -143,7 +143,7 @@ if FIT:
         unit = "B" if f["per"] in (16, 64) else "K"
         fx, fy = LABEL_AT[f["per"]]
         ax.annotate(f"${unit}_\\mathrm{{crit}} \\approx {fmt_k(f['crit'])}$", xy=(n_c, s_c), xytext=(n_c * fx, s_c * fy),
-                    textcoords="data", ha="center", va="center", fontsize=14, color=col, zorder=10,
+                    textcoords="data", ha="center", va="center", fontsize=17, color=col, zorder=10,
                     bbox=dict(boxstyle="round,pad=0.2", fc=SURFACE, ec="none"),
                     arrowprops=dict(arrowstyle="-|>", color=col, lw=1.5, shrinkA=2, shrinkB=9, zorder=9))
     ax.set_ylim(bottom=ymin)
@@ -151,7 +151,7 @@ if FIT:
 
 ax.set_xscale("log", base=2); ax.set_yscale("log")
 ticks = sorted(set(batch["seqs"]) | set(roll["seqs"]) | set(b64["seqs"]))
-ax.set_xticks(ticks); ax.set_xticklabels([f"{t:,}" if t < 10000 else f"{t // 1024}k" for t in ticks], fontsize=12)
+ax.set_xticks(ticks); ax.set_xticklabels([f"{t:,}" if t < 1024 else f"{t // 1024}k" for t in ticks], fontsize=15)   # 1k, 2k, ... keep the larger type from colliding
 ax.set_xlabel("sequences per optimizer step  (prompts B × rollouts K)", color=INK)
 ax.set_ylabel("steps to target AIME 1983–2024", color=INK)
 ax.grid(True, which="major", color=GRID, lw=0.6, zorder=0)     # very light grid, no border
@@ -167,8 +167,8 @@ def fmt_tokens(v):
 
 # secondary x-axis: maximum tokens per optimizer step = sequences × (max prompt + max response length)
 top = ax.secondary_xaxis("top", functions=(lambda n: n * TOKENS_PER_SEQ, lambda t: t / TOKENS_PER_SEQ))
-top.set_xticks([t * TOKENS_PER_SEQ for t in ticks]); top.set_xticklabels([fmt_tokens(t * TOKENS_PER_SEQ) for t in ticks], fontsize=11)
-top.set_xlabel(f"maximum tokens per optimizer step  (sequences × {TOKENS_PER_SEQ:,} tokens)", color=INK, fontsize=12.5)
+top.set_xticks([t * TOKENS_PER_SEQ for t in ticks]); top.set_xticklabels([fmt_tokens(t * TOKENS_PER_SEQ) for t in ticks], fontsize=14)
+top.set_xlabel(f"maximum tokens per optimizer step  (sequences × {TOKENS_PER_SEQ:,} tokens)", color=INK, fontsize=15.5)
 top.tick_params(which="both", colors=INK, length=0)
 for sp in top.spines.values():
     sp.set_visible(False)
@@ -184,8 +184,8 @@ if FIT:
     refs.append(Line2D([], [], ls="-", lw=1.8, color=INK2, label="fit, S = S_min (1 + N*/N)"))
     refs.append(Line2D([], [], marker="o", ms=9, mfc=SURFACE, mec=INK2, mew=1.8, ls=":", lw=1.6, color=INK2,
                        label=f"critical batch, {int(round((KNEE_TOL - 1) * 100))}% above perfect scaling"))
-ax.add_artist(ax.legend(handles=legend, loc="upper right", frameon=False, labelcolor=INK))
-fig.legend(handles=refs, loc="outside lower center", ncol=3, frameon=False, labelcolor=INK, fontsize=11.5,
+ax.add_artist(ax.legend(handles=legend, loc="lower left", frameon=False, labelcolor=INK))
+fig.legend(handles=refs, loc="outside lower center", ncol=3, frameon=False, labelcolor=INK, fontsize=13,
            columnspacing=1.3, handlelength=2.0, handletextpad=0.5)
 fig.savefig(png_out, dpi=200, facecolor=SURFACE)
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper")   # plots/paper/
