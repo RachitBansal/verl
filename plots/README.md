@@ -58,8 +58,9 @@ $PLOT scripts/build_lr_grid_interactive.py csv/val_curves_n16.json html/lr_grid_
 # then republish html/lr_grid_interactive.html to https://claude.ai/artifact/7E7Y5QAMBp9hJavaHhC9X2
 ```
 
-# ICLR Figure 2 (total compute and data to target)
+# ICLR figures 2 and 5b
 `iclr_figs/` holds a self-contained pipeline (wandb pull -> per-cell best-LR crossings -> figure) for the
-paper's Figure 2, the sequences and prompt draws each sweep cell consumed before reaching 50%. See
-`iclr_figs/README.md`. Outputs: `paper/fig_budget_frontier_{a,b}.pdf`, `png/fig_budget_frontier.png`,
-`csv/fig_budget_frontier_table.csv`.
+paper's Figure 2 (sequences and prompt draws each sweep cell consumed before reaching 50%) and Figure 5b
+(critical batch size N* refit at each target accuracy, against training tokens). See `iclr_figs/README.md`.
+Outputs: `paper/fig_budget_frontier_{a,b}.pdf`, `paper/fig4_cbs_vs_tokens.pdf`, the PNGs under `png/`, and
+`csv/fig_budget_frontier_table.csv`, `csv/cbs_vs_tokens_table.csv`.
