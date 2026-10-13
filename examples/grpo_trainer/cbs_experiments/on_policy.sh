@@ -26,6 +26,7 @@ KL_COEF=${KL_COEF:-0.001}
 TAG=${TAG:-}
 STOP_AT=${STOP_AT:-0.52}      # end the run once AIME val >= this (brackets the 50% crossing); STOP_AT=null to disable
 TEST_FREQ=${TEST_FREQ:-25}   # validation interval in steps; 10 for bsz>=1024 where 50% arrives in ~25-50 steps
+NCCL_TIMEOUT=${NCCL_TIMEOUT:-600}   # seconds a rank may wait in a collective; raise (e.g. 7200) for very large steps, where generation length differs across ranks
 
 project_name="grpo_on_policy_cbs"
 # _updated_scaling marks runs on the fixed dp_actor loss normalisation (2026-09-11);
@@ -105,4 +106,5 @@ python3 -m verl.trainer.main_ppo \
     trainer.save_freq=100 \
     trainer.test_freq=${TEST_FREQ} \
     trainer.stop_val_threshold=${STOP_AT} \
+    actor_rollout_ref.nccl_timeout=${NCCL_TIMEOUT} \
     trainer.total_epochs=15
