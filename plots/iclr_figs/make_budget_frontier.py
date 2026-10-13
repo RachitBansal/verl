@@ -105,6 +105,7 @@ print(f"rollout sweep K=16 -> K=128: steps {r16['S']:.0f} -> {r128['S']:.0f}, pr
       f" sequences {r16['E']/1e3:.0f}k -> {r128['E']/1e3:.0f}k")
 
 # ------------------------------------------------------------------ figure
+PLOT_SERIES = ("prompts64", "prompts")      # the rollout sweep stays in the table but is not drawn
 def fmt_int(v):
     return f"{int(v):,}" if v < 1e4 else (f"{v/1e3:.0f}k" if v < 1e6 else f"{v/1e6:g}M")
 
@@ -130,13 +131,13 @@ def label(ax, s, p, ykey, text, dx, dy, ha="center", va="center"):
                 ha=ha, va=va, fontsize=13, color=s["color"])
 
 for ax, ykey in ((axE, "E"), (axP, "P")):
-    for name in ("rollouts", "prompts64", "prompts"):
+    for name in PLOT_SERIES:
         frontier(ax, SER[name], ykey)
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: fmt_int(v)))
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: fmt_int(v)))
     ax.xaxis.set_minor_locator(NullLocator()); ax.yaxis.set_minor_locator(NullLocator())
-    ax.set_xlabel('steps to target  (wall-clock)')
+    ax.set_xlabel('steps to target')
     ax.xaxis.set_major_locator(FixedLocator([10, 100, 1000]))
 
 def fmt_B(b):
@@ -151,9 +152,6 @@ label(axE, s16, p16[0], "E", f"$B={p16[0]['B']}$", 0, 14)
 label(axE, s16, p16[-1], "E", f"$B={fmt_B(p16[-1]['B'])}$", 9, -6, ha="left", va="top")
 label(axE, s64, p64[0], "E", f"$B={p64[0]['B']}$", 0, 14)
 label(axE, s64, p64[-1], "E", f"$B={fmt_B(p64[-1]['B'])}$", 10, 0, ha="left")
-label(axE, sro, ro[0], "E", f"$K={ro[0]['K']}$", 0, 14)
-label(axE, sro, ro[-1], "E", f"$K={ro[-1]['K']}$", 10, 0, ha="left")
-label(axE, sro, Emin_roll, "E", f"$K={Emin_roll['K']}$", 0, -17)
 axE.set_title("(a) compute: fewer rollouts per prompt is cheaper", loc="left", color=INK, pad=10)
 
 # (b) data
@@ -167,43 +165,37 @@ label(axP, s16, p16[0], "P", f"$B={p16[0]['B']}$", 0, 14)
 label(axP, s16, p16[-1], "P", f"$B={fmt_B(p16[-1]['B'])}$", 10, 2, ha="left")
 label(axP, s64, p64[0], "P", f"$B={p64[0]['B']}$", 0, -18)
 label(axP, s64, p64[-1], "P", f"$B={fmt_B(p64[-1]['B'])}$", 0, -18)
-label(axP, sro, ro[0], "P", f"$K={ro[0]['K']}$", -12, 0, ha="right")
-label(axP, sro, ro[-1], "P", f"$K={ro[-1]['K']}$", 0, -18)
 axP.set_title("(b) data: more rollouts per prompt spends fewer prompts", loc="left", color=INK, pad=10)
 
 hnd = [Line2D([], [], marker=SER[n]["marker"], color=SER[n]["color"], ms=SER[n]["ms"], lw=0, mec="white", label=SER[n]["label"])
-       for n in ("prompts", "prompts64", "rollouts")]
+       for n in PLOT_SERIES[::-1]]
 hnd.append(Line2D([], [], ls="--", color=INK, lw=1.6, label=r"McCandlish fit  $S = S_{\min}(1 + N^*/N)$"))
-fig.legend(handles=hnd, loc="outside lower center", ncol=2, handletextpad=0.4, columnspacing=2.0, labelspacing=0.35)
+fig.legend(handles=hnd, loc="outside lower center", ncol=3, handletextpad=0.4, columnspacing=2.0, labelspacing=0.35)
 
 fig.get_layout_engine().set(w_pad=0.25, wspace=0.08)
 for ext in ("pdf", "png"):
     fig.savefig(os.path.join(a.out, f"{a.stem}.{ext}"))
 print("\nwrote", a.stem)
 
-# ---- single-panel exports for the paper (subfigure captions carry the titles; legend lives in panel a)
+# ---- single-panel exports for the paper (subfigure captions carry the titles; the legend is a separate strip)
 plt.close(fig)
 for tag, ykey in (("a", "E"), ("b", "P")):
     fg, ax = plt.subplots(figsize=(7.4, 5.6))
-    for name in ("rollouts", "prompts64", "prompts"):
+    for name in PLOT_SERIES:
         frontier(ax, SER[name], ykey)
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: fmt_int(v)))
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: fmt_int(v)))
     ax.xaxis.set_minor_locator(NullLocator()); ax.yaxis.set_minor_locator(NullLocator())
     ax.xaxis.set_major_locator(FixedLocator([10, 100, 1000])); ax.set_xlim(4, 9000)
-    ax.set_xlabel('steps to target  (wall-clock)')
+    ax.set_xlabel('steps to target')
     if ykey == "E":
         ax.set_ylabel('sequences to target  (compute)')
-        ax.yaxis.set_major_locator(FixedLocator([3e5, 5e5, 1e6, 2e6])); ax.set_ylim(2.3e5, 4.5e6)
+        ax.yaxis.set_major_locator(FixedLocator([3e5, 5e5, 1e6, 2e6])); ax.set_ylim(2.3e5, 2.6e6)
         label(ax, s16, p16[0], "E", f"$B={p16[0]['B']}$", 0, 14)
         label(ax, s16, p16[-1], "E", f"$B={fmt_B(p16[-1]['B'])}$", 9, -6, ha="left", va="top")
         label(ax, s64, p64[0], "E", f"$B={p64[0]['B']}$", 0, 14)
         label(ax, s64, p64[-1], "E", f"$B={fmt_B(p64[-1]['B'])}$", 10, 0, ha="left")
-        label(ax, sro, ro[0], "E", f"$K={ro[0]['K']}$", 0, 14)
-        label(ax, sro, ro[-1], "E", f"$K={ro[-1]['K']}$", 10, 0, ha="left")
-        label(ax, sro, Emin_roll, "E", f"$K={Emin_roll['K']}$", 0, -17)
-        ax.legend(handles=hnd, loc="upper right", fontsize=13, handletextpad=0.4, borderaxespad=0.2, labelspacing=0.3)
     else:
         ax.set_ylabel('prompts to target  (data)')
         ax.yaxis.set_major_locator(FixedLocator([1e4, 2e4, 5e4, 1e5, 2e5])); ax.set_ylim(5.5e3, 3.2e5)
@@ -214,9 +206,17 @@ for tag, ykey in (("a", "E"), ("b", "P")):
         label(ax, s16, p16[-1], "P", f"$B={fmt_B(p16[-1]['B'])}$", 10, 2, ha="left")
         label(ax, s64, p64[0], "P", f"$B={p64[0]['B']}$", 0, -18)
         label(ax, s64, p64[-1], "P", f"$B={fmt_B(p64[-1]['B'])}$", 0, -18)
-        label(ax, sro, ro[0], "P", f"$K={ro[0]['K']}$", -12, 0, ha="right")
-        label(ax, sro, ro[-1], "P", f"$K={ro[-1]['K']}$", 0, -18)
     fg.tight_layout()
     for ext in ("pdf", "png"):
         fg.savefig(os.path.join(a.out, f"{a.stem}_{tag}.{ext}"))
     plt.close(fg); print("wrote", f"{a.stem}_{tag}")
+
+
+# ---- legend strip for the paper: rendered at the width of the two panels side by side (2 x 7.4 in) and included at
+# \linewidth, so its type comes out at the same size as the panel labels; not cropped, so that scale is preserved
+fg = plt.figure(figsize=(14.8, 0.5))
+fg.legend(handles=hnd, loc="center", ncol=3, handletextpad=0.4, columnspacing=2.4, borderaxespad=0.0)
+plt.rcParams["savefig.bbox"] = None
+for ext in ("pdf", "png"):
+    fg.savefig(os.path.join(a.out, f"{a.stem}_legend.{ext}"))
+plt.close(fg); print("wrote", f"{a.stem}_legend")

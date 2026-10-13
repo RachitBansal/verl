@@ -81,6 +81,10 @@ roll, roll_never = fastest_per(roll_src, "n")
 
 # batch sweep at n = 64 (fixed code only; every run is post-fix)
 b64_src = df[(df["n"] == 64) & df["fixed"].astype(bool)]
+# n = 64 cells rerun with per-step validation ("_dense") replace the coarse originals, whose 50% crossing was
+# interpolated over a 25-step bracket (at B = 1024 between step 0 and the single reading at step 25)
+dense_b = set(b64_src.loc[b64_src["name"].str.contains("_dense"), "bsz"])
+b64_src = b64_src[~(b64_src["bsz"].isin(dense_b) & ~b64_src["name"].str.contains("_dense"))]
 b64, b64_never = fastest_per(b64_src, "bsz") if len(b64_src) else (roll.iloc[0:0], roll.iloc[0:0])
 
 table = pd.concat([batch.assign(series="batch_sweep_n16"), roll.assign(series="rollout_sweep_bsz128"),
@@ -92,7 +96,7 @@ table.to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)),
 # ------------------------------------------------------------------ figure
 TOKENS_PER_SEQ = 1024 + 3072       # data.max_prompt_length + data.max_response_length in on_policy*.sh: the token budget per sequence
 plt.rcParams.update({"font.size": 14, "axes.labelsize": 14.5, "legend.fontsize": 12.5})
-fig, ax = plt.subplots(figsize=(10, 5.6), facecolor=SURFACE)
+fig, ax = plt.subplots(figsize=(10, 5.9), facecolor=SURFACE, layout="constrained")
 ax.set_facecolor(SURFACE)
 
 # perfect 1/sequences scaling through the smallest batch point
@@ -100,6 +104,11 @@ b0 = batch.iloc[0]
 xmax = max(batch["seqs"].max(), roll["seqs"].max(), b64["seqs"].max() if len(b64) else 0)
 xs = np.array([batch["seqs"].min() / 2.5, xmax * 1.6])
 ax.plot(xs, b0["steps"] * b0["seqs"] / xs, ls=":", lw=1.2, color=MUTED, zorder=1)
+# the same reference along the K = 64 curve, anchored on its own smallest batch point
+if len(b64):
+    c0 = b64.iloc[0]
+    xs64 = np.array([c0["seqs"] / 2.5, xmax * 1.6])
+    ax.plot(xs64, c0["steps"] * c0["seqs"] / xs64, ls=":", lw=1.2, color=TEAL, alpha=0.55, zorder=1)
 
 # markers only (no joining lines); the fitted curves, when asked for, are the lines
 if len(b64):
@@ -122,16 +131,21 @@ if FIT:
     # critical batch of each series: the point on the fitted curve where steps are KNEE_TOL x perfect scaling,
     # N_crit = (KNEE_TOL - 1) N*; marked on the curve, dotted vertical to the axis, labelled in the series colour
     ymin = min(batch["steps"].min(), roll["steps"].min(), b64["steps"].min() if len(b64) else np.inf) / 4
-    LABEL_OFF = {16: (-10, -22), 64: (14, 16), 128: (-14, -30)}     # keep the three labels clear of each other and the curves
+    # label each critical batch in its own units, placed in open space and tied to the circle by an arrow;
+    # position = (x factor, y factor) applied to the circle's coordinates
+    LABEL_AT = {16: (1.0, 0.16), 64: (2.2, 5.2), 128: (2.7, 2.1)}
     for f in fits:
         col = {16: BLUE, 128: VIOLET, 64: TEAL}[f["per"]]
         n_c = (KNEE_TOL - 1) * f["n_star_seqs"]; s_c = f["s_min"] * (1 + f["n_star_seqs"] / n_c)
         f["n_crit_seqs"] = n_c; f["crit"] = n_c / f["per"]
-        ax.plot([n_c] * 2, [ymin, s_c], ls=":", lw=1.6, color=col, zorder=2.5)
+        ax.axvline(n_c, ls=":", lw=2.6, color=col, zorder=2.5)
         ax.plot([n_c], [s_c], marker="o", ms=13, mfc=SURFACE, mec=col, mew=2.2, ls="", zorder=9)
         unit = "B" if f["per"] in (16, 64) else "K"
-        ax.annotate(f"$N_\\mathrm{{crit}}$ ≈ {fmt_k(n_c)}  (${unit}$ ≈ {fmt_k(f['crit'])})", (n_c, s_c), xytext=LABEL_OFF[f["per"]],
-                    textcoords="offset points", ha="left" if LABEL_OFF[f["per"]][0] > 0 else "right", fontsize=11.5, color=col, zorder=10)
+        fx, fy = LABEL_AT[f["per"]]
+        ax.annotate(f"${unit}_\\mathrm{{crit}} \\approx {fmt_k(f['crit'])}$", xy=(n_c, s_c), xytext=(n_c * fx, s_c * fy),
+                    textcoords="data", ha="center", va="center", fontsize=14, color=col, zorder=10,
+                    bbox=dict(boxstyle="round,pad=0.2", fc=SURFACE, ec="none"),
+                    arrowprops=dict(arrowstyle="-|>", color=col, lw=1.5, shrinkA=2, shrinkB=9, zorder=9))
     ax.set_ylim(bottom=ymin)
     pd.DataFrame(fits).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_fit_table.csv")), index=False)
 
@@ -139,9 +153,10 @@ ax.set_xscale("log", base=2); ax.set_yscale("log")
 ticks = sorted(set(batch["seqs"]) | set(roll["seqs"]) | set(b64["seqs"]))
 ax.set_xticks(ticks); ax.set_xticklabels([f"{t:,}" if t < 10000 else f"{t // 1024}k" for t in ticks], fontsize=12)
 ax.set_xlabel("sequences per optimizer step  (prompts B × rollouts K)", color=INK)
-ax.set_ylabel("steps to 50% AIME 1983–2024", color=INK)
-ax.grid(True, which="major", color=GRID, lw=0.7)
-ax.tick_params(which="both", colors=INK2, length=0)
+ax.set_ylabel("steps to target AIME 1983–2024", color=INK)
+ax.grid(True, which="major", color=GRID, lw=0.6, zorder=0)     # very light grid, no border
+ax.set_axisbelow(True)
+ax.tick_params(which="both", colors=INK, length=0)
 for sp in ax.spines.values():
     sp.set_visible(False)
 
@@ -153,25 +168,25 @@ def fmt_tokens(v):
 # secondary x-axis: maximum tokens per optimizer step = sequences × (max prompt + max response length)
 top = ax.secondary_xaxis("top", functions=(lambda n: n * TOKENS_PER_SEQ, lambda t: t / TOKENS_PER_SEQ))
 top.set_xticks([t * TOKENS_PER_SEQ for t in ticks]); top.set_xticklabels([fmt_tokens(t * TOKENS_PER_SEQ) for t in ticks], fontsize=11)
-top.set_xlabel(f"maximum tokens per optimizer step  (sequences × {TOKENS_PER_SEQ:,} tokens)", color=INK2, fontsize=12.5)
-top.tick_params(which="both", colors=INK2, length=0)
+top.set_xlabel(f"maximum tokens per optimizer step  (sequences × {TOKENS_PER_SEQ:,} tokens)", color=INK, fontsize=12.5)
+top.tick_params(which="both", colors=INK, length=0)
 for sp in top.spines.values():
     sp.set_visible(False)
 
 nstar = {}       # critical batches are annotated on the curves, not in the legend
-legend = [Line2D([], [], marker="o", ls="", ms=8, color=BLUE, mec=SURFACE, label="more prompts: vary B, K = 16" + nstar.get(16, ""))]
+legend = [Line2D([], [], marker="o", ls="", ms=8, color=BLUE, mec=SURFACE, label="scaling prompts, fixed K = 16" + nstar.get(16, ""))]
 if len(b64):
-    legend.append(Line2D([], [], marker="h", ls="", ms=9, color=TEAL, mec=SURFACE, label="more prompts: vary B, K = 64" + nstar.get(64, "")))
-legend.append(Line2D([], [], marker="p", ls="", ms=9, color=VIOLET, mec=SURFACE, label="more rollouts: B = 128, vary K" + nstar.get(128, "")))
-# series in the upper right; reference lines (perfect scaling, fit, N*) in the lower left
-refs = [Line2D([], [], ls=":", lw=1.2, color=MUTED, label="perfect scaling (steps ∝ 1/sequences)")]
+    legend.append(Line2D([], [], marker="h", ls="", ms=9, color=TEAL, mec=SURFACE, label="scaling prompts, fixed K = 64" + nstar.get(64, "")))
+legend.append(Line2D([], [], marker="p", ls="", ms=9, color=VIOLET, mec=SURFACE, label="scaling rollouts, fixed B = 128" + nstar.get(128, "")))
+# series in the upper right; reference lines (perfect scaling, fit, critical batch) in a row below the axes
+refs = [Line2D([], [], ls=":", lw=1.2, color=MUTED, label="perfect scaling, S ∝ 1/N")]
 if FIT:
-    refs.append(Line2D([], [], ls="-", lw=1.8, color=INK2, label="fit  S = S_min (1 + N*/N)"))
+    refs.append(Line2D([], [], ls="-", lw=1.8, color=INK2, label="fit, S = S_min (1 + N*/N)"))
     refs.append(Line2D([], [], marker="o", ms=9, mfc=SURFACE, mec=INK2, mew=1.8, ls=":", lw=1.6, color=INK2,
-                       label=f"critical batch: steps {int(round((KNEE_TOL - 1) * 100))}% above perfect scaling"))
+                       label=f"critical batch, {int(round((KNEE_TOL - 1) * 100))}% above perfect scaling"))
 ax.add_artist(ax.legend(handles=legend, loc="upper right", frameon=False, labelcolor=INK))
-ax.legend(handles=refs, loc="lower left", frameon=False, labelcolor=INK)
-fig.tight_layout()
+fig.legend(handles=refs, loc="outside lower center", ncol=3, frameon=False, labelcolor=INK, fontsize=11.5,
+           columnspacing=1.3, handlelength=2.0, handletextpad=0.5)
 fig.savefig(png_out, dpi=200, facecolor=SURFACE)
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper")   # plots/paper/
 os.makedirs(pdf_dir, exist_ok=True)
