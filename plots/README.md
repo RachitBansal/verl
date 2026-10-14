@@ -20,6 +20,7 @@ $PULL scripts/pull_steps_to_50.py csv/steps_to_50_kl.csv "1e-3,1e-2"          # 
 $PLOT scripts/plot_steps_to_50.py    csv/steps_to_50_kl.csv png/steps_to_50.png        # LR x batch grid, KL 1e-3
 $PLOT scripts/plot_steps_to_50.py    csv/steps_to_50_kl.csv png/steps_to_50_n.png --by-n   # LR x rollout-count grid at batch 128
 $PLOT scripts/plot_steps_to_50_kl.py csv/steps_to_50_kl.csv png/steps_to_50_kl.png     # ... KL 1e-3 vs 1e-2
+$PULL scripts/gpu_hours_sweeps.py csv/gpu_hours_sweeps.csv csv/val_curves_n16.json csv/val_curves_n64.json csv/val_curves_bsz128.json csv/val_curves_bsz1024.json   # GPU hours behind the LR grids and the downsampling figures (wandb runtime x 4 GPUs; resumed segments de-overlapped; failed attempts listed separately)
 $PLOT scripts/plot_steps_vs_bsz.py   csv/steps_to_50_kl.csv png/steps_vs_bsz.png       # steps to 50% vs batch
 $PLOT scripts/plot_steps_vs_bsz_kl.py csv/steps_to_50_kl.csv png/steps_vs_bsz_kl.png
 
