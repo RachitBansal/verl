@@ -63,7 +63,8 @@ if [ -n "${TAG}" ]; then experiment_name="${experiment_name}_${TAG}"; fi
 
 source /n/holylabs/dam_lab/Lab/brachit/envs/bin/activate
 # verl is not pip-installed in this env; import from this source tree (branch kimi-k2).
-export PYTHONPATH=/n/home08/brachit/coverage/verl:${PYTHONPATH:-}
+# pyextras: wandb deps (platformdirs, gitpython) missing from the lab env, which is admin-writable only.
+export PYTHONPATH=/n/home08/brachit/coverage/verl:/n/home08/brachit/coverage/pyextras:${PYTHONPATH:-}
 
 OUTPUT_DIR=${OUTPUT_DIR:-"/n/netscratch/dam_lab/Everyone/brachit/kimi_k2_runs"}
 

@@ -15,7 +15,8 @@
 # lock-step requirement of the probe forwards). 3 tiny steps, no validation, wandb offline.
 set -xeuo pipefail
 source /n/holylabs/dam_lab/Lab/brachit/envs/bin/activate
-export PYTHONPATH=/n/home08/brachit/coverage/verl:${PYTHONPATH:-}
+# pyextras: wandb deps (platformdirs, gitpython) missing from the lab env, which is admin-writable only.
+export PYTHONPATH=/n/home08/brachit/coverage/verl:/n/home08/brachit/coverage/pyextras:${PYTHONPATH:-}
 export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_JOB_ID}
 export TORCHINDUCTOR_CACHE_DIR=/tmp/inductor_${SLURM_JOB_ID}
 export VLLM_CACHE_ROOT=/tmp/vllm_cache_${SLURM_JOB_ID}
