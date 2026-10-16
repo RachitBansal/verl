@@ -1,0 +1,2 @@
+series,S_min,N_crit,K_crit,rms_log,points,source
+"more rollouts: generate K, train K",41.85979033368712,7929.378983244038,61.94827330659405,0.1144218844941828,7,csv/steps_vs_seqs_fit_fit_table.csv
