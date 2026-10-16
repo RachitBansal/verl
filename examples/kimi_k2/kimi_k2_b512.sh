@@ -29,6 +29,7 @@ set -xeuo pipefail
 #   FORM    squared (published) | gradient
 #   KL_COEF KL-to-reference loss coefficient (0 = published K2; the GRPO controls used 0.001)
 #   STD_ADV True -> GRPO std-normalised advantages as the target (controls use True; published K2 is False)
+#   CLIP_LOW/CLIP_HIGH  PPO clip range for LOSS_MODE=vanilla (0.2/0.2 = cbs GRPO; 0.2/0.4 = DAPO clip-higher)
 #   HOLDOUT rows held out of the update for the held-out regression loss (per DP rank)
 ####################
 
@@ -43,6 +44,8 @@ FORM=${FORM:-squared}
 KL_COEF=${KL_COEF:-0}
 STD_ADV=${STD_ADV:-False}
 LOSS_MODE=${LOSS_MODE:-kimi_k2}
+CLIP_LOW=${CLIP_LOW:-0.2}     # PPO clip range (vanilla/GRPO only); asymmetric clip_high=0.4 is the DAPO "clip-higher"
+CLIP_HIGH=${CLIP_HIGH:-0.2}
 PROBE=${PROBE:-64}
 HOLDOUT=${HOLDOUT:-64}
 TRACE=${TRACE:-True}     # kimi_probe_per_step: probe/held-out stats after every inner step
@@ -57,7 +60,7 @@ project_name=${PROJECT:-"kimi_k2_cbs"}
 if [ "${LOSS_MODE}" = "kimi_k2" ]; then
     experiment_name="k2_n${N}_bsz${BSZ}_tau${TAU}_${LEVEL}_${FORM}_mini${MINI}_ep${EPOCHS}_lr${LR}_kl${KL_COEF}"
 else
-    experiment_name="${LOSS_MODE}_n${N}_bsz${BSZ}_mini${MINI}_ep${EPOCHS}_lr${LR}_kl${KL_COEF}_std${STD_ADV}"
+    experiment_name="${LOSS_MODE}_n${N}_bsz${BSZ}_mini${MINI}_ep${EPOCHS}_lr${LR}_kl${KL_COEF}_std${STD_ADV}_clip${CLIP_LOW}-${CLIP_HIGH}"
 fi
 if [ -n "${TAG}" ]; then experiment_name="${experiment_name}_${TAG}"; fi
 
@@ -116,6 +119,8 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=32768 \
     actor_rollout_ref.actor.policy_loss.loss_mode=${LOSS_MODE} \
+    actor_rollout_ref.actor.clip_ratio_low=${CLIP_LOW} \
+    actor_rollout_ref.actor.clip_ratio_high=${CLIP_HIGH} \
     actor_rollout_ref.actor.policy_loss.kimi_tau=${TAU} \
     actor_rollout_ref.actor.policy_loss.kimi_target_level=${LEVEL} \
     actor_rollout_ref.actor.policy_loss.kimi_form=${FORM} \
