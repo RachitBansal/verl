@@ -123,7 +123,7 @@ $PLOT iclr_figs/make_kl_fig_horizon.py --traj csv/traj_from_curves.csv --meta cs
 ```bash
 $PLOT scripts/plot_steps_vs_seqs_paper.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_fit.png --b1024 --fit --knee 1.25          # Figure 1 (-> iclr/figures/steps_vs_seqs_fit.pdf)
 $PLOT scripts/plot_steps_vs_seqs_paper.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_b1024_fit.png --b1024 --fit                # fitted N* table read by the LR figure
-$PLOT scripts/plot_steps_to_50_combined.py csv/steps_to_50_kl.csv png/steps_to_50_split.png --n2 64 --lr-max 1.2e-4 --lr-min 5e-7 --split --nstar csv/steps_vs_seqs_b1024_fit_fit_table.csv --fig1-colors --no-nstar-n2   # LR figure: Figure 1 palette, no N* line on K=64
+$PLOT scripts/plot_steps_to_50_combined.py csv/steps_to_50_kl.csv png/steps_to_50_split.png --n2 64 --lr-max 1.2e-4 --lr-min 5e-7 --split --nstar csv/steps_vs_seqs_b1024_fit_fit_table.csv --fig1-colors --no-nstar-n2 --no-fit-n2 --no-early   # LR figure: Figure 1 palette; K=64 panel without N* line or fit; no "too early to tell" runs
 $PLOT scripts/plot_rollouts_vs_downsample_clean.py csv/steps_to_50_seqs.csv png/rollouts_vs_downsample_clean_fit.png --fit      # upsampling figure
 ```
 Budget frontier, KL figure, CBS vs tokens and the appendix trajectories come from the cbs repo, `critical-batch-rlvr/analysis/iclr_figs` (README there; `fetch_incremental.py` refreshes the trajectories).

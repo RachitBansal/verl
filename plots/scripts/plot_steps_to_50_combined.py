@@ -18,6 +18,8 @@ Usage: python plot_steps_to_50_combined.py csv/steps_to_50_kl.csv png/steps_to_5
   the reached runs on a light-to-dark ramp of that hue (darker = fewer steps), the fit and the critical-batch line in the hue;
   the shared colour bar becomes a neutral grey lightness scale.
   --no-nstar-n2 leaves the critical-batch line off the --n2 panel.
+  --no-fit-n2 leaves the power-law fit and its exponent off the --n2 panel (its LRs were set by the K = 16 rule, so the fit is circular).
+  --no-early does not draw the "too early to tell" runs (nor their legend entry).
   --lr-max / --lr-min drop runs outside that learning-rate range (the paper figure uses 5e-7 to 1e-4: nothing outside it ever
   crossed, those runs only add headroom).
 Writes the PNG, paper/<stem>.pdf and csv/<stem>_table.csv (both panels' collapsed grids).
@@ -69,6 +71,8 @@ NSTAR = opt("--nstar", None, str)          # Figure 1 fit table (csv/steps_vs_se
 N2 = opt("--n2", None, int)                # third panel: a second batch sweep at this K (fixed-code runs only; its pre-fix runs stepped at a fraction of the nominal LR)
 FIG1 = "--fig1-colors" in sys.argv          # per-panel Figure 1 hues instead of one blue scale
 NO_NSTAR_N2 = "--no-nstar-n2" in sys.argv      # no critical-batch line on the second batch sweep
+NO_FIT_N2 = "--no-fit-n2" in sys.argv          # no power-law fit on the second batch sweep
+NO_EARLY = "--no-early" in sys.argv            # do not draw the "too early to tell" runs
 FIXED_ONLY = "--fixed-only" in sys.argv    # drop pre-fix runs (before 2026-09-11 they stepped at a fraction of the nominal LR; see the loss-scaling note)
 
 df = pd.read_csv(csv_in)
@@ -142,6 +146,8 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, fitc=FITC, starc=STA
             settled.add(x)
     short = short[~short[xcol].isin(settled)]
     ax.scatter(miss[xcol], miss["lr"], s=190, facecolors="none", edgecolors=MISSING, linewidths=2.6, zorder=2)
+    if NO_EARLY:
+        short = short.iloc[0:0]
     ax.scatter(short[xcol], short["lr"], s=170, marker="x", c=MISSING, linewidths=2.6, zorder=2)
     ax.scatter(ok[xcol], ok["lr"], s=260, c=ok["steps"], cmap=cmap, norm=norm, edgecolors=SURFACE, linewidths=1.5, zorder=3)
 
@@ -189,7 +195,7 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, fitc=FITC, starc=STA
 # panels in order: the batch sweeps (K = N_ROLL, then K = N2 if given), then the rollout sweep at B = BSZ (unless --batch-only)
 specs = [dict(data=batch, xcol="bsz", xlabel="batch size B", title=f"scaling prompts, fixed K = {N_ROLL}", fit=True)]
 if N2:
-    specs.append(dict(data=batch2, xcol="bsz", xlabel="batch size B", title=f"scaling prompts, fixed K = {N2}", fit=True))
+    specs.append(dict(data=batch2, xcol="bsz", xlabel="batch size B", title=f"scaling prompts, fixed K = {N2}", fit=not NO_FIT_N2))
 if not BATCH_ONLY:
     specs.append(dict(data=roll, xcol="n", xlabel="rollouts per prompt K", title=f"scaling rollouts, fixed B = {BSZ}", fit=False))
 if NSTAR:
@@ -252,13 +258,13 @@ cb.ax.tick_params(colors=INK, labelsize=TICK - 1, length=0); cb.outline.set_visi
 legend = [
     Line2D([], [], marker="o", ls="", ms=16, mfc="#5b5b5b" if FIG1 else RAMP[4], mec=SURFACE, label=f"reached {PCT}%"),
     Line2D([], [], marker="o", ls="", ms=16, mfc="none", mec=MISSING, mew=2.6, label=f"never reached {PCT}%"),
-    Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6, label="too early to tell"),
+] + ([] if NO_EARLY else [Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6, label="too early to tell")]) + [
     Line2D([], [], marker="o", ls="", ms=22, mfc="none", mec=INK, mew=3.4, label="fastest LR at each x"),
     Line2D([], [], ls="-", lw=4.6, color=INK2 if FIG1 else FITC, label="power-law fit (dotted: plateau)" if plateau_b else "power-law fit"),
 ]
 if NSTAR and any(sp.get("star") is not None for sp in specs):
     legend.append(Line2D([], [], ls=(0, (5, 2.5)), lw=3.6, color=INK2 if FIG1 else STARC,
-                         label="fitted critical batch (B* or K*, Figure 1 fit)" if FIG1 else "critical batch (B* or K*)"))
+                         label="fitted critical batch (B* or K*)" if FIG1 else "critical batch (B* or K*)"))
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper"); os.makedirs(pdf_dir, exist_ok=True)
 if SPLIT:
     stem = png_out.replace(".png", "")
