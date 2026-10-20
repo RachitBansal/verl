@@ -70,6 +70,11 @@ df["seqs"] = df["seqs"].astype(int)
 df = df[~df["downsample"].astype(bool)]
 long_enough = (df["last_val_step"].fillna(0) >= SHORT_STEPS) | df[COL].notna()
 df = df[long_enough]
+# a run validated every step ("_dense") that crossed replaces the coarsely validated runs of the same (n, B, LR) cell,
+# whose crossing was interpolated over a 10- or 25-step bracket; applies to every series
+_cell = ["n", "bsz", "lr"]
+_dkey = set(df.loc[df["name"].str.contains("_dense") & df[COL].notna(), _cell].astype(str).agg("|".join, axis=1))
+df = df[~(df[_cell].astype(str).agg("|".join, axis=1).isin(_dkey) & ~df["name"].str.contains("_dense"))]
 
 
 def fastest_per(src, key):
@@ -100,10 +105,7 @@ roll, roll_never = fastest_per(roll_src, "n")
 
 # batch sweep at n = 64 (fixed code only; every run is post-fix)
 b64_src = df[(df["n"] == 64) & df["fixed"].astype(bool)]
-# n = 64 cells rerun with per-step validation ("_dense") replace the coarse originals, whose 50% crossing was
-# interpolated over a 25-step bracket (at B = 1024 between step 0 and the single reading at step 25)
-dense_b = set(b64_src.loc[b64_src["name"].str.contains("_dense"), "bsz"])
-b64_src = b64_src[~(b64_src["bsz"].isin(dense_b) & ~b64_src["name"].str.contains("_dense"))]
+# (per-step-validated "_dense" reruns already replace the coarse runs of their cell, see above)
 b64, b64_never = fastest_per(b64_src, "bsz") if len(b64_src) else (roll.iloc[0:0], roll.iloc[0:0])
 
 # second rollout sweep at B = 512 (fixed code only); points that have not crossed are kept separately
@@ -145,7 +147,7 @@ ax.set_facecolor(SURFACE)
 
 # perfect 1/sequences scaling through the smallest batch point
 b0 = batch.iloc[0]
-xmax = max(batch["seqs"].max(), roll["seqs"].max(), b64["seqs"].max() if len(b64) else 0)
+xmax = max(batch["seqs"].max(), roll["seqs"].max(), r1k["seqs"].max() if len(r1k) else 0, b64["seqs"].max() if len(b64) else 0)
 xs = np.array([batch["seqs"].min() / 2.5, xmax * 1.6])
 ax.plot(xs, b0["steps"] * b0["seqs"] / xs, ls=":", lw=1.2, color=MUTED, zorder=1)
 # the same reference along the K = 64 curve, anchored on its own smallest batch point
@@ -198,10 +200,12 @@ if FIT:
     # N_crit of each series is the fitted parameter N* (the batch at which steps are twice S_min). With --knee TOL the
     # marker moves to (TOL - 1) N* instead, where the curve is TOL x perfect scaling; marked on the curve with a
     # dotted vertical to the axis, labelled in the series colour
-    ymin = min(batch["steps"].min(), roll["steps"].min(), b64["steps"].min() if len(b64) else np.inf) / 4
+    ymin = min(batch["steps"].min(), roll["steps"].min(), r1k["steps"].min() if len(r1k) else np.inf, b64["steps"].min() if len(b64) else np.inf) / 4
     # label each critical batch in its own units, placed in open space and tied to the circle by an arrow;
     # position = (x factor, y factor) applied to the circle's coordinates
     LABEL_AT = {16: (0.5, 0.34), 64: (2.2, 5.2), 128: (2.7, 2.1)}   # K=16 label raised so it clears the tick labels with the fitted-N* knee
+    if KNEE_TOL < 2 and not KL2:
+        LABEL_AT[1024] = (1.3, 0.38)                                  # paper Figure 1 (--b1024 --knee 1.25): below-right of its circle
     if KL2:
         LABEL_AT[16.01] = (2.4, 0.42)                                 # the KL 1e-2 label below-right of its circle, clear of the B = 1024 curve
         LABEL_AT[16] = (0.36, 0.3)                                    # the K = 16 label further down-left, clear of the purple N_crit label

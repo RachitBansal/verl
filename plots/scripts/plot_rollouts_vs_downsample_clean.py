@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 SURFACE, INK, INK2, GRID, MUTED = "#ffffff", "#0b0b0b", "#52514e", "#e6e5e1", "#a8a7a2"
-GREEN, PURPLE = "#2ca02c", "#9467bd"     # tab:green = the rollout sweep's colour in Figure 1; tab:purple for upsampling
+GREEN, PURPLE = "#2ca02c", "#c2378f"     # tab:green = the rollout sweep's colour in Figure 1; magenta for upsampling (purple is the B = 1024 rollout sweep in Figure 1)
 B = 128
 SHORT_STEPS = 200
 VALID_N_PREFIX = {1, 2, 4, 8, 16}        # K where a pre-fix run is an honest measurement

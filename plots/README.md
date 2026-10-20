@@ -118,3 +118,12 @@ Outputs: `paper/fig_budget_frontier_{a,b}.pdf`, `paper/fig4_cbs_vs_tokens.pdf`, 
 `csv/fig_budget_frontier_table.csv`, `csv/cbs_vs_tokens_table.csv`.
 $PLOT iclr_figs/make_kl_fig.py --traj csv/traj_from_curves.csv --meta csv/meta_from_curves.jsonl --out iclr_out   # KL figure, two panels in the kl_compare_clean style (started from Rachit's make_kl_fig.py in cbs-for-rl@onpol-theory-reeval-jun10; his panel (c) dropped): (a) steps vs B per KL with the Figure 1 fits and B* (--fit-table), (b) fastest LR vs the highest LR that reached the target, band shaded, non-reaching LRs above it as hollow dots. 'stable' = crossed the target (--stable reach, default); --stable hold also requires its last 10% of readings to still average >= the target; --stable peak is his original rule (last 10% >= 60% of peak). Also writes fig_kl_stability_{a,b} and paper/fig_kl_stability.pdf; prints the ceiling per B
 $PLOT iclr_figs/make_kl_fig_horizon.py --traj csv/traj_from_curves.csv --meta csv/meta_from_curves.jsonl --out iclr_out --horizon 2.5   # its panel (b) as run vs with every run cut at H x its crossing (a common horizon), to show how much of 'stable' is the horizon; same --stable rules (non-default rules get a _<rule> suffix)
+
+# Paper figures (2026-10-20): the exact commands behind the ICLR draft
+```bash
+$PLOT scripts/plot_steps_vs_seqs_paper.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_fit.png --b1024 --fit --knee 1.25          # Figure 1 (-> iclr/figures/steps_vs_seqs_fit.pdf)
+$PLOT scripts/plot_steps_vs_seqs_paper.py csv/steps_to_50_seqs.csv png/steps_vs_seqs_b1024_fit.png --b1024 --fit                # fitted N* table read by the LR figure
+$PLOT scripts/plot_steps_to_50_combined.py csv/steps_to_50_kl.csv png/steps_to_50_split.png --n2 64 --lr-max 1.2e-4 --lr-min 5e-7 --split --nstar csv/steps_vs_seqs_b1024_fit_fit_table.csv --fig1-colors --no-nstar-n2   # LR figure: Figure 1 palette, no N* line on K=64
+$PLOT scripts/plot_rollouts_vs_downsample_clean.py csv/steps_to_50_seqs.csv png/rollouts_vs_downsample_clean_fit.png --fit      # upsampling figure
+```
+Budget frontier, KL figure, CBS vs tokens and the appendix trajectories come from the cbs repo, `critical-batch-rlvr/analysis/iclr_figs` (README there; `fetch_incremental.py` refreshes the trajectories).

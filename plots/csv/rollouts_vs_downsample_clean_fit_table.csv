@@ -6,9 +6,9 @@ more_rollouts,16.0,2048.0,1e-05,191.07142857142856,n16_bsz128_lr1e-5_kl1e-3_v2
 more_rollouts,32.0,4096.0,1e-05,125.0,n32_bsz128_lr1e-5_kl0.001_updated_scaling
 more_rollouts,64.0,8192.0,1e-05,86.95652173913042,n64_bsz128_lr1e-5_kl0.001_updated_scaling
 more_rollouts,1.0,128.0,,,"no crossing (best 44.3% in 2075 steps, 10 runs)"
+downsample,2.0,256.0,3e-06,1023.3333333333334,downsample_n64_dsk2_bsz128_lr3e-6_kl0.001_updated_scaling
 downsample,4.0,512.0,1e-05,750.0,downsample_n64_dsk4_bsz128_lr1e-5_kl1e-3_updated_scaling
 downsample,8.0,1024.0,1e-05,291.6666666666665,downsample_n64_dsk8_bsz128_lr1e-5_kl0.001_updated_scaling
 downsample,16.0,2048.0,1e-05,164.28571428571428,downsample_n64_dsk16_bsz128_lr1e-5_kl0.001_updated_scaling
 downsample,32.0,4096.0,1e-05,115.83333333333336,downsample_n64_dsk32_bsz128_lr1e-5_kl0.001_updated_scaling
 downsample,1.0,128.0,,,"no crossing (best 44.1% in 725 steps, 25 runs)"
-downsample,2.0,256.0,,,"no crossing (best 46.4% in 1250 steps, 41 runs)"

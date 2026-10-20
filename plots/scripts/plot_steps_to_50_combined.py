@@ -14,6 +14,10 @@ Usage: python plot_steps_to_50_combined.py csv/steps_to_50_kl.csv png/steps_to_5
   --n2 K adds a third panel, the batch sweep at that K, drawn from fixed-code runs only (its pre-fix runs stepped at ~0.46x nominal LR).
   --batch-only draws just the batch-sweep panel (same styling, legend and colour scale).
   --fixed-only keeps only runs on the fixed loss normalisation (for K = 64, whose few pre-fix runs stepped at ~0.46x nominal LR).
+  --fig1-colors colours each panel in its Figure 1 series colour (K = 16 blue, K = 64 orange, B = 128 green, B = 1024 purple):
+  the reached runs on a light-to-dark ramp of that hue (darker = fewer steps), the fit and the critical-batch line in the hue;
+  the shared colour bar becomes a neutral grey lightness scale.
+  --no-nstar-n2 leaves the critical-batch line off the --n2 panel.
   --lr-max / --lr-min drop runs outside that learning-rate range (the paper figure uses 5e-7 to 1e-4: nothing outside it ever
   crossed, those runs only add headroom).
 Writes the PNG, paper/<stem>.pdf and csv/<stem>_table.csv (both panels' collapsed grids).
@@ -35,6 +39,19 @@ MISSING = "#8f8e8a"          # darker grey than the single-panel grids, for cont
 STARC = "#6a3d9a"            # the fitted critical batch N*: purple, distinct from everything else on the panel
 FITC = "#d66300"             # the power-law fit: deep orange, distinct from the blue colour scale and the grey marks
 SHORT_STEPS = 200
+# Figure 1 series colours (plot_steps_vs_seqs_paper.py): K = 16 tab:blue, K = 64 deep orange, B = 128 tab:green, B = 1024 tab:purple
+FIG1_HUE = {("bsz", 16): "#1f77b4", ("bsz", 64): "#d66300", ("n", 128): "#2ca02c", ("n", 1024): "#9467bd"}
+
+
+def hue_ramp(hex_):
+    """light (slow) -> dark (fast) ramp of one hue, reversed like CMAP so that dark = fewest steps"""
+    import matplotlib.colors as mc
+    c = np.array(mc.to_rgb(hex_)); white, black = np.ones(3), np.zeros(3)
+    stops = [0.80 * white + 0.20 * c, 0.45 * white + 0.55 * c, c, 0.78 * c + 0.22 * black, 0.55 * c + 0.45 * black]
+    return LinearSegmentedColormap.from_list("hue_rev", stops[::-1])
+
+
+GREY_RAMP = LinearSegmentedColormap.from_list("grey_rev", ["#1e1e1e", "#5b5b5b", "#9a9a9a", "#d6d6d6"])
 
 
 def opt(flag, default, cast):
@@ -50,6 +67,8 @@ BATCH_ONLY = "--batch-only" in sys.argv    # one panel: just the batch sweep, sa
 SPLIT = "--split" in sys.argv              # write (a) the prompt sweeps, (b) the rollout sweep with the colour bar, and a legend strip as separate files
 NSTAR = opt("--nstar", None, str)          # Figure 1 fit table (csv/steps_vs_seqs_*fit_fit_table.csv): mark each sweep's fitted critical batch N* on its panel
 N2 = opt("--n2", None, int)                # third panel: a second batch sweep at this K (fixed-code runs only; its pre-fix runs stepped at a fraction of the nominal LR)
+FIG1 = "--fig1-colors" in sys.argv          # per-panel Figure 1 hues instead of one blue scale
+NO_NSTAR_N2 = "--no-nstar-n2" in sys.argv      # no critical-batch line on the second batch sweep
 FIXED_ONLY = "--fixed-only" in sys.argv    # drop pre-fix runs (before 2026-09-11 they stepped at a fraction of the nominal LR; see the loss-scaling note)
 
 df = pd.read_csv(csv_in)
@@ -64,6 +83,11 @@ if LR_MIN is not None:
     df = df[df["lr"] >= LR_MIN / 1.001]
 if FIXED_ONLY:
     df = df[df["fixed"]]
+# a run validated every step ("_dense") that crossed replaces the coarsely validated runs of its (n, B, LR) cell (same rule as Figure 1)
+_cell = ["n", "bsz", "lr"]
+_isd = df["name"].str.contains("_dense", na=False)
+_dkey = set(df.loc[_isd & df[COL].notna(), _cell].astype(str).agg("|".join, axis=1))
+df = df[~(df[_cell].astype(str).agg("|".join, axis=1).isin(_dkey) & ~_isd)]
 
 
 def collapse(sub):
@@ -95,7 +119,7 @@ def style(ax):
     ax.set_axisbelow(True)
 
 
-def panel(ax, sub, xcol, xlabel, fit, star=None):
+def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, fitc=FITC, starc=STARC):
     ok = sub.dropna(subset=["steps"])
     miss = sub[sub["steps"].isna()]
     ref = miss[xcol].map(ok.groupby(xcol)["steps"].min()).fillna(SHORT_STEPS).clip(upper=SHORT_STEPS)
@@ -119,7 +143,7 @@ def panel(ax, sub, xcol, xlabel, fit, star=None):
     short = short[~short[xcol].isin(settled)]
     ax.scatter(miss[xcol], miss["lr"], s=190, facecolors="none", edgecolors=MISSING, linewidths=2.6, zorder=2)
     ax.scatter(short[xcol], short["lr"], s=170, marker="x", c=MISSING, linewidths=2.6, zorder=2)
-    ax.scatter(ok[xcol], ok["lr"], s=260, c=ok["steps"], cmap=CMAP, norm=norm, edgecolors=SURFACE, linewidths=1.5, zorder=3)
+    ax.scatter(ok[xcol], ok["lr"], s=260, c=ok["steps"], cmap=cmap, norm=norm, edgecolors=SURFACE, linewidths=1.5, zorder=3)
 
     best = ok.loc[ok.groupby(xcol)["steps"].idxmin()].sort_values(xcol)
     ax.scatter(best[xcol], best["lr"], s=720, facecolors="none", edgecolors=INK, linewidths=3.4, zorder=4)
@@ -135,18 +159,18 @@ def panel(ax, sub, xcol, xlabel, fit, star=None):
         slope, icpt = np.polyfit(lx, ly, 1)
         resid = ly - (slope * lx + icpt); se = np.sqrt(resid.var(ddof=2) / ((lx - lx.mean()) ** 2).sum()) if len(fitpts) > 2 else float("nan")
         xs_fit = np.geomspace(fitpts[xcol].min(), fitpts[xcol].max(), 50)
-        ax.plot(xs_fit, np.exp(icpt) * xs_fit ** slope, ls="-", lw=4.6, color=FITC, alpha=0.95, zorder=2.6)
+        ax.plot(xs_fit, np.exp(icpt) * xs_fit ** slope, ls="-", lw=4.6, color=fitc, alpha=0.95, zorder=2.6)
         if plateau:
-            ax.plot([fitpts[xcol].max(), best[xcol].max()], [lrs[-1]] * 2, ls=":", lw=3.6, color=FITC, alpha=0.95, zorder=2.6)
+            ax.plot([fitpts[xcol].max(), best[xcol].max()], [lrs[-1]] * 2, ls=":", lw=3.6, color=fitc, alpha=0.95, zorder=2.6)
             note = f"$\\eta^* \\propto B^{{{slope:.2f}}}$ (±{se:.2f})"
         else:
             note = f"$\\eta^* \\propto B^{{{slope:.2f}}}$ (±{se:.2f})"
-        ax.text(0.03, 0.93, note, transform=ax.transAxes, ha="left", va="top", fontsize=NOTE, color=FITC, zorder=10,
+        ax.text(0.03, 0.93, note, transform=ax.transAxes, ha="left", va="top", fontsize=NOTE, color=fitc, zorder=10,
                 bbox=dict(boxstyle="round,pad=0.15", fc=SURFACE, ec="none", alpha=0.85))   # top-left corner
     gb = ok[ok["steps"] == ok["steps"].min()]
 
     if star is not None:          # the sweep's fitted critical batch from the steps-vs-sequences fit, in this panel's x units (legend names it)
-        ax.axvline(star, ls=(0, (5, 2.5)), lw=3.6, color=STARC, alpha=0.9, zorder=2.3)
+        ax.axvline(star, ls=(0, (5, 2.5)), lw=3.6, color=starc, alpha=0.9, zorder=2.3)
     ax.set_xscale("log", base=2); ax.set_yscale("log")
     drawn = pd.concat([ok, miss, short])
     xs = sorted(sub[xcol].unique())
@@ -173,6 +197,8 @@ if NSTAR:
     for sp in specs:
         key = f"more prompts, K = {N_ROLL if sp is specs[0] else N2}" if sp["xcol"] == "bsz" else f"more rollouts, B = {BSZ}"
         sp["star"] = float(ft[key]) if key in ft else None
+        if NO_NSTAR_N2 and N2 and sp is not specs[0] and sp["xcol"] == "bsz":
+            sp["star"] = None; continue
         if sp["star"] is None:
             print(f"note: no N* for '{key}' in {NSTAR}")
 widths = [max(sp["data"][sp["xcol"]].nunique(), 1) for sp in specs]
@@ -202,7 +228,11 @@ else:
         fig.get_layout_engine().set(wspace=0.04 if len(axes) < 3 else 0.06)
 results = []
 for ax, sp in zip(axes, specs):
-    best, gb, note, drawn, plateau = panel(ax, sp["data"], sp["xcol"], sp["xlabel"], fit=sp["fit"], star=sp.get("star"))
+    kw = {}
+    if FIG1:
+        h = FIG1_HUE.get(("bsz", N_ROLL if sp is specs[0] else N2) if sp["xcol"] == "bsz" else ("n", BSZ), INK2)
+        kw = dict(cmap=hue_ramp(h), fitc=h, starc=h)
+    best, gb, note, drawn, plateau = panel(ax, sp["data"], sp["xcol"], sp["xlabel"], fit=sp["fit"], star=sp.get("star"), **kw)
     ax.set_title(sp["title"], loc="left", fontsize=TITLE if (len(specs) < 3 or SPLIT) else TITLE - 2, color=INK, pad=4)
     results.append(dict(spec=sp, best=best, note=note, drawn=drawn, plateau=plateau))
 lr_all = pd.concat([r["drawn"] for r in results])["lr"]          # shared y-limits from what the panels actually draw
@@ -211,7 +241,7 @@ for ax in axes:
 axes[0].set_ylabel("learning rate", color=INK, fontsize=LABEL)
 plateau_b = any(r["plateau"] for r in results)
 
-sm = plt.cm.ScalarMappable(norm=norm, cmap=CMAP); sm.set_array([])
+sm = plt.cm.ScalarMappable(norm=norm, cmap=GREY_RAMP if FIG1 else CMAP); sm.set_array([])
 if SPLIT:
     cb = figB.colorbar(sm, ax=list(gB[0]), fraction=0.06, pad=0.02)       # the colour bar rides with panel (b)
 else:
@@ -220,14 +250,15 @@ cb.set_label("steps to target", color=INK, fontsize=CBAR)
 cb.ax.tick_params(colors=INK, labelsize=TICK - 1, length=0); cb.outline.set_visible(False); cb.ax.invert_yaxis()
 
 legend = [
-    Line2D([], [], marker="o", ls="", ms=16, mfc=RAMP[4], mec=SURFACE, label=f"reached {PCT}%"),
+    Line2D([], [], marker="o", ls="", ms=16, mfc="#5b5b5b" if FIG1 else RAMP[4], mec=SURFACE, label=f"reached {PCT}%"),
     Line2D([], [], marker="o", ls="", ms=16, mfc="none", mec=MISSING, mew=2.6, label=f"never reached {PCT}%"),
     Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6, label="too early to tell"),
     Line2D([], [], marker="o", ls="", ms=22, mfc="none", mec=INK, mew=3.4, label="fastest LR at each x"),
-    Line2D([], [], ls="-", lw=4.6, color=FITC, label="power-law fit (dotted: plateau)" if plateau_b else "power-law fit"),
+    Line2D([], [], ls="-", lw=4.6, color=INK2 if FIG1 else FITC, label="power-law fit (dotted: plateau)" if plateau_b else "power-law fit"),
 ]
 if NSTAR and any(sp.get("star") is not None for sp in specs):
-    legend.append(Line2D([], [], ls=(0, (5, 2.5)), lw=3.6, color=STARC, label="critical batch (B* or K*)"))
+    legend.append(Line2D([], [], ls=(0, (5, 2.5)), lw=3.6, color=INK2 if FIG1 else STARC,
+                         label="fitted critical batch (B* or K*, Figure 1 fit)" if FIG1 else "critical batch (B* or K*)"))
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper"); os.makedirs(pdf_dir, exist_ok=True)
 if SPLIT:
     stem = png_out.replace(".png", "")
