@@ -80,8 +80,8 @@ if SPLIT:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import paperstyle as PS
     TICK, LABEL, TITLE, NOTE, LEGEND, CBAR = PS.FS["tick"], PS.FS["label"], PS.FS["title"], PS.FS["annot"], PS.FS["legend"], PS.FS["label"]
-    SZ = dict(hit=170, miss=125, short=110, ring=430, ring_lw=2.6, edge_lw=2.2, fit_lw=PS.LW["line"], plateau_lw=3.2, star_lw=PS.LW["crit"],
-              leg_ms=12, leg_ring=16, strip_h=1.2, W=PS.TEXTWIDTH_IN * PS.K_CANVAS, H=4.9)
+    SZ = dict(hit=95, miss=70, short=65, ring=250, ring_lw=2.2, edge_lw=1.8, fit_lw=PS.LW["line"], plateau_lw=3.2, star_lw=PS.LW["crit"],
+              leg_ms=10, leg_ring=13, strip_h=1.2, W=PS.TEXTWIDTH_IN * PS.K_CANVAS, H=4.9)
 else:
     SZ = dict(hit=260, miss=190, short=170, ring=720, ring_lw=3.4, edge_lw=2.6, fit_lw=4.6, plateau_lw=3.6, star_lw=3.6,
               leg_ms=16, leg_ring=22, strip_h=2.3, W=26.0, H=7.4)
