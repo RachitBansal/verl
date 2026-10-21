@@ -279,8 +279,8 @@ cb.set_label("steps to target", color=INK, fontsize=CBAR)
 cb.ax.tick_params(colors=INK, labelsize=TICK - 1, length=0); cb.outline.set_visible(False); cb.ax.invert_yaxis()
 
 legend = [
-    Line2D([], [], marker="o", ls="", ms=SZ["leg_ms"], mfc="#5b5b5b" if FIG1 else RAMP[4], mec=SURFACE, label=f"reached {PCT}%"),
-    Line2D([], [], marker="o", ls="", ms=SZ["leg_ms"], mfc="none", mec=MISSING, mew=SZ["edge_lw"], label=f"never reached {PCT}%"),
+    Line2D([], [], marker="o", ls="", ms=SZ["leg_ms"], mfc="#5b5b5b" if FIG1 else RAMP[4], mec=SURFACE, label="reached target"),
+    Line2D([], [], marker="o", ls="", ms=SZ["leg_ms"], mfc="none", mec=MISSING, mew=SZ["edge_lw"], label="never reached target"),
 ] + ([] if NO_EARLY else [Line2D([], [], marker="x", ls="", ms=SZ["leg_ms"], color=MISSING, mew=SZ["edge_lw"], label="too early to tell")]) + [
     Line2D([], [], marker="o", ls="", ms=SZ["leg_ring"], mfc="none", mec=INK, mew=SZ["ring_lw"], label="fastest LR at each x"),
     Line2D([], [], ls="-", lw=SZ["fit_lw"], color=INK2 if FIG1 else FITC, label="power-law fit (dotted: plateau)" if plateau_b else "power-law fit"),
@@ -299,7 +299,11 @@ if SPLIT:
         print("wrote", f"{stem}_{tag}.png")
     # legend strip at the full line width (W), so its type comes out at the same size as the panels; not cropped, to keep that scale
     figL = plt.figure(figsize=(W, SZ["strip_h"]), facecolor=SURFACE)
-    figL.legend(handles=legend, loc="center", ncol=3, frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, columnspacing=1.5, borderaxespad=0.0)
+    # two rows, each centred on its own (one legend per row), so a short second row does not leave the strip lopsided
+    half = (len(legend) + 1) // 2
+    for rows_, y in ((legend[:half], 0.73), (legend[half:], 0.27)):
+        figL.legend(handles=rows_, loc="center", bbox_to_anchor=(0.5, y), ncol=len(rows_), frameon=False, fontsize=LEGEND, labelcolor=INK,
+                    handletextpad=0.6, columnspacing=2.0, borderaxespad=0.0)
     figL.savefig(f"{stem}_legend.png", dpi=170, facecolor=SURFACE)
     figL.savefig(os.path.join(pdf_dir, os.path.basename(stem) + "_legend.pdf"), facecolor=SURFACE)
     print("wrote", f"{stem}_legend.png")
