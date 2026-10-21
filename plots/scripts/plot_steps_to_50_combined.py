@@ -200,6 +200,8 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, fitc=FITC, starc=STA
     else:
         ax.set_xticks(xs); ax.set_xticklabels([fmt(x) for x in xs])
     ax.set_xlabel(xlabel, color=INK, fontsize=LABEL)
+    if SPLIT:       # room for the large rings at both ends of the axis
+        ax.set_xlim(min(xs) / 1.6, max(xs) * 1.6)
     style(ax)
     return best, gb, note, drawn, plateau
 
