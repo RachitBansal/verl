@@ -212,8 +212,8 @@ legend_r = [Line2D([], [], marker="o", ls="", ms=16, mfc="none", mec=INK, mew=2.
             Line2D([], [], marker="o", ls="", ms=12, mfc="none", mec=MISSING, mew=2.2, label="never reached the target")]
 if (roll_lad["verdict"] == "inconclusive").any() or (ds_lad["verdict"] == "inconclusive").any():
     legend_r.append(Line2D([], [], marker="x", ls="", ms=11, color=MISSING, mew=2.2, label="too early to tell"))
-axr.legend(handles=legend_r, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=len(legend_r), frameon=False, fontsize=LEGEND, labelcolor=INK,
-           handletextpad=0.5, columnspacing=1.6)   # directly under the right panel
+fig.legend(handles=legend_r, loc="upper center", bbox_to_anchor=(0.5, 0.08), ncol=len(legend_r), frameon=False, fontsize=LEGEND, labelcolor=INK,
+           handletextpad=0.5, columnspacing=1.6)   # centred under the whole figure, so it adds no width on the right
 fig.savefig(png_out, dpi=170, facecolor=SURFACE, bbox_inches="tight")
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper")   # plots/paper/
 os.makedirs(pdf_dir, exist_ok=True)
