@@ -15,6 +15,9 @@ matplotlib.use("Agg"); import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cbs_data import load_runs, best_per_cell
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
+import paperstyle as PS
+PS.apply()
 ap = argparse.ArgumentParser(); ap.add_argument("--traj", required=True); ap.add_argument("--meta", required=True)
 ap.add_argument("--out", required=True); ap.add_argument("--tau", type=float, default=0.5)
 ap.add_argument("--stable", choices=["hold", "peak", "reach"], default="reach",
@@ -27,9 +30,11 @@ a = ap.parse_args()
 
 # ---- style, as in plot_kl_compare_clean.py
 SURFACE, INK, INK2, GRID = "#ffffff", "#0b0b0b", "#52514e", "#e6e5e1"
-KLC = {0.001: "#1f77b4", 0.01: "#c2185b"}   # KL 1e-3 blue (Figure 1 K = 16 blue), KL 1e-2 pink
-KLN = {0.001: "KL 1e-3", 0.01: "KL 1e-2"}; MK = {0.001: "o", 0.01: "s"}; MS = {0.001: 17, 0.01: 15}
-TICK, LABEL, TITLE, LEGEND = 28, 31, 32, 34
+KLC = {0.001: PS.C["kl3"], 0.01: PS.C["kl2"]}   # KL 1e-3 blue (Figure 1 K = 16 blue), KL 1e-2 pink
+KLN = {0.001: "KL 1e-3", 0.01: "KL 1e-2"}; MK = {0.001: "o", 0.01: "s"}; MS = {0.001: 12, 0.01: 11}
+# sizes from the shared paper style (plots/scripts/paperstyle.py; Figure 1 is the reference): the two-panel figure is printed at
+# full line width, on a canvas 2.45x that width, so this type lands at ~8-9 pt in the PDF
+TICK, LABEL, TITLE, LEGEND, ANNOT = PS.FS["tick"], PS.FS["label"], PS.FS["title"], PS.FS["legend"], PS.FS["annot"]
 K0 = 16; KLS = (0.001, 0.01)
 runs = load_runs(a.traj, a.meta)
 fmt = lambda x: f"{int(x) // 1024}k" if x >= 1024 else str(int(x))
@@ -69,10 +74,7 @@ Bs = sorted({x["B"] for x in rows})
 
 
 def style(ax):
-    ax.set_facecolor(SURFACE); ax.grid(True, which="major", color=GRID, lw=0.6); ax.set_axisbelow(True)
-    ax.tick_params(which="both", colors=INK, labelsize=TICK, length=0)
-    for sp in ("top", "right"): ax.spines[sp].set_visible(False)
-    for sp in ("left", "bottom"): ax.spines[sp].set_color(GRID)
+    ax.set_facecolor(SURFACE); PS.finish(ax)
     ax.set_xscale("log", base=2); ax.set_yscale("log")
     major = [x for x in Bs if int(round(np.log2(x))) % 2 == 0]
     ax.set_xticks(major); ax.set_xticklabels([fmt(x) for x in major])
@@ -90,50 +92,55 @@ def panel_a(ax):
         if fits is not None and FIT_KEY[kl] in fits.index:
             f = fits.loc[FIT_KEY[kl]]; smin, nstar = float(f["s_min"]), float(f["n_star_seqs"]); bstar = nstar / K0
             xs = np.geomspace(x.min() / 1.4, x.max() * 1.4, 200)
-            ax.plot(xs, smin * (1 + nstar / (K0 * xs)), ls="-", lw=3.2, color=KLC[kl], zorder=3)
-            ax.axvline(bstar, ls=(0, (5, 2.5)), lw=3.6, color=KLC[kl], alpha=0.9, zorder=2.3)
-            ax.annotate(f"$B^* \\approx$ {bstar / 1000:.1f}k", (bstar, 0.60 - 0.13 * row), xycoords=("data", "axes fraction"), xytext=(-10, 0),
-                        textcoords="offset points", ha="right", va="center", fontsize=LEGEND - 6, color=KLC[kl], zorder=10,
+            ax.plot(xs, smin * (1 + nstar / (K0 * xs)), ls="-", lw=PS.LW["line"], color=KLC[kl], zorder=3)
+            ax.axvline(bstar, ls=(0, (5, 2.5)), lw=PS.LW["crit"], color=KLC[kl], alpha=0.9, zorder=2.3)
+            ax.annotate(f"$B^* \\approx$ {bstar / 1000:.1f}k", (bstar, 0.90 - 0.12 * row), xycoords=("data", "axes fraction"), xytext=(-10, 0),
+                        textcoords="offset points", ha="right", va="center", fontsize=ANNOT, color=KLC[kl], zorder=10,
                         bbox=dict(boxstyle="round,pad=0.15", fc=SURFACE, ec="none", alpha=0.85))
         else:
-            ax.plot(x, y, lw=3.2, color=KLC[kl], zorder=3)
+            ax.plot(x, y, lw=PS.LW["line"], color=KLC[kl], zorder=3)
         ax.scatter(x, y, s=MS[kl] ** 2 * 1.5, marker=MK[kl], color=KLC[kl], edgecolors=SURFACE, linewidths=1.5, zorder=6)
     style(ax); ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
-    ax.set_title(f"scaling prompts, fixed K = {K0}", loc="left", fontsize=TITLE, color=INK, pad=6)
+    ax.set_title(f"(a) steps to target, K = {K0}", loc="left", fontsize=TITLE, color=INK, pad=6)
     hnd = [Line2D([], [], marker=MK[kl], ls="", ms=MS[kl], color=KLC[kl], mec=SURFACE, label=KLN[kl]) for kl in KLS]
-    if fits is not None: hnd.append(Line2D([], [], ls="-", lw=3.2, color=INK2, label="fit  $S = S_\\min\\,(1 + N^*/N)$\n(as in Fig. 1)"))
-    ax.legend(handles=hnd, loc="lower left", frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)
+    if fits is not None: hnd.append(Line2D([], [], ls="-", lw=PS.LW["line"], color=INK2, label="fit (Figure 1)"))
+    ax.legend(handles=hnd, loc="lower left", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.5, borderaxespad=0.2, labelspacing=0.3)
 
 
 # ---------------- (b) fastest LR vs highest stable LR per KL
 STABLE_LABEL = {"reach": "highest LR that reached the target", "hold": "highest LR that reached and held the target", "peak": "highest stable LR"}
 FAIL_LABEL = {"reach": "did not reach the target", "hold": "did not reach / hold the target", "peak": "collapsed / did not reach"}
-def panel_b(ax):
+def panel_b(ax, legend_fig=None):
     for kl, nudge in zip(KLS, (-0.07, +0.07)):
         bs = np.array(sorted(set(best[kl]) & set(ceil[kl])), float) * 2.0 ** nudge
         yb = np.array([best[kl][int(round(v))] for v in bs / 2.0 ** nudge]); yc = np.array([ceil[kl][int(round(v))] for v in bs / 2.0 ** nudge])
         ax.fill_between(bs, yb, yc, color=KLC[kl], alpha=0.12, lw=0)
-        ax.plot(bs, yc, ls="-", lw=3.2, color=KLC[kl], zorder=5)
-        ax.plot(bs, yb, ls=(0, (5, 2.5)), lw=2.4, color=KLC[kl], alpha=0.8, zorder=4)
+        ax.plot(bs, yc, ls="-", lw=PS.LW["line"], color=KLC[kl], zorder=5)
+        ax.plot(bs, yb, ls=(0, (5, 2.5)), lw=PS.LW["ref"], color=KLC[kl], alpha=0.8, zorder=4)
         ax.scatter(bs, yb, s=MS[kl] ** 2 * 1.5, marker=MK[kl], color=KLC[kl], edgecolors=SURFACE, linewidths=1.5, zorder=6)
         for x in rows:   # runs above the ceiling that did not qualify
             if x["kl"] == kl and x["out"] in ("reached_collapsed", "never") and x["lr"] > ceil[kl].get(x["B"], 0):
-                ax.scatter([x["B"] * 2.0 ** nudge], [x["lr"]], s=90, marker="o", facecolors="none", edgecolors=KLC[kl], alpha=0.35, linewidths=1.8, zorder=3)
+                ax.scatter([x["B"] * 2.0 ** nudge], [x["lr"]], s=70, marker="o", facecolors="none", edgecolors=KLC[kl], alpha=0.4, linewidths=1.8, zorder=3)
     style(ax); ax.set_ylabel("learning rate", color=INK, fontsize=LABEL); ax.set_xlim(min(Bs) / 1.9, max(Bs) * 1.9)
-    hnd = [Line2D([], [], ls=(0, (5, 2.5)), lw=2.4, marker="o", ms=12, color=INK2, mec=SURFACE, label="fastest LR at each B"),
-           Line2D([], [], ls="-", lw=3.2, color=INK2, label=STABLE_LABEL[a.stable]),
-           Line2D([], [], marker="o", ls="", ms=9, mfc="none", mec=INK2, alpha=0.6, mew=1.8, label=FAIL_LABEL[a.stable])]
-    ax.legend(handles=hnd, loc="upper center", bbox_to_anchor=(0.5, -0.17), ncol=2, frameon=False, fontsize=LEGEND - 4, labelcolor=INK,
-              handletextpad=0.5, columnspacing=1.6)
+    ax.set_title(f"(b) learning rates, K = {K0}", loc="left", fontsize=TITLE, color=INK, pad=6)
+    hnd = [Line2D([], [], ls=(0, (5, 2.5)), lw=PS.LW["ref"], marker="o", ms=10, color=INK2, mec=SURFACE, label="fastest LR at each B"),
+           Line2D([], [], ls="-", lw=PS.LW["line"], color=INK2, label=STABLE_LABEL[a.stable]),
+           Line2D([], [], marker="o", ls="", ms=8, mfc="none", mec=INK2, alpha=0.6, mew=1.8, label=FAIL_LABEL[a.stable])]
+    if legend_fig is not None:   # two-panel figure: one row centred under the whole figure (no extra width on the right)
+        legend_fig.legend(handles=hnd, loc="upper center", bbox_to_anchor=(0.5, 0.06), ncol=3, frameon=False, fontsize=LEGEND, labelcolor=INK,
+                          handletextpad=0.5, columnspacing=1.4)
+    else:
+        ax.legend(handles=hnd, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=1, frameon=False, fontsize=LEGEND, labelcolor=INK,
+                  handletextpad=0.5)
 
 
 for tag, fn in (("a", panel_a), ("b", panel_b)):
-    fig, ax = plt.subplots(figsize=(12.5, 8.6), facecolor=SURFACE); fn(ax)
+    fig, ax = plt.subplots(figsize=PS.canvas(0.495, 0.75), facecolor=SURFACE); fn(ax)
     for ext in ("pdf", "png"): fig.savefig(os.path.join(a.out, f"fig_kl_stability_{tag}.{ext}"), dpi=170, facecolor=SURFACE, bbox_inches="tight")
     plt.close(fig)
-fig, (axl, axr) = plt.subplots(1, 2, figsize=(26.0, 8.6), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1]))
-fig.subplots_adjust(left=0.06, right=0.99, top=0.84, bottom=0.22, wspace=0.22)
-panel_a(axl); panel_b(axr)
+fig, (axl, axr) = plt.subplots(1, 2, figsize=PS.canvas(1.0, 0.42), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.0, 1.0]))
+fig.subplots_adjust(left=0.08, right=0.99, top=0.9, bottom=0.2, wspace=0.28)
+panel_a(axl); panel_b(axr, legend_fig=fig)
 for ext in ("pdf", "png"): fig.savefig(os.path.join(a.out, f"fig_kl_stability.{ext}"), dpi=170, facecolor=SURFACE, bbox_inches="tight")
 paper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "paper"); os.makedirs(paper, exist_ok=True)
 fig.savefig(os.path.join(paper, "fig_kl_stability.pdf"), facecolor=SURFACE, bbox_inches="tight")   # paper copy, next to the other paper-ready PDFs
