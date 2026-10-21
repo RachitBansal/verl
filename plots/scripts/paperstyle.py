@@ -53,3 +53,9 @@ def finish(ax, grid=True):
         ax.grid(True, which="major", color=GRID, lw=LW["grid"], zorder=0)
         ax.set_axisbelow(True)
     ax.tick_params(which="both", length=0, colors=INK, labelsize=FS["tick"])
+
+
+def subcaption(ax, text, xlabel=None, fontsize=None):
+    """Sub-figure caption inside the figure, under the panel (below its x-axis label), instead of a LaTeX \\subcaption or a
+    title on top. Use \\phantomsubcaption in LaTeX to keep \\label / \\ref working for (a), (b), ..."""
+    ax.set_xlabel(f"{xlabel}\n{text}" if xlabel else text, linespacing=1.7, fontsize=fontsize or FS["label"])

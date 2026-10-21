@@ -143,7 +143,7 @@ GREEN, PURPLE = PS.C["b128"], PS.C["upsample"]
 # two panels side by side: steps to target on the left, every LR tried at each K on the right (ring = fastest), to show the
 # LR choice barely moves between the two series
 fig, (ax, axr) = plt.subplots(1, 2, figsize=PS.canvas(1.0, 0.40), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1]))   # a full line width
-fig.subplots_adjust(left=0.08, right=0.99, top=0.82, bottom=0.2, wspace=0.3)
+fig.subplots_adjust(left=0.08, right=0.99, top=0.82, bottom=0.3, wspace=0.3)
 ax.set_facecolor(SURFACE); axr.set_facecolor(SURFACE)
 
 series = [("more rollouts: generate K, train K", roll, GREEN, "p", 12.5),
@@ -167,7 +167,7 @@ ax.set_xscale("log", base=2); ax.set_yscale("log")
 ticks = sorted(set(roll["seqs"]) | set(ds["seqs"]))
 ax.set_xticks(ticks); ax.set_xticklabels([f"{t:,}" if t < 1024 else f"{t // 1024}k" for t in ticks])
 ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
-ax.set_xlabel("sequences per step", color=INK, fontsize=LABEL)
+PS.subcaption(ax, "(a) Steps to target.", xlabel="sequences per step")      # sub-caption under the panel
 ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
 ax.grid(True, which="major", color=GRID, lw=0.6)
 ax.set_axisbelow(True)
@@ -189,7 +189,7 @@ ks = sorted(set(roll_lad["k"]) | set(ds_lad["k"]))
 axr.set_xticks(ks); axr.set_xticklabels([str(k) for k in ks])
 axr.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
 axr.set_xlim(min(ks) / 1.9, max(ks) * 1.9)
-axr.set_xlabel("rollouts trained per prompt K", color=INK, fontsize=LABEL)
+PS.subcaption(axr, "(b) Learning rates.", xlabel="rollouts trained per prompt $K$")
 axr.set_ylabel("learning rate", color=INK, fontsize=LABEL)
 axr.grid(True, which="major", color=GRID, lw=0.6); axr.set_axisbelow(True)
 axr.tick_params(which="both", colors=INK, labelsize=TICK, length=0)
@@ -209,10 +209,10 @@ if FIT:
     legend += [Line2D([], [], ls="-", lw=PS.LW["line"], color=GREEN, label="fit (Figure 1)")]
 ax.legend(handles=legend, loc="upper right", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.5, borderaxespad=0.2, labelspacing=0.3)   # the upper right is empty: steps fall with N
 legend_r = [Line2D([], [], marker="o", ls="", ms=16, mfc="none", mec=INK, mew=2.6, label="fastest LR at each K"),
-            Line2D([], [], marker="o", ls="", ms=12, mfc="none", mec=MISSING, mew=2.2, label="never reached the target")]
+            Line2D([], [], marker="o", ls="", ms=12, mfc="none", mec=MISSING, mew=2.2, label="never reached target")]
 if (roll_lad["verdict"] == "inconclusive").any() or (ds_lad["verdict"] == "inconclusive").any():
     legend_r.append(Line2D([], [], marker="x", ls="", ms=11, color=MISSING, mew=2.2, label="too early to tell"))
-fig.legend(handles=legend_r, loc="upper center", bbox_to_anchor=(0.5, 0.08), ncol=len(legend_r), frameon=False, fontsize=LEGEND, labelcolor=INK,
+fig.legend(handles=legend_r, loc="upper center", bbox_to_anchor=(0.5, 0.06), ncol=len(legend_r), frameon=False, fontsize=LEGEND, labelcolor=INK,
            handletextpad=0.5, columnspacing=1.6)   # centred under the whole figure, so it adds no width on the right
 fig.savefig(png_out, dpi=170, facecolor=SURFACE, bbox_inches="tight")
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper")   # plots/paper/

@@ -207,11 +207,11 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, fitc=FITC, starc=STA
 
 
 # panels in order: the batch sweeps (K = N_ROLL, then K = N2 if given), then the rollout sweep at B = BSZ (unless --batch-only)
-specs = [dict(data=batch, xcol="bsz", xlabel="batch size B", title=(f"prompts, K = {N_ROLL}" if SPLIT else f"scaling prompts, fixed K = {N_ROLL}"), fit=True)]
+specs = [dict(data=batch, xcol="bsz", xlabel=(f"batch size $B$  ($K={N_ROLL}$)" if SPLIT else "batch size B"), title=(f"prompts, K = {N_ROLL}" if SPLIT else f"scaling prompts, fixed K = {N_ROLL}"), fit=True)]
 if N2:
-    specs.append(dict(data=batch2, xcol="bsz", xlabel="batch size B", title=(f"prompts, K = {N2}" if SPLIT else f"scaling prompts, fixed K = {N2}"), fit=not NO_FIT_N2))
+    specs.append(dict(data=batch2, xcol="bsz", xlabel=(f"batch size $B$  ($K={N2}$)" if SPLIT else "batch size B"), title=(f"prompts, K = {N2}" if SPLIT else f"scaling prompts, fixed K = {N2}"), fit=not NO_FIT_N2))
 if not BATCH_ONLY:
-    specs.append(dict(data=roll, xcol="n", xlabel="rollouts per prompt K", title=(f"rollouts, B = {BSZ}" if SPLIT else f"scaling rollouts, fixed B = {BSZ}"), fit=False))
+    specs.append(dict(data=roll, xcol="n", xlabel=(f"rollouts $K$ ($B={BSZ}$)" if SPLIT else "rollouts per prompt K"), title=(f"rollouts, B = {BSZ}" if SPLIT else f"scaling rollouts, fixed B = {BSZ}"), fit=False))
 if NSTAR:
     ft = pd.read_csv(NSTAR).set_index("series")["star"]
     for sp in specs:
@@ -253,8 +253,12 @@ for ax, sp in zip(axes, specs):
         h = FIG1_HUE.get(("bsz", N_ROLL if sp is specs[0] else N2) if sp["xcol"] == "bsz" else ("n", BSZ), INK2)
         kw = dict(cmap=hue_ramp(h), fitc=h, starc=h)
     best, gb, note, drawn, plateau = panel(ax, sp["data"], sp["xcol"], sp["xlabel"], fit=sp["fit"], star=sp.get("star"), **kw)
-    ax.set_title(sp["title"], loc="left", fontsize=TITLE if (len(specs) < 3 or SPLIT) else TITLE - 2, color=INK, pad=4)
+    if not SPLIT:   # paper layout: no titles on top; the sweep is in the x-label and the sub-caption sits under the panels
+        ax.set_title(sp["title"], loc="left", fontsize=TITLE if len(specs) < 3 else TITLE - 2, color=INK, pad=4)
     results.append(dict(spec=sp, best=best, note=note, drawn=drawn, plateau=plateau))
+if SPLIT:        # sub-figure captions inside the figure, under the panels (same height in both files, so they line up in LaTeX)
+    figA.supxlabel("(a) Learning rate vs. $B$.", fontsize=LABEL)
+    figB.supxlabel("(b) Learning rate vs. $K$.", fontsize=LABEL)
 lr_all = pd.concat([r["drawn"] for r in results])["lr"]          # shared y-limits from what the panels actually draw
 for ax in axes:
     ax.set_ylim(lr_all.min() / 1.7, lr_all.max() * 1.7)

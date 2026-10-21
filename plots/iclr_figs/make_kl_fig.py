@@ -101,15 +101,15 @@ def panel_a(ax):
             ax.plot(x, y, lw=PS.LW["line"], color=KLC[kl], zorder=3)
         ax.scatter(x, y, s=MS[kl] ** 2 * 1.5, marker=MK[kl], color=KLC[kl], edgecolors=SURFACE, linewidths=1.5, zorder=6)
     style(ax); ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
-    ax.set_title(f"(a) steps to target, K = {K0}", loc="left", fontsize=TITLE, color=INK, pad=6)
+    PS.subcaption(ax, "(a) Steps to target.", xlabel=f"batch size $B$  ($K={K0}$)")      # sub-caption under the panel
     hnd = [Line2D([], [], marker=MK[kl], ls="", ms=MS[kl], color=KLC[kl], mec=SURFACE, label=KLN[kl]) for kl in KLS]
     if fits is not None: hnd.append(Line2D([], [], ls="-", lw=PS.LW["line"], color=INK2, label="fit (Figure 1)"))
     ax.legend(handles=hnd, loc="lower left", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.5, borderaxespad=0.2, labelspacing=0.3)
 
 
 # ---------------- (b) fastest LR vs highest stable LR per KL
-STABLE_LABEL = {"reach": "highest LR that reached the target", "hold": "highest LR that reached and held the target", "peak": "highest stable LR"}
-FAIL_LABEL = {"reach": "did not reach the target", "hold": "did not reach / hold the target", "peak": "collapsed / did not reach"}
+STABLE_LABEL = {"reach": "highest LR that reached target", "hold": "highest LR that reached and held the target", "peak": "highest stable LR"}
+FAIL_LABEL = {"reach": "never reached target", "hold": "did not reach / hold the target", "peak": "collapsed / did not reach"}
 def panel_b(ax, legend_fig=None):
     for kl, nudge in zip(KLS, (-0.07, +0.07)):
         bs = np.array(sorted(set(best[kl]) & set(ceil[kl])), float) * 2.0 ** nudge
@@ -122,12 +122,12 @@ def panel_b(ax, legend_fig=None):
             if x["kl"] == kl and x["out"] in ("reached_collapsed", "never") and x["lr"] > ceil[kl].get(x["B"], 0):
                 ax.scatter([x["B"] * 2.0 ** nudge], [x["lr"]], s=70, marker="o", facecolors="none", edgecolors=KLC[kl], alpha=0.4, linewidths=1.8, zorder=3)
     style(ax); ax.set_ylabel("learning rate", color=INK, fontsize=LABEL); ax.set_xlim(min(Bs) / 1.9, max(Bs) * 1.9)
-    ax.set_title(f"(b) learning rates, K = {K0}", loc="left", fontsize=TITLE, color=INK, pad=6)
+    PS.subcaption(ax, "(b) Fastest and highest LR.", xlabel=f"batch size $B$  ($K={K0}$)")
     hnd = [Line2D([], [], ls=(0, (5, 2.5)), lw=PS.LW["ref"], marker="o", ms=10, color=INK2, mec=SURFACE, label="fastest LR at each B"),
            Line2D([], [], ls="-", lw=PS.LW["line"], color=INK2, label=STABLE_LABEL[a.stable]),
            Line2D([], [], marker="o", ls="", ms=8, mfc="none", mec=INK2, alpha=0.6, mew=1.8, label=FAIL_LABEL[a.stable])]
     if legend_fig is not None:   # two-panel figure: one row centred under the whole figure (no extra width on the right)
-        legend_fig.legend(handles=hnd, loc="upper center", bbox_to_anchor=(0.5, 0.06), ncol=3, frameon=False, fontsize=LEGEND, labelcolor=INK,
+        legend_fig.legend(handles=hnd, loc="upper center", bbox_to_anchor=(0.5, 0.045), ncol=3, frameon=False, fontsize=LEGEND, labelcolor=INK,
                           handletextpad=0.5, columnspacing=1.4)
     else:
         ax.legend(handles=hnd, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=1, frameon=False, fontsize=LEGEND, labelcolor=INK,
@@ -139,7 +139,7 @@ for tag, fn in (("a", panel_a), ("b", panel_b)):
     for ext in ("pdf", "png"): fig.savefig(os.path.join(a.out, f"fig_kl_stability_{tag}.{ext}"), dpi=170, facecolor=SURFACE, bbox_inches="tight")
     plt.close(fig)
 fig, (axl, axr) = plt.subplots(1, 2, figsize=PS.canvas(1.0, 0.42), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.0, 1.0]))
-fig.subplots_adjust(left=0.08, right=0.99, top=0.9, bottom=0.2, wspace=0.28)
+fig.subplots_adjust(left=0.08, right=0.99, top=0.97, bottom=0.25, wspace=0.28)
 panel_a(axl); panel_b(axr, legend_fig=fig)
 for ext in ("pdf", "png"): fig.savefig(os.path.join(a.out, f"fig_kl_stability.{ext}"), dpi=170, facecolor=SURFACE, bbox_inches="tight")
 paper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "paper"); os.makedirs(paper, exist_ok=True)

@@ -15,6 +15,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paperstyle as PS                                   # shared paper style: sub-figure captions go under each panel
 
 SURFACE, INK, INK2, GRID, MUTED = "#ffffff", "#0b0b0b", "#52514e", "#e6e5e1", "#a8a7a2"
 COL = dict(k16="#1f77b4", k64="#d66300", b128="#2ca02c", b256="#8c564b", b1024="#9467bd")
@@ -83,9 +85,9 @@ plt.rcParams.update({"font.size": 20})
 fig = plt.figure(figsize=(13.5, 8.6), facecolor=SURFACE, layout="constrained")
 gs = fig.add_gridspec(2, 2, width_ratios=[1.45, 1])
 axI = fig.add_subplot(gs[:, 0]); axII = fig.add_subplot(gs[0, 1]); axIII = fig.add_subplot(gs[1, 1])
-PANELS = [(axI, ["k64", "b1024"], "(i) prompts (K=64) vs rollouts (B=1024)"),
-          (axII, ["k16", "k64"], "(ii) prompts: K=16 vs K=64"),
-          (axIII, ["b128", "b1024"], "(iii) rollouts: B=128 vs B=1024")]
+PANELS = [(axI, ["k64", "b1024"], "(a) Prompts at $K=64$ vs. rollouts at $B=1024$."),
+          (axII, ["k16", "k64"], "(b) Prompts: $K=16$ vs. $K=64$."),
+          (axIII, ["b128", "b1024"], "(c) Rollouts: $B=128$ vs. $B=1024$.")]
 SHORT = dict(k16="K = 16", k64="K = 64", b128="B = 128", b256="B = 256", b1024="B = 1024")
 allN = np.concatenate([SER[k][0]["N"].to_numpy() for k in SER]); allS = np.concatenate([SER[k][0]["S"].to_numpy() for k in SER])
 YLIM = (allS.min() / 2.2, allS.max() * 1.8)
@@ -127,7 +129,7 @@ def draw(ax, keys, title, big):
     ax.tick_params(which="both", colors=INK, length=0)
     for sp in ax.spines.values():
         sp.set_visible(False)
-    ax.set_title(title, loc="left", fontsize=z["title"], color=INK)
+    PS.subcaption(ax, title, xlabel="sequences per step  $N = B \\times K$", fontsize=PS.FS["label"])
     ax.legend(handles=[Line2D([], [], marker=MARK[k], ls="-", lw=z["line"], ms=14 if big else 12, color=COL[k], mec=SURFACE,
                               label=LAB[k] if big else SHORT[k]) for k in keys],
               loc="upper right", frameon=False, fontsize=z["legend"], handlelength=1.8, borderaxespad=0.2)
@@ -136,8 +138,7 @@ def draw(ax, keys, title, big):
 for ax, keys, title in PANELS:
     draw(ax, keys, title, big=ax is axI)
 axI.set_ylabel("steps to target", fontsize=FS["big"]["label"])
-axI.set_xlabel("sequences per step  N = B × K", fontsize=FS["big"]["label"])
-axIII.set_xlabel("sequences per step  N = B × K", fontsize=FS["small"]["label"])
+
 refs = [Line2D([], [], ls=":", lw=FS["big"]["dot"], color=INK2, label="perfect scaling"),
         Line2D([], [], ls="-", lw=FS["big"]["line"], color=INK2, label="fit S = S_min(1 + N*/N)"),
         Line2D([], [], marker="o", ms=15, mfc=SURFACE, mec=INK2, mew=3, ls=":", lw=FS["big"]["crit"], color=INK2, label="critical batch (25% above perfect)")]
