@@ -75,64 +75,73 @@ def fmt_k(v):
     return f"{v / 1000:.2g}k" if v >= 1000 else f"{float(f'{v:.2g}'):.0f}"
 
 
-plt.rcParams.update({"font.size": 15, "axes.labelsize": 16})
-fig = plt.figure(figsize=(15.5, 8.2), facecolor=SURFACE, layout="constrained")
-gs = fig.add_gridspec(2, 2, width_ratios=[1.55, 1])
+# Sized for \includegraphics[width=\linewidth] (about 5.5 in): the canvas is 13.5 in wide, so everything shrinks by ~0.41
+# and these sizes land at roughly 8-10 pt in the paper; lines at ~1.5-2 pt.
+FS = dict(big=dict(title=25, label=24, tick=21, legend=21, annot=23, line=4.4, dot=2.8, crit=3.2, s=260, ring=17),
+          small=dict(title=22, label=21, tick=19, legend=19, annot=20, line=3.8, dot=2.6, crit=2.8, s=170, ring=14))
+plt.rcParams.update({"font.size": 20})
+fig = plt.figure(figsize=(13.5, 8.6), facecolor=SURFACE, layout="constrained")
+gs = fig.add_gridspec(2, 2, width_ratios=[1.45, 1])
 axI = fig.add_subplot(gs[:, 0]); axII = fig.add_subplot(gs[0, 1]); axIII = fig.add_subplot(gs[1, 1])
-PANELS = [(axI, ["k64", "b1024"], "(i)  prompts at K = 64  vs  rollouts at B = 1024"),
-          (axII, ["k16", "k64"], "(ii)  prompts: K = 16  vs  K = 64"),
-          (axIII, ["b128", "b1024"], "(iii)  rollouts: B = 128  vs  B = 1024")]
+PANELS = [(axI, ["k64", "b1024"], "(i) prompts (K=64) vs rollouts (B=1024)"),
+          (axII, ["k16", "k64"], "(ii) prompts: K=16 vs K=64"),
+          (axIII, ["b128", "b1024"], "(iii) rollouts: B=128 vs B=1024")]
+SHORT = dict(k16="K = 16", k64="K = 64", b128="B = 128", b256="B = 256", b1024="B = 1024")
 allN = np.concatenate([SER[k][0]["N"].to_numpy() for k in SER]); allS = np.concatenate([SER[k][0]["S"].to_numpy() for k in SER])
 YLIM = (allS.min() / 2.2, allS.max() * 1.8)
-
-
-OFFSET = {"k16": (-12, -26), "b1024_small": (12, -26)}         # in (ii) the K = 16 label goes below-left of its circle, clear of the K = 64 one
+OFFSET = {"k16": (-14, -30), "b1024_small": (-14, -30)}     # (ii): K = 16 label below-left of its circle; (iii): B = 1024 label below-right
 
 
 def draw(ax, keys, title, big):
-    ms = 1.0 if big else 0.75
+    z = FS["big" if big else "small"]
     xs_all = np.concatenate([SER[k][0]["N"].to_numpy() for k in keys])
     xlo, xhi = (allN.min(), allN.max()) if SHARE_X else (xs_all.min(), xs_all.max())
     for k in keys:
         d, per, unit = SER[k]; f = FITS[k]; c = COL[k]
         p0 = d.iloc[0]
         xs = np.array([xlo / 1.6, xhi * 1.6])
-        ax.plot(xs, p0["S"] * p0["N"] / xs, ls=":", lw=1.3, color=c, alpha=0.6, zorder=1)          # perfect scaling from the smallest point
+        ax.plot(xs, p0["S"] * p0["N"] / xs, ls=":", lw=z["dot"], color=c, alpha=0.6, zorder=1)          # perfect scaling from the smallest point
         fx = np.geomspace(d["N"].min() / 1.4, d["N"].max() * 1.4, 200)
-        ax.plot(fx, f["smin"] * (1 + f["ns"] / fx), "-", lw=2.2 if big else 1.8, color=c, alpha=0.9, zorder=3)
-        ax.scatter(d["N"], d["S"], s=(130 if big else 75), marker=MARK[k], color=c, edgecolors=SURFACE, linewidths=1.2, zorder=5)
+        ax.plot(fx, f["smin"] * (1 + f["ns"] / fx), "-", lw=z["line"], color=c, alpha=0.9, zorder=3)
+        ax.scatter(d["N"], d["S"], s=z["s"], marker=MARK[k], color=c, edgecolors=SURFACE, linewidths=1.5, zorder=5)
         nc = f["nc"]; sc = f["smin"] * (1 + f["ns"] / nc)
-        if not (d["N"].min() <= nc <= d["N"].max()):     # knee outside the measured range (B = 256: three points from K = 16): not marked
+        if not (d["N"].min() <= nc <= d["N"].max()):     # knee outside the measured range: not marked
             print(f"{k}: N_crit {nc:.0f} outside its data {d['N'].min()}..{d['N'].max()}, not marked")
             continue
-        ax.axvline(nc, ls=":", lw=2.4 if big else 1.8, color=c, zorder=2)
-        ax.plot([nc], [sc], marker="o", ms=13 * ms, mfc=SURFACE, mec=c, mew=2.2, ls="", zorder=9)
-        ax.annotate(f"${unit}_\\mathrm{{crit}} \\approx {fmt_k(nc / per)}$", xy=(nc, sc), xytext=OFFSET.get(k + ("" if big else "_small"), OFFSET.get(k, (10, 10))), textcoords="offset points",
-                    ha="right" if OFFSET.get(k + ("" if big else "_small"), OFFSET.get(k, (10, 10)))[0] < 0 else "left", fontsize=16 if big else 13, color=c, zorder=10, bbox=dict(boxstyle="round,pad=0.15", fc=SURFACE, ec="none", alpha=0.85))
+        ax.axvline(nc, ls=":", lw=z["crit"], color=c, zorder=2)
+        ax.plot([nc], [sc], marker="o", ms=z["ring"], mfc=SURFACE, mec=c, mew=3.0, ls="", zorder=9)
+        off = OFFSET.get(k + ("" if big else "_small"), OFFSET.get(k, (12, 12)))
+        ax.annotate(f"${unit}_\\mathrm{{crit}} \\approx {fmt_k(nc / per)}$", xy=(nc, sc), xytext=off, textcoords="offset points",
+                    ha="right" if off[0] < 0 else "left", fontsize=z["annot"], color=c, zorder=10,
+                    bbox=dict(boxstyle="round,pad=0.12", fc=SURFACE, ec="none", alpha=0.85))
     ax.set_xscale("log", base=2); ax.set_yscale("log")
-    ax.set_xlim(xlo / 1.6, xhi * 1.6); ax.set_ylim(*YLIM)
+    ys_all = np.concatenate([SER[k][0]["S"].to_numpy() for k in keys])
+    ax.set_xlim(xlo / 1.6, xhi * 1.6); ax.set_ylim(ys_all.min() / 2.0, ys_all.max() * (3.0 if big else 4.0))   # each panel its own y-range (headroom for the legend)
     ticks = [2 ** i for i in range(4, 20) if xlo / 1.6 <= 2 ** i <= xhi * 1.6]
-    step = 1 if (big or len(ticks) <= 7) else 2
-    ax.set_xticks(ticks[::step]); ax.set_xticklabels([f"{t:,}" if t < 1024 else f"{t // 1024}k" for t in ticks[::step]], fontsize=13 if big else 11.5)
-    ax.tick_params(axis="y", labelsize=13 if big else 11.5)
-    ax.grid(True, which="major", color=GRID, lw=0.6, zorder=0); ax.set_axisbelow(True)
+    step = 1 if len(ticks) <= 6 else 2
+    ticks = [t for t in ticks if int(np.log2(t)) % step == int(np.log2(ticks[-1])) % step]   # keep the largest batch labelled
+    ax.set_xticks(ticks); ax.set_xticklabels([f"{t:,}" if t < 1024 else f"{t // 1024}k" for t in ticks])
+    ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+    ax.tick_params(axis="both", labelsize=z["tick"])
+    ax.grid(True, which="major", color=GRID, lw=0.8, zorder=0); ax.set_axisbelow(True)
     ax.tick_params(which="both", colors=INK, length=0)
     for sp in ax.spines.values():
         sp.set_visible(False)
-    ax.set_title(title, loc="left", fontsize=17 if big else 14, color=INK)
-    ax.legend(handles=[Line2D([], [], marker=MARK[k], ls="-", lw=2, ms=9 if big else 7, color=COL[k], mec=SURFACE,
-                              label=LAB[k] + (f"  ({FITS[k]['n']} points, K = 16–64)" if k == "b256" else "")) for k in keys],
-              loc="lower left" if big else "upper right", frameon=False, fontsize=14 if big else 11.5)
+    ax.set_title(title, loc="left", fontsize=z["title"], color=INK)
+    ax.legend(handles=[Line2D([], [], marker=MARK[k], ls="-", lw=z["line"], ms=14 if big else 12, color=COL[k], mec=SURFACE,
+                              label=LAB[k] if big else SHORT[k]) for k in keys],
+              loc="upper right", frameon=False, fontsize=z["legend"], handlelength=1.8, borderaxespad=0.2)
 
 
 for ax, keys, title in PANELS:
     draw(ax, keys, title, big=ax is axI)
-axI.set_ylabel("steps to target AIME 1983–2024"); axI.set_xlabel("sequences per optimizer step  N = B × K")
-axIII.set_xlabel("sequences per optimizer step  N = B × K", fontsize=13)
-refs = [Line2D([], [], ls=":", lw=1.3, color=INK2, label="perfect scaling from the smallest batch"),
-        Line2D([], [], ls="-", lw=2, color=INK2, label="fit  S = S_min (1 + N*/N)"),
-        Line2D([], [], marker="o", ms=10, mfc=SURFACE, mec=INK2, mew=2, ls=":", lw=1.6, color=INK2, label="critical batch, 25% above perfect scaling")]
-fig.legend(handles=refs, loc="outside lower center", ncol=3, frameon=False, fontsize=13)
+axI.set_ylabel("steps to target", fontsize=FS["big"]["label"])
+axI.set_xlabel("sequences per step  N = B × K", fontsize=FS["big"]["label"])
+axIII.set_xlabel("sequences per step  N = B × K", fontsize=FS["small"]["label"])
+refs = [Line2D([], [], ls=":", lw=FS["big"]["dot"], color=INK2, label="perfect scaling"),
+        Line2D([], [], ls="-", lw=FS["big"]["line"], color=INK2, label="fit S = S_min(1 + N*/N)"),
+        Line2D([], [], marker="o", ms=15, mfc=SURFACE, mec=INK2, mew=3, ls=":", lw=FS["big"]["crit"], color=INK2, label="critical batch (25% above perfect)")]
+fig.legend(handles=refs, loc="outside lower center", ncol=3, frameon=False, fontsize=FS["big"]["legend"] - 1, columnspacing=1.0, handlelength=1.8, handletextpad=0.4)
 fig.savefig(png_out, dpi=170, facecolor=SURFACE)
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper"); os.makedirs(pdf_dir, exist_ok=True)
 fig.savefig(os.path.join(pdf_dir, os.path.basename(png_out).replace(".png", ".pdf")), facecolor=SURFACE)
