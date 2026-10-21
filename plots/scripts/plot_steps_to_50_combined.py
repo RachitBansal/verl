@@ -19,6 +19,7 @@ Usage: python plot_steps_to_50_combined.py csv/steps_to_50_kl.csv png/steps_to_5
   the shared colour bar becomes a neutral grey lightness scale.
   --no-nstar-n2 leaves the critical-batch line off the --n2 panel.
   --no-fit-n2 leaves the power-law fit and its exponent off the --n2 panel (its LRs were set by the K = 16 rule, so the fit is circular).
+  --share-b gives the prompt-sweep panels one common batch-size axis (and equal widths).
   --no-early does not draw the "too early to tell" runs (nor their legend entry).
   --lr-max / --lr-min drop runs outside that learning-rate range (the paper figure uses 5e-7 to 1e-4: nothing outside it ever
   crossed, those runs only add headroom).
@@ -72,7 +73,18 @@ N2 = opt("--n2", None, int)                # third panel: a second batch sweep a
 FIG1 = "--fig1-colors" in sys.argv          # per-panel Figure 1 hues instead of one blue scale
 NO_NSTAR_N2 = "--no-nstar-n2" in sys.argv      # no critical-batch line on the second batch sweep
 NO_FIT_N2 = "--no-fit-n2" in sys.argv          # no power-law fit on the second batch sweep
-NO_EARLY = "--no-early" in sys.argv            # do not draw the "too early to tell" runs
+NO_EARLY = "--no-early" in sys.argv
+SHARE_B = "--share-b" in sys.argv              # the prompt-sweep panels use one common batch-size axis            # do not draw the "too early to tell" runs
+# --split is the paper layout: canvas and sizes from paperstyle.py (the shared figure style; Figure 1 is the reference)
+if SPLIT:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import paperstyle as PS
+    TICK, LABEL, TITLE, NOTE, LEGEND, CBAR = PS.FS["tick"], PS.FS["label"], PS.FS["title"], PS.FS["annot"], PS.FS["legend"], PS.FS["label"]
+    SZ = dict(hit=170, miss=125, short=110, ring=430, ring_lw=2.6, edge_lw=2.2, fit_lw=PS.LW["line"], plateau_lw=3.2, star_lw=PS.LW["crit"],
+              leg_ms=12, leg_ring=16, strip_h=1.2, W=PS.TEXTWIDTH_IN * PS.K_CANVAS, H=4.9)
+else:
+    SZ = dict(hit=260, miss=190, short=170, ring=720, ring_lw=3.4, edge_lw=2.6, fit_lw=4.6, plateau_lw=3.6, star_lw=3.6,
+              leg_ms=16, leg_ring=22, strip_h=2.3, W=26.0, H=7.4)
 FIXED_ONLY = "--fixed-only" in sys.argv    # drop pre-fix runs (before 2026-09-11 they stepped at a fraction of the nominal LR; see the loss-scaling note)
 
 df = pd.read_csv(csv_in)
@@ -117,7 +129,7 @@ def style(ax):
     for s in ("top", "right"):
         ax.spines[s].set_visible(False)
     for s in ("left", "bottom"):
-        ax.spines[s].set_color(GRID)
+        ax.spines[s].set_visible(not SPLIT); ax.spines[s].set_color(GRID)      # paper layout: no frame, as in Figure 1
     ax.tick_params(colors=INK, labelsize=TICK, length=0)
     ax.grid(True, which="major", color=GRID, lw=0.6)
     ax.set_axisbelow(True)
@@ -145,14 +157,14 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, fitc=FITC, starc=STA
         if definite(i - 1) and definite(i + 1):
             settled.add(x)
     short = short[~short[xcol].isin(settled)]
-    ax.scatter(miss[xcol], miss["lr"], s=190, facecolors="none", edgecolors=MISSING, linewidths=2.6, zorder=2)
+    ax.scatter(miss[xcol], miss["lr"], s=SZ["miss"], facecolors="none", edgecolors=MISSING, linewidths=SZ["edge_lw"], zorder=2)
     if NO_EARLY:
         short = short.iloc[0:0]
-    ax.scatter(short[xcol], short["lr"], s=170, marker="x", c=MISSING, linewidths=2.6, zorder=2)
-    ax.scatter(ok[xcol], ok["lr"], s=260, c=ok["steps"], cmap=cmap, norm=norm, edgecolors=SURFACE, linewidths=1.5, zorder=3)
+    ax.scatter(short[xcol], short["lr"], s=SZ["short"], marker="x", c=MISSING, linewidths=SZ["edge_lw"], zorder=2)
+    ax.scatter(ok[xcol], ok["lr"], s=SZ["hit"], c=ok["steps"], cmap=cmap, norm=norm, edgecolors=SURFACE, linewidths=1.5, zorder=3)
 
     best = ok.loc[ok.groupby(xcol)["steps"].idxmin()].sort_values(xcol)
-    ax.scatter(best[xcol], best["lr"], s=720, facecolors="none", edgecolors=INK, linewidths=3.4, zorder=4)
+    ax.scatter(best[xcol], best["lr"], s=SZ["ring"], facecolors="none", edgecolors=INK, linewidths=SZ["ring_lw"], zorder=4)
 
     note = None; plateau = False
     if fit and len(best) >= 3:
@@ -165,23 +177,23 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, fitc=FITC, starc=STA
         slope, icpt = np.polyfit(lx, ly, 1)
         resid = ly - (slope * lx + icpt); se = np.sqrt(resid.var(ddof=2) / ((lx - lx.mean()) ** 2).sum()) if len(fitpts) > 2 else float("nan")
         xs_fit = np.geomspace(fitpts[xcol].min(), fitpts[xcol].max(), 50)
-        ax.plot(xs_fit, np.exp(icpt) * xs_fit ** slope, ls="-", lw=4.6, color=fitc, alpha=0.95, zorder=2.6)
+        ax.plot(xs_fit, np.exp(icpt) * xs_fit ** slope, ls="-", lw=SZ["fit_lw"], color=fitc, alpha=0.95, zorder=2.6)
         if plateau:
-            ax.plot([fitpts[xcol].max(), best[xcol].max()], [lrs[-1]] * 2, ls=":", lw=3.6, color=fitc, alpha=0.95, zorder=2.6)
+            ax.plot([fitpts[xcol].max(), best[xcol].max()], [lrs[-1]] * 2, ls=":", lw=SZ["plateau_lw"], color=fitc, alpha=0.95, zorder=2.6)
             note = f"$\\eta^* \\propto B^{{{slope:.2f}}}$ (±{se:.2f})"
         else:
             note = f"$\\eta^* \\propto B^{{{slope:.2f}}}$ (±{se:.2f})"
-        ax.text(0.03, 0.93, note, transform=ax.transAxes, ha="left", va="top", fontsize=NOTE, color=fitc, zorder=10,
+        ax.text(*((0.97, 0.05) if SPLIT else (0.03, 0.93)), note, transform=ax.transAxes, ha="right" if SPLIT else "left", va="bottom" if SPLIT else "top", fontsize=NOTE, color=fitc, zorder=10,
                 bbox=dict(boxstyle="round,pad=0.15", fc=SURFACE, ec="none", alpha=0.85))   # top-left corner
     gb = ok[ok["steps"] == ok["steps"].min()]
 
     if star is not None:          # the sweep's fitted critical batch from the steps-vs-sequences fit, in this panel's x units (legend names it)
-        ax.axvline(star, ls=(0, (5, 2.5)), lw=3.6, color=starc, alpha=0.9, zorder=2.3)
+        ax.axvline(star, ls=(0, (5, 2.5)), lw=SZ["star_lw"], color=starc, alpha=0.9, zorder=2.3)
     ax.set_xscale("log", base=2); ax.set_yscale("log")
     drawn = pd.concat([ok, miss, short])
     xs = sorted(sub[xcol].unique())
     fmt = lambda x: f"{int(x) // 1024}k" if x >= 1024 else str(int(x))         # 1k, 2k, ...
-    if len(xs) > 8:        # a long batch-size axis: label every other doubling (even powers of two: 4, 16, 64, 256, 1k, 4k, 16k), tick the rest
+    if len(xs) > (6 if SPLIT else 8):        # a long batch-size axis: label every other doubling (even powers of two: 4, 16, 64, 256, 1k, 4k, 16k), tick the rest
         major = [x for x in xs if int(round(np.log2(x))) % 2 == 0]; minor = [x for x in xs if x not in major]
         ax.set_xticks(major); ax.set_xticklabels([fmt(x) for x in major])
         ax.set_xticks(minor, minor=True); ax.set_xticklabels([""] * len(minor), minor=True); ax.tick_params(axis="x", which="minor", length=0)
@@ -193,11 +205,11 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, fitc=FITC, starc=STA
 
 
 # panels in order: the batch sweeps (K = N_ROLL, then K = N2 if given), then the rollout sweep at B = BSZ (unless --batch-only)
-specs = [dict(data=batch, xcol="bsz", xlabel="batch size B", title=f"scaling prompts, fixed K = {N_ROLL}", fit=True)]
+specs = [dict(data=batch, xcol="bsz", xlabel="batch size B", title=(f"prompts, K = {N_ROLL}" if SPLIT else f"scaling prompts, fixed K = {N_ROLL}"), fit=True)]
 if N2:
-    specs.append(dict(data=batch2, xcol="bsz", xlabel="batch size B", title=f"scaling prompts, fixed K = {N2}", fit=not NO_FIT_N2))
+    specs.append(dict(data=batch2, xcol="bsz", xlabel="batch size B", title=(f"prompts, K = {N2}" if SPLIT else f"scaling prompts, fixed K = {N2}"), fit=not NO_FIT_N2))
 if not BATCH_ONLY:
-    specs.append(dict(data=roll, xcol="n", xlabel="rollouts per prompt K", title=f"scaling rollouts, fixed B = {BSZ}", fit=False))
+    specs.append(dict(data=roll, xcol="n", xlabel="rollouts per prompt K", title=(f"rollouts, B = {BSZ}" if SPLIT else f"scaling rollouts, fixed B = {BSZ}"), fit=False))
 if NSTAR:
     ft = pd.read_csv(NSTAR).set_index("series")["star"]
     for sp in specs:
@@ -208,13 +220,13 @@ if NSTAR:
         if sp["star"] is None:
             print(f"note: no N* for '{key}' in {NSTAR}")
 widths = [max(sp["data"][sp["xcol"]].nunique(), 1) for sp in specs]
-H = 7.4
+H = SZ["H"]
 if SPLIT:
     # (a) the batch sweeps side by side, (b) the rollout sweep; widths 0.655 : 0.33 of the same line, so the type matches in the paper
-    W = 26.0
+    W = SZ["W"]
     bspecs, rspecs = [sp for sp in specs if sp["xcol"] == "bsz"], [sp for sp in specs if sp["xcol"] == "n"]
     figA, gA = plt.subplots(1, len(bspecs), figsize=(0.655 * W, H), facecolor=SURFACE, sharey=True, layout="constrained",
-                            gridspec_kw=dict(width_ratios=[max(sp["data"]["bsz"].nunique(), 1) for sp in bspecs]), squeeze=False)
+                            gridspec_kw=dict(width_ratios=[1] * len(bspecs) if SHARE_B else [max(sp["data"]["bsz"].nunique(), 1) for sp in bspecs]), squeeze=False)
     figA.get_layout_engine().set(wspace=0.04)
     figB, gB = plt.subplots(1, 1, figsize=(0.33 * W, H), facecolor=SURFACE, layout="constrained", squeeze=False)
     axes = list(gA[0]) + list(gB[0]); specs = bspecs + rspecs; fig = figA
@@ -244,6 +256,15 @@ for ax, sp in zip(axes, specs):
 lr_all = pd.concat([r["drawn"] for r in results])["lr"]          # shared y-limits from what the panels actually draw
 for ax in axes:
     ax.set_ylim(lr_all.min() / 1.7, lr_all.max() * 1.7)
+if SHARE_B:     # the prompt-sweep panels share one batch-size axis (the K = 16 range, 4 ... 16k), so they line up
+    bax = [ax for ax, sp in zip(axes, specs) if sp["xcol"] == "bsz"]
+    lo = min(sp["data"]["bsz"].min() for sp in specs if sp["xcol"] == "bsz"); hi = max(sp["data"]["bsz"].max() for sp in specs if sp["xcol"] == "bsz")
+    allb = [2 ** i for i in range(int(np.log2(lo)), int(np.log2(hi)) + 1)]
+    major = [b for b in allb if int(round(np.log2(b))) % 4 == 2]      # 4, 64, 1k, 16k: room for the larger type
+    for ax in bax:
+        ax.set_xlim(lo / 1.6, hi * 1.6)
+        ax.set_xticks(major); ax.set_xticklabels([f"{b // 1024}k" if b >= 1024 else str(b) for b in major])
+        ax.set_xticks([b for b in allb if b not in major], minor=True); ax.set_xticklabels([], minor=True)
 axes[0].set_ylabel("learning rate", color=INK, fontsize=LABEL)
 plateau_b = any(r["plateau"] for r in results)
 
@@ -256,14 +277,14 @@ cb.set_label("steps to target", color=INK, fontsize=CBAR)
 cb.ax.tick_params(colors=INK, labelsize=TICK - 1, length=0); cb.outline.set_visible(False); cb.ax.invert_yaxis()
 
 legend = [
-    Line2D([], [], marker="o", ls="", ms=16, mfc="#5b5b5b" if FIG1 else RAMP[4], mec=SURFACE, label=f"reached {PCT}%"),
-    Line2D([], [], marker="o", ls="", ms=16, mfc="none", mec=MISSING, mew=2.6, label=f"never reached {PCT}%"),
-] + ([] if NO_EARLY else [Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6, label="too early to tell")]) + [
-    Line2D([], [], marker="o", ls="", ms=22, mfc="none", mec=INK, mew=3.4, label="fastest LR at each x"),
-    Line2D([], [], ls="-", lw=4.6, color=INK2 if FIG1 else FITC, label="power-law fit (dotted: plateau)" if plateau_b else "power-law fit"),
+    Line2D([], [], marker="o", ls="", ms=SZ["leg_ms"], mfc="#5b5b5b" if FIG1 else RAMP[4], mec=SURFACE, label=f"reached {PCT}%"),
+    Line2D([], [], marker="o", ls="", ms=SZ["leg_ms"], mfc="none", mec=MISSING, mew=SZ["edge_lw"], label=f"never reached {PCT}%"),
+] + ([] if NO_EARLY else [Line2D([], [], marker="x", ls="", ms=SZ["leg_ms"], color=MISSING, mew=SZ["edge_lw"], label="too early to tell")]) + [
+    Line2D([], [], marker="o", ls="", ms=SZ["leg_ring"], mfc="none", mec=INK, mew=SZ["ring_lw"], label="fastest LR at each x"),
+    Line2D([], [], ls="-", lw=SZ["fit_lw"], color=INK2 if FIG1 else FITC, label="power-law fit (dotted: plateau)" if plateau_b else "power-law fit"),
 ]
 if NSTAR and any(sp.get("star") is not None for sp in specs):
-    legend.append(Line2D([], [], ls=(0, (5, 2.5)), lw=3.6, color=INK2 if FIG1 else STARC,
+    legend.append(Line2D([], [], ls=(0, (5, 2.5)), lw=SZ["star_lw"], color=INK2 if FIG1 else STARC,
                          label="fitted critical batch (B* or K*)" if FIG1 else "critical batch (B* or K*)"))
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper"); os.makedirs(pdf_dir, exist_ok=True)
 if SPLIT:
@@ -275,7 +296,7 @@ if SPLIT:
         f.savefig(os.path.join(pdf_dir, os.path.basename(stem) + f"_{tag}.pdf"), facecolor=SURFACE)
         print("wrote", f"{stem}_{tag}.png")
     # legend strip at the full line width (W), so its type comes out at the same size as the panels; not cropped, to keep that scale
-    figL = plt.figure(figsize=(W, 2.3), facecolor=SURFACE)
+    figL = plt.figure(figsize=(W, SZ["strip_h"]), facecolor=SURFACE)
     figL.legend(handles=legend, loc="center", ncol=3, frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, columnspacing=1.5, borderaxespad=0.0)
     figL.savefig(f"{stem}_legend.png", dpi=170, facecolor=SURFACE)
     figL.savefig(os.path.join(pdf_dir, os.path.basename(stem) + "_legend.pdf"), facecolor=SURFACE)

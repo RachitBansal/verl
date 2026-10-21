@@ -135,15 +135,19 @@ for series, hits, never in [("more_rollouts", roll, roll_never), ("downsample", 
 pd.DataFrame(rows).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_table.csv")), index=False)
 
 # ------------------------------------------------------------------ figure (styled like plot_steps_to_50_combined.py)
-TICK, LABEL, TITLE, NOTE, LEGEND = 28, 31, 32, 29, 34       # type sizes, as in the steps_to_50 figures
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paperstyle as PS                                   # shared paper figure style (Figure 1 is the reference)
+PS.apply()
+TICK, LABEL, TITLE, NOTE, LEGEND = PS.FS["tick"], PS.FS["label"], PS.FS["title"], PS.FS["annot"], PS.FS["legend"]
+GREEN, PURPLE = PS.C["b128"], PS.C["upsample"]
 # two panels side by side: steps to target on the left, every LR tried at each K on the right (ring = fastest), to show the
 # LR choice barely moves between the two series
-fig, (ax, axr) = plt.subplots(1, 2, figsize=(26.0, 8.6), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1]))   # ~3:1, a full line width
-fig.subplots_adjust(left=0.06, right=0.99, top=0.84, bottom=0.22, wspace=0.22)
+fig, (ax, axr) = plt.subplots(1, 2, figsize=PS.canvas(1.0, 0.40), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1]))   # a full line width
+fig.subplots_adjust(left=0.08, right=0.99, top=0.82, bottom=0.2, wspace=0.3)
 ax.set_facecolor(SURFACE); axr.set_facecolor(SURFACE)
 
-series = [("more rollouts: generate K, train K", roll, GREEN, "p", 17),
-          ("upsampling: generate 64, train the K largest-|advantage|", ds, PURPLE, "D", 14)]
+series = [("more rollouts: generate K, train K", roll, GREEN, "p", 12.5),
+          ("upsampling: generate 64, train K", ds, PURPLE, "D", 10.5)]
 fits = []
 for label, pts, color, marker, ms in series:
     if FIT and pts is roll:
@@ -151,10 +155,10 @@ for label, pts, color, marker, ms in series:
         f1 = ft[ft["series"] == f"more rollouts, B = {B}"].iloc[0]
         smin, nstar = float(f1["s_min"]), float(f1["n_star_seqs"])
         xs = np.geomspace(pts["seqs"].min() / 1.4, pts["seqs"].max() * 1.4, 200)
-        ax.plot(xs, smin * (1 + nstar / xs), ls="-", lw=3.2, color=color, zorder=3)
+        ax.plot(xs, smin * (1 + nstar / xs), ls="-", lw=PS.LW["line"], color=color, zorder=3)
         fits.append(dict(series=label, S_min=smin, N_crit=nstar, K_crit=nstar / B, rms_log=float(f1["rms_log"]), points=int(f1["n_points"]), source=FIT_TABLE))
     else:                                   # no fit for this series: join its points
-        ax.plot(pts["seqs"], pts["steps"], lw=3.2, color=color, zorder=3)
+        ax.plot(pts["seqs"], pts["steps"], lw=PS.LW["line"], color=color, zorder=3)
     ax.scatter(pts["seqs"], pts["steps"], s=ms ** 2 * 1.5, marker=marker, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=6)
 if FIT:
     pd.DataFrame(fits).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_fit_table.csv")), index=False)
@@ -168,21 +172,18 @@ ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
 ax.grid(True, which="major", color=GRID, lw=0.6)
 ax.set_axisbelow(True)
 ax.tick_params(which="both", colors=INK, labelsize=TICK, length=0)
-for sp in ("top", "right"):
-    ax.spines[sp].set_visible(False)
-for sp in ("left", "bottom"):
-    ax.spines[sp].set_color(GRID)
+PS.finish(ax)
 
 # ---- right panel: every LR tried at each K; filled = reached the target, hollow = never, x = too early to tell; ring = fastest
 MISSING = "#8f8e8a"
-for lad, color, marker, ms, nudge in [(roll_lad, GREEN, "p", 17, -0.09), (ds_lad, PURPLE, "D", 14, +0.09)]:
+for lad, color, marker, ms, nudge in [(roll_lad, GREEN, "p", 12.5, -0.12), (ds_lad, PURPLE, "D", 10.5, +0.12)]:
     x = lad["k"] * 2.0 ** nudge                       # the two series side by side within each K column
     hit = lad[lad["verdict"].isin(["hit", "best"])]; nev = lad[lad["verdict"] == "never"]; inc = lad[lad["verdict"] == "inconclusive"]
     axr.scatter(x[hit.index], hit["lr"], s=ms ** 2 * 1.5, marker=marker, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=5)
-    axr.scatter(x[nev.index], nev["lr"], s=ms ** 2 * 1.5, marker=marker, facecolors="none", edgecolors=color, linewidths=2.6, zorder=5)
-    axr.scatter(x[inc.index], inc["lr"], s=170, marker="x", c=MISSING, linewidths=2.6, zorder=5)
+    axr.scatter(x[nev.index], nev["lr"], s=ms ** 2 * 1.5, marker=marker, facecolors="none", edgecolors=color, linewidths=2.2, zorder=5)
+    axr.scatter(x[inc.index], inc["lr"], s=110, marker="x", c=MISSING, linewidths=2.2, zorder=5)
     best = lad[lad["verdict"] == "best"]
-    axr.scatter(x[best.index], best["lr"], s=720, marker="o", facecolors="none", edgecolors=INK, linewidths=3.4, zorder=6)
+    axr.scatter(x[best.index], best["lr"], s=400, marker="o", facecolors="none", edgecolors=INK, linewidths=2.6, zorder=6)
 axr.set_xscale("log", base=2); axr.set_yscale("log")
 ks = sorted(set(roll_lad["k"]) | set(ds_lad["k"]))
 axr.set_xticks(ks); axr.set_xticklabels([str(k) for k in ks])
@@ -192,10 +193,7 @@ axr.set_xlabel("rollouts trained per prompt K", color=INK, fontsize=LABEL)
 axr.set_ylabel("learning rate", color=INK, fontsize=LABEL)
 axr.grid(True, which="major", color=GRID, lw=0.6); axr.set_axisbelow(True)
 axr.tick_params(which="both", colors=INK, labelsize=TICK, length=0)
-for sp in ("top", "right"):
-    axr.spines[sp].set_visible(False)
-for sp in ("left", "bottom"):
-    axr.spines[sp].set_color(GRID)
+PS.finish(axr)
 
 top = ax.secondary_xaxis("top", functions=(lambda n: n / B, lambda k: k * B))
 top.set_xticks([t // B for t in ticks]); top.set_xticklabels([str(t // B) for t in ticks])
@@ -205,16 +203,16 @@ top.tick_params(which="both", colors=INK, labelsize=TICK, length=0)
 for sp in top.spines.values():
     sp.set_visible(False)
 
-legend = [Line2D([], [], marker="p", ls="", ms=17, color=GREEN, mec=SURFACE, label="generate K, train K"),
-          Line2D([], [], marker="D", ls="", ms=14, color=PURPLE, mec=SURFACE, label="generate 64, train K\n(upsampling)")]
+legend = [Line2D([], [], marker="p", ls="", ms=12.5, color=GREEN, mec=SURFACE, label="generate K, train K"),
+          Line2D([], [], marker="D", ls="", ms=10.5, color=PURPLE, mec=SURFACE, label="generate 64, train K\n(upsampling)")]
 if FIT:
-    legend += [Line2D([], [], ls="-", lw=3.2, color=GREEN, label="fit  $S = S_\\min\\,(1 + N^*/N)$\n(as in Fig. 1)")]
-ax.legend(handles=legend, loc="upper right", frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)   # the upper right is empty: steps fall with N
-legend_r = [Line2D([], [], marker="o", ls="", ms=22, mfc="none", mec=INK, mew=3.4, label="fastest LR at each K"),
-            Line2D([], [], marker="o", ls="", ms=16, mfc="none", mec=MISSING, mew=2.6, label="never reached the target")]
+    legend += [Line2D([], [], ls="-", lw=PS.LW["line"], color=GREEN, label="fit (Figure 1)")]
+ax.legend(handles=legend, loc="upper right", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.5, borderaxespad=0.2, labelspacing=0.3)   # the upper right is empty: steps fall with N
+legend_r = [Line2D([], [], marker="o", ls="", ms=16, mfc="none", mec=INK, mew=2.6, label="fastest LR at each K"),
+            Line2D([], [], marker="o", ls="", ms=12, mfc="none", mec=MISSING, mew=2.2, label="never reached the target")]
 if (roll_lad["verdict"] == "inconclusive").any() or (ds_lad["verdict"] == "inconclusive").any():
-    legend_r.append(Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6, label="too early to tell"))
-axr.legend(handles=legend_r, loc="upper center", bbox_to_anchor=(0.5, -0.17), ncol=len(legend_r), frameon=False, fontsize=LEGEND - 4, labelcolor=INK,
+    legend_r.append(Line2D([], [], marker="x", ls="", ms=11, color=MISSING, mew=2.2, label="too early to tell"))
+axr.legend(handles=legend_r, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=len(legend_r), frameon=False, fontsize=LEGEND, labelcolor=INK,
            handletextpad=0.5, columnspacing=1.6)   # directly under the right panel
 fig.savefig(png_out, dpi=170, facecolor=SURFACE, bbox_inches="tight")
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper")   # plots/paper/
