@@ -28,7 +28,7 @@ a = ap.parse_args()
 # ---- style, as in plot_kl_compare_clean.py
 SURFACE, INK, INK2, GRID = "#ffffff", "#0b0b0b", "#52514e", "#e6e5e1"
 KLC = {0.001: "#1f77b4", 0.01: "#c2185b"}   # KL 1e-3 blue (Figure 1 K = 16 blue), KL 1e-2 pink
-KLN = {0.001: "KL 1e-3", 0.01: "KL 1e-2"}; MK = {0.001: "o", 0.01: "s"}; MS = {0.001: 17, 0.01: 15}
+KLN = {0.001: "KL 1e-3", 0.01: "KL 1e-2"}; MK = {0.001: "o", 0.01: "s"}; MS = {0.001: 14.1, 0.01: 12.6}   # markers at the steps_to_50 split figure size (s = 300 for circles)
 TICK, LABEL, TITLE, LEGEND = 28, 31, 32, 34
 K0 = 16; KLS = (0.001, 0.01)
 runs = load_runs(a.traj, a.meta)
