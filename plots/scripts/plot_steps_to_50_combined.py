@@ -129,12 +129,12 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, hue=None):
         if definite(i - 1) and definite(i + 1):
             settled.add(x)
     short = short[~short[xcol].isin(settled)]
-    ax.scatter(miss[xcol], miss["lr"], s=190, facecolors="none", edgecolors=MISSING, linewidths=2.6, zorder=2)
-    ax.scatter(short[xcol], short["lr"], s=170, marker="x", c=MISSING, linewidths=2.6, zorder=2)
-    ax.scatter(ok[xcol], ok["lr"], s=260, c=ok["steps"], cmap=cmap, norm=norm, edgecolors=SURFACE, linewidths=1.5, zorder=3)
+    ax.scatter(miss[xcol], miss["lr"], s=215, facecolors="none", edgecolors=MISSING, linewidths=2.7, zorder=2)
+    ax.scatter(short[xcol], short["lr"], s=190, marker="x", c=MISSING, linewidths=2.7, zorder=2)
+    ax.scatter(ok[xcol], ok["lr"], s=300, c=ok["steps"], cmap=cmap, norm=norm, edgecolors=SURFACE, linewidths=1.5, zorder=3)
 
     best = ok.loc[ok.groupby(xcol)["steps"].idxmin()].sort_values(xcol)
-    ax.scatter(best[xcol], best["lr"], s=720, facecolors="none", edgecolors=INK, linewidths=3.4, zorder=4)
+    ax.scatter(best[xcol], best["lr"], s=800, facecolors="none", edgecolors=INK, linewidths=3.6, zorder=4)
 
     note = None; plateau = False
     if fit and len(best) >= 3:
@@ -163,7 +163,7 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, hue=None):
     drawn = pd.concat([ok, miss, short])
     xs = sorted(sub[xcol].unique())
     fmt = lambda x: f"{int(x) // 1024}k" if x >= 1024 else str(int(x))         # 1k, 2k, ...
-    if len(xs) > 8:        # a long batch-size axis: label every other doubling (even powers of two: 4, 16, 64, 256, 1k, 4k, 16k), tick the rest
+    if len(xs) > 4:        # label every other doubling (even powers of two: 4, 16, 64, 256, 1k, 4k, 16k), tick the rest; same rule on every panel
         major = [x for x in xs if int(round(np.log2(x))) % 2 == 0]; minor = [x for x in xs if x not in major]
         ax.set_xticks(major); ax.set_xticklabels([fmt(x) for x in major])
         ax.set_xticks(minor, minor=True); ax.set_xticklabels([""] * len(minor), minor=True); ax.tick_params(axis="x", which="minor", length=0)
@@ -236,10 +236,10 @@ cb.set_label("steps to target", color=INK, fontsize=CBAR)
 cb.ax.tick_params(colors=INK, labelsize=TICK - 1, length=0); cb.outline.set_visible(False); cb.ax.invert_yaxis()
 
 legend = [
-    Line2D([], [], marker="o", ls="", ms=16, mfc=RAMP[4] if MONO else "#6e6e6e", mec=SURFACE, label=f"reached {PCT}%"),
-    Line2D([], [], marker="o", ls="", ms=16, mfc="none", mec=MISSING, mew=2.6, label=f"did not reach {PCT}%"),   # the condition (trained at least as long as the fastest LR) goes in the caption
+    Line2D([], [], marker="o", ls="", ms=17, mfc=RAMP[4] if MONO else "#6e6e6e", mec=SURFACE, label=f"reached {PCT}%"),
+    Line2D([], [], marker="o", ls="", ms=17, mfc="none", mec=MISSING, mew=2.7, label=f"did not reach {PCT}%"),   # the condition (trained at least as long as the fastest LR) goes in the caption
     Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6, label="too early to tell"),
-    Line2D([], [], marker="o", ls="", ms=22, mfc="none", mec=INK, mew=3.4, label="fastest LR at each x"),
+    Line2D([], [], marker="o", ls="", ms=23, mfc="none", mec=INK, mew=3.6, label="fastest LR at each x"),
     Line2D([], [], ls="-", lw=4.6, color=FITC if MONO else INK2, label="power-law fit (dotted: plateau)" if plateau_b else "power-law fit"),
 ]
 if NSTAR and any(sp.get("star") is not None for sp in specs):
