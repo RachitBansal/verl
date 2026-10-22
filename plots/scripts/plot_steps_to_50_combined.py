@@ -108,6 +108,8 @@ def style(ax):
 
 def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, hue=None):
     fitc, starc = (hue or FITC), (hue or STARC)      # the fit and the critical-batch line take the panel's Figure 1 hue
+    reached = sub.dropna(subset=["steps"])[xcol].unique()
+    sub = sub[sub[xcol].isin(reached)]               # a column where no LR reached the target is left out
     ok = sub.dropna(subset=["steps"])
     miss = sub[sub["steps"].isna()]
     ref = miss[xcol].map(ok.groupby(xcol)["steps"].min()).fillna(SHORT_STEPS).clip(upper=SHORT_STEPS)
@@ -236,8 +238,8 @@ cb.set_label("steps to target", color=INK, fontsize=CBAR)
 cb.ax.tick_params(colors=INK, labelsize=TICK - 1, length=0); cb.outline.set_visible(False); cb.ax.invert_yaxis()
 
 legend = [
-    Line2D([], [], marker="o", ls="", ms=17, mfc=RAMP[4] if MONO else "#6e6e6e", mec=SURFACE, label=f"reached {PCT}%"),
-    Line2D([], [], marker="o", ls="", ms=17, mfc="none", mec=MISSING, mew=2.7, label=f"did not reach {PCT}%"),   # the condition (trained at least as long as the fastest LR) goes in the caption
+    Line2D([], [], marker="o", ls="", ms=17, mfc=RAMP[4] if MONO else "#6e6e6e", mec=SURFACE, label="reached target"),
+    Line2D([], [], marker="o", ls="", ms=17, mfc="none", mec=MISSING, mew=2.7, label="did not reach target"),   # the condition (trained at least as long as the fastest LR) goes in the caption
     Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6, label="too early to tell"),
     Line2D([], [], marker="o", ls="", ms=23, mfc="none", mec=INK, mew=3.6, label="fastest LR at each x"),
     Line2D([], [], ls="-", lw=4.6, color=FITC if MONO else INK2, label="power-law fit (dotted: plateau)" if plateau_b else "power-law fit"),
