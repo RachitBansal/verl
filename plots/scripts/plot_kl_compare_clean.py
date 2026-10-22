@@ -121,9 +121,9 @@ major = [x for x in bs if int(round(np.log2(x))) % 2 == 0]
 ax.set_xticks(major); ax.set_xticklabels([fmt(x) for x in major])
 ax.set_xticks([x for x in bs if x not in major], minor=True); ax.set_xticklabels([""] * len([x for x in bs if x not in major]), minor=True)
 ax.tick_params(axis="x", which="minor", length=0)
-ax.set_xlabel("batch size B", color=INK, fontsize=LABEL)
+ax.set_xlabel(f"prompts B  (K = {K})", color=INK, fontsize=LABEL)
 ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
-ax.set_title(f"scaling prompts, fixed K = {K}", loc="left", fontsize=TITLE, color=INK, pad=6)
+# no panel title: what is fixed goes in the x labels
 legend = [Line2D([], [], marker=m, ls="", ms=ms_, color=c, mec=SURFACE, label=n) for _, n, c, m, ms_ in SERIES]
 if FIT and fits is not None:
     legend.append(Line2D([], [], ls="-", lw=3.2, color=INK2, label="fit  $S = S_\\min\\,(1 + N^*/N)$\n(as in Fig. 1)"))
@@ -147,7 +147,7 @@ axr.set_xticks(majr); axr.set_xticklabels([fmt(x) for x in majr])
 axr.set_xticks([x for x in bsr if x not in majr], minor=True); axr.set_xticklabels([""] * len([x for x in bsr if x not in majr]), minor=True)
 axr.tick_params(axis="x", which="minor", length=0)
 axr.set_xlim(min(bsr) / 1.9, max(bsr) * 1.9)
-axr.set_xlabel("batch size B", color=INK, fontsize=LABEL)
+axr.set_xlabel(f"prompts B  (K = {K})", color=INK, fontsize=LABEL)
 axr.set_ylabel("learning rate", color=INK, fontsize=LABEL)
 legend_r = [Line2D([], [], ls="-", lw=3.2, marker="o", ms=12, color=INK2, mec=SURFACE, label="fastest LR at each B"),
             Line2D([], [], marker="o", ls="", ms=9, color=INK2, alpha=0.45, mec="none", label="other LR: reached the target"),
