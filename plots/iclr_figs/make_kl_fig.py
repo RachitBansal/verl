@@ -105,8 +105,8 @@ def panel_a(ax):
 
 
 # ---------------- (b) fastest LR vs highest stable LR per KL
-STABLE_LABEL = {"reach": "highest LR that reached the target", "hold": "highest LR that reached and held the target", "peak": "highest stable LR"}
-FAIL_LABEL = {"reach": "did not reach the target", "hold": "did not reach / hold the target", "peak": "collapsed / did not reach"}
+STABLE_LABEL = {"reach": "highest LR reaching target", "hold": "highest LR holding target", "peak": "highest stable LR"}
+FAIL_LABEL = {"reach": "did not reach target", "hold": "did not reach / hold target", "peak": "collapsed / did not reach"}
 def panel_b(ax):
     for kl, nudge in zip(KLS, (-0.07, +0.07)):
         bs = np.array(sorted(set(best[kl]) & set(ceil[kl])), float) * 2.0 ** nudge
@@ -119,11 +119,12 @@ def panel_b(ax):
             if x["kl"] == kl and x["out"] in ("reached_collapsed", "never") and x["lr"] > ceil[kl].get(x["B"], 0):
                 ax.scatter([x["B"] * 2.0 ** nudge], [x["lr"]], s=90, marker="o", facecolors="none", edgecolors=KLC[kl], alpha=0.35, linewidths=1.8, zorder=3)
     style(ax); ax.set_ylabel("learning rate", color=INK, fontsize=LABEL); ax.set_xlim(min(Bs) / 1.9, max(Bs) * 1.9)
-    hnd = [Line2D([], [], ls=(0, (5, 2.5)), lw=2.4, marker="o", ms=12, color=INK2, mec=SURFACE, label="fastest LR at each B"),
+    lo = min(min(best[kl].values()) for kl in KLS); ax.set_ylim(lo / 4.5, ax.get_ylim()[1])   # room under the data for the legend
+    hnd = [Line2D([], [], ls=(0, (5, 2.5)), lw=2.4, marker="o", ms=12, color=INK2, mec=SURFACE, label="fastest LR"),
            Line2D([], [], ls="-", lw=3.2, color=INK2, label=STABLE_LABEL[a.stable]),
            Line2D([], [], marker="o", ls="", ms=9, mfc="none", mec=INK2, alpha=0.6, mew=1.8, label=FAIL_LABEL[a.stable])]
-    ax.legend(handles=hnd, loc="upper center", bbox_to_anchor=(0.5, -0.17), ncol=2, frameon=False, fontsize=LEGEND - 4, labelcolor=INK,
-              handletextpad=0.5, columnspacing=1.6)
+    ax.legend(handles=hnd, loc="lower right", frameon=False, fontsize=LEGEND - 6, labelcolor=INK, handletextpad=0.5, borderaxespad=0.3,
+              labelspacing=0.3)      # the lower-right quadrant of the panel is empty, so the legend sits there instead of under the figure
 
 
 for tag, fn in (("a", panel_a), ("b", panel_b)):
