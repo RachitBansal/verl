@@ -37,7 +37,7 @@ bsz,lr,steps,longest,verdict,bracket,kl
 256,3.2e-05,,300.0,never,complete,0.001
 256,6.4e-05,,650.0,never,complete,0.001
 512,3e-06,258.3333333333333,375.0,hit,complete,0.001
-512,1e-05,77.49999999999999,375.0,hit,complete,0.001
+512,1e-05,59.8,375.0,hit,complete,0.001
 512,2e-05,43.90909090909091,70.0,best,complete,0.001
 512,5e-05,,175.0,never,complete,0.001
 512,8e-05,,150.0,never,complete,0.001
@@ -50,7 +50,7 @@ bsz,lr,steps,longest,verdict,bracket,kl
 2048,2e-05,22.4,40.0,hit,complete,0.001
 2048,3e-05,14.0,67.0,best,complete,0.001
 2048,5e-05,17.500000000000004,20.0,hit,complete,0.001
-4096,2e-05,,10.0,never,complete,0.001
+4096,2e-05,,11.0,never,complete,0.001
 4096,3e-05,11.666666666666666,45.0,hit,complete,0.001
 4096,5e-05,8.923076923076922,49.0,best,complete,0.001
 4096,0.0001,,11.0,never,complete,0.001

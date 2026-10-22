@@ -126,7 +126,7 @@ ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
 # no panel title: what is fixed goes in the x labels
 legend = [Line2D([], [], marker=m, ls="", ms=ms_, color=c, mec=SURFACE, label=n) for _, n, c, m, ms_ in SERIES]
 if FIT and fits is not None:
-    legend.append(Line2D([], [], ls="-", lw=4.8, color=INK2, label="fit  $S = S_\\min\\,(1 + N^*/N)$\n(as in Fig. 1)"))
+    legend.append(Line2D([], [], ls="-", lw=4.8, color=INK2, label="fit  $S = S_\\min\\,(1 + N^*/N)$"))
 ax.legend(handles=legend, loc="lower left", frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)
 
 # ---- right: the fastest LR per B as a solid line with markers; every other LR tried as a faint dot (filled = reached, hollow = not)

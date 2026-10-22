@@ -100,7 +100,7 @@ def panel_a(ax):
         ax.scatter(x, y, s=MS[kl] ** 2 * 1.5, marker=MK[kl], color=KLC[kl], edgecolors=SURFACE, linewidths=1.5, zorder=6)
     style(ax); ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
     hnd = [Line2D([], [], marker=MK[kl], ls="", ms=MS[kl], color=KLC[kl], mec=SURFACE, label=KLN[kl]) for kl in KLS]
-    if fits is not None: hnd.append(Line2D([], [], ls="-", lw=4.8, color=INK2, label="fit  $S = S_\\min\\,(1 + N^*/N)$\n(as in Fig. 1)"))
+    if fits is not None: hnd.append(Line2D([], [], ls="-", lw=4.8, color=INK2, label="fit  $S = S_\\min\\,(1 + N^*/N)$"))
     ax.legend(handles=hnd, loc="lower left", frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)
 
 

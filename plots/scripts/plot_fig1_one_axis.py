@@ -222,14 +222,17 @@ def draw_lr(ax):
     xs = np.geomspace(xp.min() / 1.5, xp[m].max(), 100)
     ax.plot(xs, np.exp(icpt) * (xs / K0) ** slope, ls="-", lw=4.8, color=BLUE, zorder=3)
     ax.plot([xp[m].max(), xp.max() * 1.5], [lp[-1]] * 2, ls=":", lw=4.0, color=BLUE, zorder=3)   # the plateau
-    ax.scatter(xp * 2.0 ** -0.09, lp, s=15.5 ** 2 * 1.5, marker="o", color=BLUE, edgecolors=SURFACE, linewidths=1.5, zorder=7, label=f"scaling prompts  (K = {K0})")   # nudged left
+    # nudge apart only where the two sweeps have a point in the same column AND the two LRs are close enough to overlap
+    lrr = dict(zip(xr, lr_)); close_p = np.array([x in lrr and abs(np.log(lrr[x] / l)) < 0.35 for x, l in zip(xp, lp)])
+    lrp = dict(zip(xp, lp)); close_r = np.array([x in lrp and abs(np.log(lrp[x] / l)) < 0.35 for x, l in zip(xr, lr_)])
+    ax.scatter(xp * 2.0 ** (-0.18 * close_p), lp, s=15.5 ** 2 * 1.5, marker="o", color=BLUE, edgecolors=SURFACE, linewidths=1.5, zorder=7, label=f"scaling prompts  (K = {K0})")   # nudged left
     # rollout sweep: its own power-law fit of eta* against K (shallow), with a flat reference at the geometric mean, dotted
     lxr, lyr = np.log(Kr), np.log(lr_); slope_r, icpt_r = np.polyfit(lxr, lyr, 1)
     xs_r = np.geomspace(xr.min() / 1.5, xr.max() * 1.5, 100)
     ax.plot(xs_r, np.exp(icpt_r) * (xs_r / B0) ** slope_r, ls="-", lw=4.8, color=rc, zorder=3)
     flat = np.exp(np.log(lr_).mean())
     ax.plot([xr.min() / 1.5, xr.max() * 1.5], [flat] * 2, ls=":", lw=3.0, color=rc, alpha=0.7, zorder=2.6)
-    ax.scatter(xr * 2.0 ** 0.09, lr_, s=17 ** 2 * 1.5, marker=rmk, color=rc, edgecolors=SURFACE, linewidths=1.5, zorder=6, label=f"scaling rollouts  (B = {B0})")   # nudged right
+    ax.scatter(xr * 2.0 ** (0.18 * close_r), lr_, s=17 ** 2 * 1.5, marker=rmk, color=rc, edgecolors=SURFACE, linewidths=1.5, zorder=6, label=f"scaling rollouts  (B = {B0})")   # nudged right
     for n_, col in ((nstar_p, BLUE), (nstar_r, rc)):
         ax.axvline(n_, ls=(0, (3, 3)), lw=2.6, color=col, alpha=0.55, zorder=2.3)
     # the two exponent labels at the top, each beside its own critical-batch line and facing away from the other, as in panel (a)
