@@ -14,7 +14,11 @@
 # End-to-end smoke test of loss_mode=kimi_k2 + solve tracking on 2 GPUs (DP=2 exercises the FSDP
 # lock-step requirement of the probe forwards). 3 tiny steps, no validation, wandb offline.
 set -xeuo pipefail
-source /n/holylabs/dam_lab/Lab/brachit/envs/bin/activate
+# ENV_DIR: the lab venv; readable only by the dam_lab group, so others fall back to the world-readable copy
+# in /n/netscratch/dam_lab/Everyone/brachit/share/envs (same packages, shebangs rewritten).
+ENV_DIR=${ENV_DIR:-/n/holylabs/dam_lab/Lab/brachit/envs}
+[ -r "${ENV_DIR}/bin/activate" ] || ENV_DIR=/n/netscratch/dam_lab/Everyone/brachit/share/envs
+source "${ENV_DIR}/bin/activate"
 # pyextras: wandb deps (platformdirs, gitpython) missing from the lab env, which is admin-writable only.
 export PYTHONPATH=/n/home08/brachit/coverage/verl:/n/home08/brachit/coverage/pyextras:${PYTHONPATH:-}
 export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_JOB_ID}

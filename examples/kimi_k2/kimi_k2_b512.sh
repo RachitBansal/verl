@@ -75,7 +75,11 @@ else
 fi
 if [ -n "${TAG}" ]; then experiment_name="${experiment_name}_${TAG}"; fi
 
-source /n/holylabs/dam_lab/Lab/brachit/envs/bin/activate
+# ENV_DIR: the lab venv; readable only by the dam_lab group, so others fall back to the world-readable copy
+# in /n/netscratch/dam_lab/Everyone/brachit/share/envs (same packages, shebangs rewritten).
+ENV_DIR=${ENV_DIR:-/n/holylabs/dam_lab/Lab/brachit/envs}
+[ -r "${ENV_DIR}/bin/activate" ] || ENV_DIR=/n/netscratch/dam_lab/Everyone/brachit/share/envs
+source "${ENV_DIR}/bin/activate"
 # verl is not pip-installed in this env; import from this source tree (branch kimi-k2).
 # pyextras: wandb deps (platformdirs, gitpython) missing from the lab env, which is admin-writable only.
 # VERL_ROOT / PYEXTRAS: override when running from a copy of the tree (e.g. the shared snapshot for collaborators).

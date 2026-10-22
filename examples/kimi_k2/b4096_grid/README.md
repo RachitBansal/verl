@@ -5,9 +5,11 @@ Two ways to get the code, both work with the same launcher:
 - **git:** `git clone -b kimi-k2 git@github.com:RachitBansal/verl.git` and run `examples/kimi_k2/b4096_grid/launch_b4096_grid.sh` from the clone.
 - **shared snapshot** (no clone needed): `/n/netscratch/dam_lab/Everyone/brachit/share/kimi_k2_hp128/` holds `verl/`, `pyextras/`, this README and the launcher.
 
-Nothing needs to be installed: the launch script activates `/n/holylabs/dam_lab/Lab/brachit/envs`, puts `verl/`
-on `PYTHONPATH` (plus `pyextras/`, the wandb dependencies missing from that env), and reads model and data
-from `/n/holylabs/LABS/sham_lab/Everyone/rl_cbs/` (world-readable).
+Nothing needs to be installed: the launch script activates the lab venv (`/n/holylabs/dam_lab/Lab/brachit/envs`
+for dam_lab members, otherwise the world-readable copy `/n/netscratch/dam_lab/Everyone/brachit/share/envs`),
+puts `verl/` on `PYTHONPATH` (plus `pyextras/`, the wandb dependencies missing from that env), and reads model
+and data from `/n/holylabs/LABS/sham_lab/Everyone/rl_cbs/` (world-readable). All of this works for any cluster
+user; only `OUTPUT_DIR` has to be somewhere you can write.
 
 ## The six runs
 
