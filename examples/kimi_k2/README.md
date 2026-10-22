@@ -32,7 +32,8 @@ Unit tests: `tests/trainer/ppo/test_kimi_k2_loss_on_cpu.py`.
 | `kimi_form` | `squared` | `squared` (published) or `gradient` = `−AΔ + τ/2 Δ²` (same minimiser, step at Δ=0 equals the policy gradient) |
 | `kimi_logratio_clip` | null | detach token log-ratios with magnitude above this (K2.5-style guard) |
 | `kimi_probe_num_seqs` | 64 | training rows re-evaluated before/after the update |
-| `kimi_holdout_num_seqs` | 0 | rows removed from the update, evaluated before/after (held-out regression loss) |
+| `kimi_holdout_num_seqs` | 0 | legacy: rows per DP rank carved out of the training batch and evaluated before/after (same-prompt held-out regression loss); superseded by `data.kimi_holdout_prompts` |
+| `data.kimi_holdout_prompts` | 0 | extra prompts generated every step and held out of the update (fresh-prompt held-out regression rows; training batch and mini-batches unchanged). Launch script: `HOLDOUT_PROMPTS`, default 128 |
 | `kimi_probe_micro_bsz` | 8 | micro-batch of the probe forwards |
 
 ## What is logged

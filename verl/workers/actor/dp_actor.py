@@ -455,17 +455,31 @@ class DataParallelPPOActor(BasePPOActor):
 
         has_multi_modal_inputs = "multi_modal_inputs" in data.non_tensor_batch.keys()
         non_tensor_select_keys = ["multi_modal_inputs"] if has_multi_modal_inputs else []
+        # trainer-side fresh-prompt hold-out flag (data.kimi_holdout_prompts), see ray_trainer._layout_holdout_rows
+        has_holdout_flag = "kimi_holdout" in data.non_tensor_batch.keys()
+        if has_holdout_flag:
+            non_tensor_select_keys.append("kimi_holdout")
 
         data = data.select(batch_keys=select_keys, non_tensor_batch_keys=non_tensor_select_keys)
 
         # ---- Kimi-K2 solve tracking -------------------------------------------------------------
         # probe rows: a fixed prefix of the training rows, re-evaluated before/after the update.
         # held-out rows: removed from the update entirely (regression loss generalisation check).
-        kimi_tracking = self.config.policy_loss.get("loss_mode", "vanilla") == "kimi_k2"
+        # With the trainer-side flag the held-out rows are rollouts of extra prompts (fresh prompts, no
+        # siblings in the update) and the training rows are the full configured batch; they are also
+        # tracked for non-kimi loss modes (regression stats then use the default kimi_tau).
+        kimi_tracking = self.config.policy_loss.get("loss_mode", "vanilla") == "kimi_k2" or has_holdout_flag
         probe_rows = holdout_rows = None
+        if has_holdout_flag:
+            hold_mask = data.non_tensor_batch["kimi_holdout"].astype(bool)
+            if hold_mask.any():
+                holdout_rows = data.select_idxs(hold_mask)
+                holdout_rows.non_tensor_batch.pop("kimi_holdout", None)
+            data = data.select_idxs(~hold_mask)
+            data.non_tensor_batch.pop("kimi_holdout", None)
         if kimi_tracking:
             n_total = len(data)
-            n_hold = int(self.config.policy_loss.get("kimi_holdout_num_seqs", 0))
+            n_hold = 0 if has_holdout_flag else int(self.config.policy_loss.get("kimi_holdout_num_seqs", 0))
             if 0 < n_hold < n_total:
                 holdout_rows = data.slice(n_total - n_hold, n_total)
                 data = data.slice(0, n_total - n_hold)

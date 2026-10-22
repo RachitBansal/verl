@@ -41,6 +41,12 @@ max_response_length: 512
 # Batch size sampled for one training iteration of different RL algorithms.
 train_batch_size: 1024
 
+# Kimi-K2 solve tracking: extra prompts generated every step and held out of the update (0 = off).
+# The dataloader draws train_batch_size + kimi_holdout_prompts prompts; the rollouts of the extra prompts
+# are the held-out regression rows (kimi_holdout/*): fresh prompts, fixed across the inner steps,
+# resampled from pi_old every step. The training batch and mini-batches are unchanged.
+kimi_holdout_prompts: 0
+
 # Batch size used during validation. Can be null.
 val_batch_size: null
 

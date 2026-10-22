@@ -13,6 +13,12 @@
 
 set -xeuo pipefail
 
+# Twin submissions: the same cell submitted to several partitions under one --job-name; whichever starts
+# first cancels the still-pending twins (CANCEL_TWINS=1 at submit; the name must be unique to the cell).
+if [ -n "${CANCEL_TWINS:-}" ]; then
+    scancel -u "$USER" --name="$SLURM_JOB_NAME" --state=PENDING || true
+fi
+
 ####################
 # Kimi-K2 squared-regression objective on the CBS GRPO spine
 # (Qwen2.5-Math-1.5B-Instruct, DAPO-Math-17k, AIME 1983-2024 val; same data/model/lengths/eval as
@@ -47,7 +53,12 @@ LOSS_MODE=${LOSS_MODE:-kimi_k2}
 CLIP_LOW=${CLIP_LOW:-0.2}     # PPO clip range (vanilla/GRPO only); asymmetric clip_high=0.4 is the DAPO "clip-higher"
 CLIP_HIGH=${CLIP_HIGH:-0.2}
 PROBE=${PROBE:-64}
-HOLDOUT=${HOLDOUT:-64}
+# Held-out regression rows. HOLDOUT_PROMPTS>0: that many extra prompts are generated every step and held
+# out of the update (fresh prompts; the training batch/mini-batches are unchanged; +HOLDOUT_PROMPTS/BSZ
+# rollouts). HOLDOUT (legacy): rows per DP rank carved out of the training batch instead; off when
+# HOLDOUT_PROMPTS>0.
+HOLDOUT_PROMPTS=${HOLDOUT_PROMPTS:-128}
+if [ "${HOLDOUT_PROMPTS}" -gt 0 ]; then HOLDOUT=${HOLDOUT:-0}; else HOLDOUT=${HOLDOUT:-64}; fi
 TRACE=${TRACE:-True}     # kimi_probe_per_step: probe/held-out stats after every inner step
 LOGRATIO_CLIP=${LOGRATIO_CLIP:-null}
 TEST_FREQ=${TEST_FREQ:-25}
@@ -67,7 +78,13 @@ if [ -n "${TAG}" ]; then experiment_name="${experiment_name}_${TAG}"; fi
 source /n/holylabs/dam_lab/Lab/brachit/envs/bin/activate
 # verl is not pip-installed in this env; import from this source tree (branch kimi-k2).
 # pyextras: wandb deps (platformdirs, gitpython) missing from the lab env, which is admin-writable only.
-export PYTHONPATH=/n/home08/brachit/coverage/verl:/n/home08/brachit/coverage/pyextras:${PYTHONPATH:-}
+# VERL_ROOT / PYEXTRAS: override when running from a copy of the tree (e.g. the shared snapshot for collaborators).
+VERL_ROOT=${VERL_ROOT:-/n/home08/brachit/coverage/verl}
+PYEXTRAS=${PYEXTRAS:-$(dirname "${VERL_ROOT}")/pyextras}
+# clones without a sibling pyextras/ (wandb deps missing from the lab env): use the shared copy
+[ -d "${PYEXTRAS}" ] || PYEXTRAS=/n/netscratch/dam_lab/Everyone/brachit/share/kimi_k2_hp128/pyextras
+export PYTHONPATH=${VERL_ROOT}:${PYEXTRAS}:${PYTHONPATH:-}
+cd "${VERL_ROOT}"
 
 OUTPUT_DIR=${OUTPUT_DIR:-"/n/netscratch/dam_lab/Everyone/brachit/kimi_k2_runs"}
 
@@ -80,7 +97,7 @@ export HF_DATASETS_CACHE=/tmp/hf_${SLURM_JOB_ID}/datasets
 mkdir -p "${HF_DATASETS_CACHE}"
 export WANDB_DIR=/tmp/wandb_${SLURM_JOB_ID}
 mkdir -p "${WANDB_DIR}"
-export WANDB_ENTITY=harvardml
+export WANDB_ENTITY=${WANDB_ENTITY:-harvardml}
 export RAY_TMPDIR=/tmp/ray_brachit_${SLURM_JOB_ID}
 mkdir -p "${RAY_TMPDIR}"
 ray stop --force 2>/dev/null || true
@@ -110,6 +127,7 @@ python3 -m verl.trainer.main_ppo \
     data.max_response_length=${max_response_length} \
     data.filter_overlong_prompts=True \
     data.truncation=${data_truncation} \
+    data.kimi_holdout_prompts=${HOLDOUT_PROMPTS} \
     actor_rollout_ref.model.path=${model_path} \
     actor_rollout_ref.nccl_timeout=${NCCL_TIMEOUT:-600} \
     actor_rollout_ref.actor.optim.lr=${LR} \

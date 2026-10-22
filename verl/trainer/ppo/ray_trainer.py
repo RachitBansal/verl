@@ -379,7 +379,8 @@ class RayPPOTrainer:
 
         self.train_dataloader = StatefulDataLoader(
             dataset=self.train_dataset,
-            batch_size=self.config.data.get("gen_batch_size", self.config.data.train_batch_size),
+            batch_size=self.config.data.get("gen_batch_size", None)
+            or self.config.data.train_batch_size + int(self.config.data.get("kimi_holdout_prompts", 0) or 0),
             num_workers=num_workers,
             drop_last=True,
             collate_fn=collate_fn,
@@ -953,6 +954,59 @@ class RayPPOTrainer:
         )
         metrics.update(global_balance_stats)
 
+    # ---- Kimi-K2 fresh-prompt hold-out (data.kimi_holdout_prompts) ------------------------------------
+    def _split_holdout_rows(self, batch: DataProto) -> tuple[DataProto, Optional[DataProto]]:
+        """Split the rollouts of the extra ``data.kimi_holdout_prompts`` prompts off the batch and flag both
+        parts with ``kimi_holdout`` (0 = train, 1 = held out).  The dataloader draws
+        ``train_batch_size + kimi_holdout_prompts`` prompts in sampler order and rollouts are interleaved per
+        prompt, so the held-out rows are the last ``kimi_holdout_prompts * rollout.n`` rows (an arbitrary
+        subset of the shuffled dataset, disjoint from the training prompts of this step).
+        Returns ``(train_batch, holdout_batch_or_None)``."""
+        n_hold_prompts = int(self.config.data.get("kimi_holdout_prompts", 0) or 0)
+        if n_hold_prompts <= 0:
+            return batch, None
+        n_roll = self.config.actor_rollout_ref.rollout.n
+        n_hold = n_hold_prompts * n_roll
+        n_train = len(batch) - n_hold
+        assert n_train == self.config.data.train_batch_size * n_roll, (
+            f"kimi_holdout_prompts: expected {self.config.data.train_batch_size} train + {n_hold_prompts} held-out "
+            f"prompts x {n_roll} rollouts, got {len(batch)} rows"
+        )
+        holdout = batch.slice(n_train, len(batch))
+        batch = batch.slice(0, n_train)
+        batch.non_tensor_batch["kimi_holdout"] = np.zeros(n_train, dtype=np.int64)
+        holdout.non_tensor_batch["kimi_holdout"] = np.ones(n_hold, dtype=np.int64)
+        return batch, holdout
+
+    def _layout_holdout_rows(self, batch: DataProto) -> None:
+        """In place: reorder rows so that every actor DP rank's contiguous dispatch chunk is
+        [its balanced training rows, its equal share of held-out rows].  Every rank then has the same
+        number of training rows (hence mini-batches and optimizer steps, which FSDP requires) and the same
+        number of held-out rows; the actor separates the two by the ``kimi_holdout`` flag."""
+        flag = batch.non_tensor_batch["kimi_holdout"].astype(bool)
+        train_idx, hold_idx = np.flatnonzero(~flag), np.flatnonzero(flag)
+        ws = self.actor_rollout_wg.world_size
+        assert len(train_idx) % ws == 0 and len(hold_idx) % ws == 0, (
+            f"kimi_holdout: {len(train_idx)} training and {len(hold_idx)} held-out rows must both be divisible "
+            f"by the actor world size {ws} (rows dropped after generation?)"
+        )
+        nt, nh = len(train_idx) // ws, len(hold_idx) // ws
+        order = np.concatenate(
+            [np.concatenate([train_idx[r * nt : (r + 1) * nt], hold_idx[r * nh : (r + 1) * nh]]) for r in range(ws)]
+        )
+        batch.reorder(torch.from_numpy(order))
+
+    def _drop_holdout_rows(self, batch: DataProto, metrics: dict) -> DataProto:
+        """Log the held-out rollouts' reward and remove them from the batch."""
+        flag = batch.non_tensor_batch["kimi_holdout"].astype(bool)
+        if flag.any() and "token_level_scores" in batch.batch:
+            hold_scores = batch.batch["token_level_scores"][torch.from_numpy(flag)].sum(-1)
+            metrics["kimi_holdout/reward_mean"] = float(hold_scores.mean().item())
+            metrics["kimi_holdout/num_rows"] = int(flag.sum())
+        batch = batch.select_idxs(~flag)
+        batch.non_tensor_batch.pop("kimi_holdout", None)
+        return batch
+
     def _val_reached_stop_threshold(self, val_metrics: dict) -> bool:
         """True when trainer.stop_val_threshold is set and the chosen validation metric has reached it."""
         thr = self.config.trainer.get("stop_val_threshold", None)
@@ -1097,12 +1151,21 @@ class RayPPOTrainer:
 
                     if "response_mask" not in batch.batch.keys():
                         batch.batch["response_mask"] = compute_response_mask(batch)
+                    # Kimi-K2 fresh-prompt hold-out: the dataloader drew data.kimi_holdout_prompts extra prompts;
+                    # their rollouts are flagged and kept out of the update (see _split_holdout_rows,
+                    # _layout_holdout_rows and dp_actor.update_policy). Split off before balancing so the
+                    # training rows alone are balanced across ranks.
+                    batch, holdout_batch = self._split_holdout_rows(batch)
                     # Balance the number of valid tokens across DP ranks.
                     # NOTE: This usually changes the order of data in the `batch`,
                     # which won't affect the advantage calculation (since it's based on uid),
                     # but might affect the loss calculation (due to the change of mini-batching).
                     if self.config.trainer.balance_batch:
                         self._balance_batch(batch, metrics=metrics)
+                    if holdout_batch is not None:
+                        # appended after balancing: the training rows keep their per-rank blocks; the
+                        # reward / log-prob / advantage stages below are row-wise (advantages group by uid)
+                        batch = DataProto.concat([batch, holdout_batch])
 
                     # compute global_valid tokens
                     batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
@@ -1139,6 +1202,9 @@ class RayPPOTrainer:
                             old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
                             entropys = old_log_prob.batch["entropys"]
                             response_masks = batch.batch["response_mask"]
+                            if "kimi_holdout" in batch.non_tensor_batch:  # training rows only
+                                keep = torch.from_numpy(batch.non_tensor_batch["kimi_holdout"] == 0)
+                                entropys, response_masks = entropys[keep], response_masks[keep]
                             loss_agg_mode = self.config.actor_rollout_ref.actor.loss_agg_mode
                             entropy_agg = agg_loss(
                                 loss_mat=entropys, loss_mask=response_masks, loss_agg_mode=loss_agg_mode
@@ -1297,6 +1363,8 @@ class RayPPOTrainer:
                     # implement critic warmup
                     if self.config.trainer.critic_warmup <= self.global_steps:
                         # update actor
+                        if "kimi_holdout" in batch.non_tensor_batch:
+                            self._layout_holdout_rows(batch)
                         with marked_timer("update_actor", timing_raw, color="red"):
                             batch.meta_info["multi_turn"] = self.config.actor_rollout_ref.rollout.multi_turn.enable
                             actor_output = self.actor_rollout_wg.update_actor(batch)
@@ -1328,6 +1396,11 @@ class RayPPOTrainer:
                     rollout_data_dir = self.config.trainer.get("rollout_data_dir", None)
                     if rollout_data_dir:
                         self._log_rollout_data(batch, reward_extra_infos_dict, timing_raw, rollout_data_dir)
+
+                    # Kimi-K2 hold-out: log the held-out rollouts' reward and drop them, so the batch metrics
+                    # below (train reward, response length, ...) describe the training rows only.
+                    if "kimi_holdout" in batch.non_tensor_batch:
+                        batch = self._drop_holdout_rows(batch, metrics)
 
                 # validate
                 if (

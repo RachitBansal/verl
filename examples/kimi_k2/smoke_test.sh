@@ -37,6 +37,7 @@ python3 -m verl.trainer.main_ppo \
     data.train_files=${train_data} data.val_files=${test_data} \
     data.train_batch_size=16 data.max_prompt_length=512 data.max_response_length=512 \
     data.filter_overlong_prompts=True data.truncation=left \
+    data.kimi_holdout_prompts=6 \
     actor_rollout_ref.model.path=${model_path} \
     actor_rollout_ref.actor.optim.lr=1e-5 \
     actor_rollout_ref.model.use_remove_padding=True \
@@ -47,7 +48,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.policy_loss.loss_mode=kimi_k2 \
     actor_rollout_ref.actor.policy_loss.kimi_tau=0.01 \
     actor_rollout_ref.actor.policy_loss.kimi_probe_num_seqs=16 \
-    actor_rollout_ref.actor.policy_loss.kimi_holdout_num_seqs=8 \
+    actor_rollout_ref.actor.policy_loss.kimi_holdout_num_seqs=0 \
     actor_rollout_ref.actor.policy_loss.kimi_probe_per_step=True \
     actor_rollout_ref.actor.use_kl_loss=False \
     actor_rollout_ref.actor.entropy_coeff=0 \
