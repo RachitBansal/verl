@@ -43,7 +43,7 @@ COL = f"steps_to_{PCT}_interp" if f"steps_to_{PCT}_interp" in df else f"steps_to
 df = df[(df["n"] == K)].dropna(subset=["bsz", "lr"]).copy()
 df = df[(df["lr"] >= LR_MIN / 1.001) & (df["lr"] <= LR_MAX * 1.001)]
 df["last_val_step"] = df["last_val_step"].fillna(0)
-SERIES = [(1e-3, "KL 1e-3", BLUE, "o", 17), (1e-2, "KL 1e-2", LIGHTBLUE, "s", 15)]
+SERIES = [(1e-3, "KL 1e-3", BLUE, "o", 15.5), (1e-2, "KL 1e-2", LIGHTBLUE, "s", 13.8)]   # paper marker size (s = 360 for circles)
 
 
 def ladder(src):
@@ -104,15 +104,15 @@ for kl, name, color, marker, ms in SERIES:
     if FIT and fits is not None and FIT_KEY[kl] in fits.index:
         f = fits.loc[FIT_KEY[kl]]; smin, nstar = float(f["s_min"]), float(f["n_star_seqs"])
         xs = np.geomspace(b["bsz"].min() / 1.4, b["bsz"].max() * 1.4, 200)
-        ax.plot(xs, smin * (1 + nstar / (K * xs)), ls="-", lw=3.2, color=color, zorder=3)
+        ax.plot(xs, smin * (1 + nstar / (K * xs)), ls="-", lw=4.8, color=color, zorder=3)
         bstar = nstar / K                                     # the fitted critical batch in prompts
-        ax.axvline(bstar, ls=(0, (5, 2.5)), lw=3.6, color=color, alpha=0.9, zorder=2.3)
+        ax.axvline(bstar, ls=(0, (3, 3)), lw=2.6, color=color, alpha=0.55, zorder=2.3)
         row = 0 if abs(kl - 1e-3) < 1e-12 else 1
         ax.annotate(f"$B^* \\approx$ {bstar / 1000:.1f}k", (bstar, 0.60 - 0.13 * row), xycoords=("data", "axes fraction"),
                     xytext=(-10, 0), textcoords="offset points", ha="right", va="center", fontsize=LEGEND - 6, color=color, zorder=10,
                     bbox=dict(boxstyle="round,pad=0.15", fc=SURFACE, ec="none", alpha=0.85))
     else:
-        ax.plot(b["bsz"], b["steps"], lw=3.2, color=color, zorder=3)
+        ax.plot(b["bsz"], b["steps"], lw=4.8, color=color, zorder=3)
     ax.scatter(b["bsz"], b["steps"], s=ms ** 2 * 1.5, marker=marker, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=6)
 ax.set_xscale("log", base=2); ax.set_yscale("log")
 bs = sorted(set(bests[1e-3]["bsz"]) | set(bests[1e-2]["bsz"]))
@@ -126,7 +126,7 @@ ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
 # no panel title: what is fixed goes in the x labels
 legend = [Line2D([], [], marker=m, ls="", ms=ms_, color=c, mec=SURFACE, label=n) for _, n, c, m, ms_ in SERIES]
 if FIT and fits is not None:
-    legend.append(Line2D([], [], ls="-", lw=3.2, color=INK2, label="fit  $S = S_\\min\\,(1 + N^*/N)$\n(as in Fig. 1)"))
+    legend.append(Line2D([], [], ls="-", lw=4.8, color=INK2, label="fit  $S = S_\\min\\,(1 + N^*/N)$\n(as in Fig. 1)"))
 ax.legend(handles=legend, loc="lower left", frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)
 
 # ---- right: the fastest LR per B as a solid line with markers; every other LR tried as a faint dot (filled = reached, hollow = not)
@@ -134,11 +134,11 @@ for (kl, name, color, marker, ms), nudge in zip(SERIES, (-0.07, +0.07)):
     lad = lads[kl]; x = lad["bsz"] * 2.0 ** nudge
     other = lad[lad["verdict"] != "best"]
     hit = other[other["verdict"] == "hit"]; nev = other[other["verdict"] == "never"]; inc = other[other["verdict"] == "inconclusive"]
-    axr.scatter(x[hit.index], hit["lr"], s=90, marker="o", color=color, alpha=0.35, edgecolors="none", zorder=3)
-    axr.scatter(x[nev.index], nev["lr"], s=90, marker="o", facecolors="none", edgecolors=color, alpha=0.35, linewidths=1.8, zorder=3)
-    axr.scatter(x[inc.index], inc["lr"], s=110, marker="x", c=MISSING, alpha=0.6, linewidths=2.0, zorder=3)
+    axr.scatter(x[hit.index], hit["lr"], s=110, marker="o", color=color, alpha=0.35, edgecolors="none", zorder=3)
+    axr.scatter(x[nev.index], nev["lr"], s=110, marker="o", facecolors="none", edgecolors=color, alpha=0.35, linewidths=1.8, zorder=3)
+    axr.scatter(x[inc.index], inc["lr"], s=130, marker="x", c=MISSING, alpha=0.6, linewidths=2.0, zorder=3)
     best = lad[lad["verdict"] == "best"].sort_values("bsz")
-    axr.plot(best["bsz"] * 2.0 ** nudge, best["lr"], ls="-", lw=3.2, color=color, zorder=5)
+    axr.plot(best["bsz"] * 2.0 ** nudge, best["lr"], ls="-", lw=4.8, color=color, zorder=5)
     axr.scatter(best["bsz"] * 2.0 ** nudge, best["lr"], s=ms ** 2 * 1.5, marker=marker, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=6)
 axr.set_xscale("log", base=2); axr.set_yscale("log")
 bsr = sorted(set(lads[1e-3]["bsz"]) | set(lads[1e-2]["bsz"]))
@@ -149,7 +149,7 @@ axr.tick_params(axis="x", which="minor", length=0)
 axr.set_xlim(min(bsr) / 1.9, max(bsr) * 1.9)
 axr.set_xlabel(f"prompts B  (K = {K})", color=INK, fontsize=LABEL)
 axr.set_ylabel("learning rate", color=INK, fontsize=LABEL)
-legend_r = [Line2D([], [], ls="-", lw=3.2, marker="o", ms=12, color=INK2, mec=SURFACE, label="fastest LR at each B"),
+legend_r = [Line2D([], [], ls="-", lw=4.8, marker="o", ms=12, color=INK2, mec=SURFACE, label="fastest LR at each B"),
             Line2D([], [], marker="o", ls="", ms=9, color=INK2, alpha=0.45, mec="none", label="other LR: reached the target"),
             Line2D([], [], marker="o", ls="", ms=9, mfc="none", mec=INK2, alpha=0.6, mew=1.8, label="other LR: did not reach it")]
 if any((lads[kl]["verdict"] == "inconclusive").any() for kl, *_ in SERIES):

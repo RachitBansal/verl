@@ -146,8 +146,8 @@ def draw_one(ax):
         ax.axvline(nstar, ls=(0, (3, 3)), lw=2.6, color=color, alpha=0.55, zorder=2.3)
         star = nstar / per; star_txt = f"{star / 1000:.1f}k" if star >= 1000 else f"{star:.0f}"
         # each label hangs off the top of its own line, on the side away from the other line: K* to the left, B* to the right
-        ax.annotate(f"{star_lab} $\\approx$ {star_txt}", (nstar, dy), xycoords=("data", "axes fraction"), xytext=(10 if per == K0 else -10, 0), textcoords="offset points",
-                    ha="left" if per == K0 else "right", va="top", fontsize=LEGEND + 2, color=color, zorder=10, bbox=dict(boxstyle="round,pad=0.2", fc=SURFACE, ec="none", alpha=1.0))
+        ax.annotate(f"{star_lab} $\\approx$ {star_txt}", (nstar, 0.80 if per == K0 else 0.90), xycoords=("data", "axes fraction"), xytext=(24 if per == K0 else -24, 0), textcoords="offset points",
+                    ha="center", va="top", fontsize=LEGEND + 2, color=color, zorder=10, bbox=dict(boxstyle="round,pad=0.2", fc=SURFACE, ec="none", alpha=1.0))
     # perfect scaling: steps falling as 1/N, the prompt fit's small-batch asymptote S_min N*/N
     smin_p, nstar_p = float(fp["s_min"]), float(fp["n_star_seqs"])
     xs = np.geomspace(prompts["seqs"].min() / 1.5, prompts["seqs"].max() * 1.5, 200)
@@ -162,7 +162,7 @@ def draw_one(ax):
     ins = ax.inset_axes([0.05, 0.06, 0.40, 0.32]); ins.set_facecolor(SURFACE)
     for sp_ in ins.spines.values():
         sp_.set_color(INK2); sp_.set_linewidth(1.4)
-    xa, xb = x0 / 1.45, x1 * 2.6
+    xa, xb = x0 / 1.45, x1 * 4.2
     xs_i = np.geomspace(xa, xb, 60)
     # the two fit curves, very faint, so the cells read against them without the lines competing with the arrows
     ins.plot(xs_i, float(fp["s_min"]) * (1 + float(fp["n_star_seqs"]) / xs_i), ls="-", lw=3.6, color=BLUE, alpha=0.18, zorder=2)
@@ -175,11 +175,15 @@ def draw_one(ax):
     for y1, rad in ((sp2, 0.22), (sr2, -0.22)):
         ins.annotate("", (x1, y1), (x0, s0), zorder=8, arrowprops=dict(arrowstyle="-|>", color=INK, lw=3.4, shrinkA=16, shrinkB=16, mutation_scale=34, connectionstyle=f"arc3,rad={rad}"))
     ins.set_xscale("log", base=2); ins.set_yscale("log"); ins.set_xlim(xa, xb); ins.set_ylim(sp2 / 1.55, s0 * 1.45)
-    ins.set_xticks([]); ins.set_yticks([]); ins.xaxis.set_minor_locator(matplotlib.ticker.NullLocator()); ins.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())   # no ticks: the main panel carries the axes
+    ins.set_xticks([]); ins.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+    ins.set_yticks([sp2, sr2]); ins.set_yticklabels([f"{sp2:.0f}", f"{sr2:.0f}"], fontsize=TICK - 6); ins.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())   # 14 and 20 (21 would overprint 20)
     ins.tick_params(which="both", colors=INK, length=0); ins.grid(False)
-    ins.annotate("2$\\times$ rollouts", (x1, sr2), xytext=(16, 0), textcoords="offset points", ha="left", va="center", fontsize=TICK - 3, color=rc, zorder=10)
-    ins.annotate("2$\\times$ prompts", (x1, sp2), xytext=(16, 0), textcoords="offset points", ha="left", va="center", fontsize=TICK - 3, color=BLUE, zorder=10)
-    ins.set_title("doubling the sequences", fontsize=TICK - 2, color=INK, pad=5, loc="left")
+    ins.annotate("2$\\times$ rollouts", (x1, sr2), xytext=(16, 0), textcoords="offset points", ha="left", va="center", fontsize=TICK + 1, color=rc, zorder=10)
+    ins.annotate("2$\\times$ prompts", (x1, sp2), xytext=(16, 0), textcoords="offset points", ha="left", va="center", fontsize=TICK + 1, color=BLUE, zorder=10)
+    # the title as a text box on the main axes, drawn above the curves with an opaque background so nothing shows through it
+    ins.set_title("")
+    ax.annotate("doubling the sequences", (0.05, 0.06 + 0.32), xycoords="axes fraction", xytext=(0, 14), textcoords="offset points",
+                ha="left", va="bottom", fontsize=TICK + 1, color=INK, zorder=12, bbox=dict(boxstyle="round,pad=0.25", fc=SURFACE, ec="none", alpha=1.0))
     # the marked window on the main panel hugs the three cells (the inset's own axes are wider, to leave room for its labels)
     wx0, wx1, wy0, wy1 = x0 / 1.25, x1 * 1.25, sp2 / 1.25, s0 * 1.6
     ax.indicate_inset([wx0, wy0, wx1 - wx0, wy1 - wy0], inset_ax=ins, edgecolor=INK2, lw=1.4, alpha=0.8)
@@ -229,14 +233,16 @@ def draw_lr(ax):
     for n_, col in ((nstar_p, BLUE), (nstar_r, rc)):
         ax.axvline(n_, ls=(0, (3, 3)), lw=2.6, color=col, alpha=0.55, zorder=2.3)
     # the two exponent labels at the top, each beside its own critical-batch line and facing away from the other, as in panel (a)
-    ax.annotate(f"$\\eta^* \\propto B^{{{slope:.2f}}}$", (nstar_p, 0.96), xycoords=("data", "axes fraction"), xytext=(10, 0), textcoords="offset points",
-                ha="left", va="top", fontsize=LEGEND + 2, color=BLUE, zorder=10, bbox=dict(boxstyle="round,pad=0.2", fc=SURFACE, ec="none", alpha=1.0))
-    ax.annotate(f"$\\eta^* \\propto K^{{{slope_r:.2f}}}$", (nstar_r, 0.96), xycoords=("data", "axes fraction"), xytext=(-10, 0), textcoords="offset points", ha="right", va="top", fontsize=LEGEND + 2, color=rc, zorder=10,
-                bbox=dict(boxstyle="round,pad=0.2", fc=SURFACE, ec="none", alpha=1.0))
+    xb_ = 32 * K0; yb_ = np.exp(icpt) * 32 ** slope         # the blue label above its fit at B = 32, in the open space over the line
+    ax.annotate(f"$\\eta^* \\propto B^{{{slope:.2f}}}$", (xb_, yb_), xycoords="data", xytext=(-10, 44), textcoords="offset points",
+                ha="center", va="bottom", fontsize=LEGEND + 2, color=BLUE, zorder=10)
+    xk_ = xr.min() / 1.5; yk_ = np.exp(icpt_r) * (xk_ / B0) ** slope_r   # the purple label just left of where its fit starts
+    ax.annotate(f"$\\eta^* \\propto K^{{{slope_r:.2f}}}$", (xk_, yk_), xycoords="data", xytext=(-8, 0), textcoords="offset points", ha="right", va="center", fontsize=LEGEND + 2, color=rc, zorder=10,
+                )
     allx = sorted(set(xp) | set(xr)); major = [x for x in allx if int(round(np.log2(x))) % 2 == 0]
     ax.set_xticks(major); ax.set_xticklabels([fmt(x) for x in major]); ax.set_xticks([x for x in allx if x not in major], minor=True)
     ax.set_xticklabels([""] * len([x for x in allx if x not in major]), minor=True); ax.tick_params(axis="x", which="minor", length=0)
-    ax.set_xlim(min(allx) / 1.9, max(allx) * 1.9); ax.set_ylim(min(lp.min(), lr_.min()) / 3.5, max(lp.max(), lr_.max()) * 4.5)
+    ax.set_xlim(min(allx) / 1.9, max(allx) * 1.9); ax.set_ylim(min(lp.min(), lr_.min()) / 1.6, max(max(lp.max(), lr_.max()) * 1.8, 1.15e-4))   # keep the 1e-4 tick
     ax.set_xlabel("sequences per step  (prompts $\\times$ rollouts)", color=INK, fontsize=LABEL); ax.set_ylabel("fastest learning rate", color=INK, fontsize=LABEL)
     if not SHARED_LEGEND:
         ax.legend(loc="lower right", frameon=False, fontsize=LEGEND - 6, labelcolor=INK, handletextpad=0.5, borderaxespad=0.3, labelspacing=0.3)

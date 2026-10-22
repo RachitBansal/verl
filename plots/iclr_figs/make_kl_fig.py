@@ -90,17 +90,17 @@ def panel_a(ax):
         if fits is not None and FIT_KEY[kl] in fits.index:
             f = fits.loc[FIT_KEY[kl]]; smin, nstar = float(f["s_min"]), float(f["n_star_seqs"]); bstar = nstar / K0
             xs = np.geomspace(x.min() / 1.4, x.max() * 1.4, 200)
-            ax.plot(xs, smin * (1 + nstar / (K0 * xs)), ls="-", lw=4.0, color=KLC[kl], zorder=3)
-            ax.axvline(bstar, ls=(0, (5, 2.5)), lw=4.2, color=KLC[kl], alpha=0.9, zorder=2.3)
+            ax.plot(xs, smin * (1 + nstar / (K0 * xs)), ls="-", lw=4.8, color=KLC[kl], zorder=3)
+            ax.axvline(bstar, ls=(0, (3, 3)), lw=2.6, color=KLC[kl], alpha=0.55, zorder=2.3)
             ax.annotate(f"$B^* \\approx$ {bstar / 1000:.1f}k", (bstar, 0.60 - 0.13 * row), xycoords=("data", "axes fraction"), xytext=(-10, 0),
                         textcoords="offset points", ha="right", va="center", fontsize=LEGEND + 2, color=KLC[kl], zorder=10,
                         bbox=dict(boxstyle="round,pad=0.15", fc=SURFACE, ec="none", alpha=0.85))
         else:
-            ax.plot(x, y, lw=4.0, color=KLC[kl], zorder=3)
+            ax.plot(x, y, lw=4.8, color=KLC[kl], zorder=3)
         ax.scatter(x, y, s=MS[kl] ** 2 * 1.5, marker=MK[kl], color=KLC[kl], edgecolors=SURFACE, linewidths=1.5, zorder=6)
     style(ax); ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
     hnd = [Line2D([], [], marker=MK[kl], ls="", ms=MS[kl], color=KLC[kl], mec=SURFACE, label=KLN[kl]) for kl in KLS]
-    if fits is not None: hnd.append(Line2D([], [], ls="-", lw=4.0, color=INK2, label="fit  $S = S_\\min\\,(1 + N^*/N)$\n(as in Fig. 1)"))
+    if fits is not None: hnd.append(Line2D([], [], ls="-", lw=4.8, color=INK2, label="fit  $S = S_\\min\\,(1 + N^*/N)$\n(as in Fig. 1)"))
     ax.legend(handles=hnd, loc="lower left", frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)
 
 
@@ -112,18 +112,18 @@ def panel_b(ax):
         bs = np.array(sorted(set(best[kl]) & set(ceil[kl])), float) * 2.0 ** nudge
         yb = np.array([best[kl][int(round(v))] for v in bs / 2.0 ** nudge]); yc = np.array([ceil[kl][int(round(v))] for v in bs / 2.0 ** nudge])
         ax.fill_between(bs, yb, yc, color=KLC[kl], alpha=0.12, lw=0)
-        ax.plot(bs, yc, ls="-", lw=4.0, color=KLC[kl], zorder=5)
-        ax.plot(bs, yb, ls=(0, (5, 2.5)), lw=3.2, color=KLC[kl], alpha=0.8, zorder=4)
+        ax.plot(bs, yc, ls="-", lw=4.8, color=KLC[kl], zorder=5)
+        ax.plot(bs, yb, ls=(0, (5, 2.5)), lw=4.0, color=KLC[kl], alpha=0.8, zorder=4)
         ax.scatter(bs, yb, s=MS[kl] ** 2 * 1.5, marker=MK[kl], color=KLC[kl], edgecolors=SURFACE, linewidths=1.5, zorder=6)
         for x in rows:   # runs above the ceiling that did not qualify
             if x["kl"] == kl and x["out"] in ("reached_collapsed", "never") and x["lr"] > ceil[kl].get(x["B"], 0):
                 ax.scatter([x["B"] * 2.0 ** nudge], [x["lr"]], s=110, marker="o", facecolors="none", edgecolors=KLC[kl], alpha=0.35, linewidths=1.8, zorder=3)
     style(ax); ax.set_ylabel("learning rate", color=INK, fontsize=LABEL); ax.set_xlim(min(Bs) / 1.9, max(Bs) * 1.9)
     lo = min(min(best[kl].values()) for kl in KLS); ax.set_ylim(min(lo / 1.2, 9e-7), ax.get_ylim()[1])   # down to the 1e-6 tick; the legend sits in the empty lower-right corner
-    hnd = [Line2D([], [], ls=(0, (5, 2.5)), lw=3.2, marker="o", ms=12, color=INK2, mec=SURFACE, label="fastest LR"),
-           Line2D([], [], ls="-", lw=4.0, color=INK2, label=STABLE_LABEL[a.stable]),
+    hnd = [Line2D([], [], ls=(0, (5, 2.5)), lw=4.0, marker="o", ms=12, color=INK2, mec=SURFACE, label="fastest LR"),
+           Line2D([], [], ls="-", lw=4.8, color=INK2, label=STABLE_LABEL[a.stable]),
            Line2D([], [], marker="o", ls="", ms=9, mfc="none", mec=INK2, alpha=0.6, mew=1.8, label=FAIL_LABEL[a.stable])]
-    ax.legend(handles=hnd, loc="lower right", frameon=False, fontsize=LEGEND - 8, labelcolor=INK, handletextpad=0.4, borderaxespad=0.2,
+    ax.legend(handles=hnd, loc="lower right", frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.4, borderaxespad=0.2,
               labelspacing=0.25, handlelength=1.6)      # the lower-right quadrant of the panel is empty, so the legend sits there instead of under the figure
 
 

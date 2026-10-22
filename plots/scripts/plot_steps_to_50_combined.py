@@ -160,7 +160,7 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, hue=None):
     gb = ok[ok["steps"] == ok["steps"].min()]
 
     if star is not None:          # the sweep's fitted critical batch from the steps-vs-sequences fit, in this panel's x units (legend names it)
-        ax.axvline(star, ls=(0, (5, 2.5)), lw=3.6, color=starc, alpha=0.9, zorder=2.3)
+        ax.axvline(star, ls=(0, (3, 3)), lw=2.6, color=starc, alpha=0.55, zorder=2.3)
     ax.set_xscale("log", base=2); ax.set_yscale("log")
     drawn = pd.concat([ok, miss, short])
     xs = sorted(sub[xcol].unique())
@@ -245,7 +245,7 @@ legend = [
     Line2D([], [], ls="-", lw=4.6, color=FITC if MONO else INK2, label="power-law fit (dotted: plateau)" if plateau_b else "power-law fit"),
 ]
 if NSTAR and any(sp.get("star") is not None for sp in specs):
-    legend.append(Line2D([], [], ls=(0, (5, 2.5)), lw=3.6, color=STARC if MONO else INK2, label="critical batch (B* or K*)"))
+    legend.append(Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=STARC if MONO else INK2, alpha=0.8, label="critical batch (B* or K*)"))
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper"); os.makedirs(pdf_dir, exist_ok=True)
 if SPLIT:
     stem = png_out.replace(".png", "")

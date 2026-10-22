@@ -113,13 +113,13 @@ def draw_b(ax): panel(ax, ["b128", "b1024"], "rollouts K", "$K^*$")
 hnd = [Line2D([], [], marker=MK[k][0], ls="", ms=MK[k][1], color=C[k], mec=SURFACE) for k in SWEEPS] + \
       [Line2D([], [], ls="-", lw=4.8, color=INK2), Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8), Line2D([], [], ls=":", lw=2.6, color=INK2, alpha=0.8),
        Line2D([], [], ls="", color=SURFACE)]
-lab = [NAME[k] for k in SWEEPS] + ["fit  $S = S_\\min\\,(1 + N^*/N)$", "critical batch  $N^*$", "perfect scaling  (steps $\\propto 1/N$)", ""]
+lab = [NAME[k] for k in SWEEPS] + ["fit  $S = S_\\min\\,(1 + N^*/N)$", "critical batch  $N^*$", "perfect scaling", ""]
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper"); os.makedirs(pdf_dir, exist_ok=True)
 H = 7.4
 fig, (axa, axb) = plt.subplots(1, 2, figsize=(26.0, H + 2.8), facecolor=SURFACE)
 fig.subplots_adjust(left=0.06, right=0.99, top=0.96, bottom=0.31, wspace=0.26)
 draw_a(axa); draw_b(axb)
-fig.legend(hnd, lab, loc="lower center", ncol=4, frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.6, columnspacing=1.6, bbox_to_anchor=(0.5, 0.0))
+fig.legend(hnd, lab, loc="lower center", ncol=4, frameon=False, fontsize=LEGEND - 1, labelcolor=INK, handletextpad=0.6, columnspacing=1.6, bbox_to_anchor=(0.5, 0.0))
 fig.savefig(png_out, dpi=170, facecolor=SURFACE, bbox_inches="tight")
 fig.savefig(os.path.join(pdf_dir, os.path.basename(png_out).replace(".png", ".pdf")), facecolor=SURFACE, bbox_inches="tight")
 stem = png_out.replace(".png", "")
@@ -127,8 +127,8 @@ for tag, fn in (("a", draw_a), ("b", draw_b)):
     f_, a_ = plt.subplots(figsize=(0.495 * 26.0, H), facecolor=SURFACE, layout="constrained"); fn(a_)
     f_.savefig(f"{stem}_{tag}.png", dpi=170, facecolor=SURFACE)
     f_.savefig(os.path.join(pdf_dir, os.path.basename(stem) + f"_{tag}.pdf"), facecolor=SURFACE); plt.close(f_)
-fL = plt.figure(figsize=(26.0, 2.4), facecolor=SURFACE)
-fL.legend(hnd, lab, loc="center", ncol=4, frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.6, columnspacing=1.6)
+fL = plt.figure(figsize=(26.0, 2.6), facecolor=SURFACE)
+fL.legend(hnd, lab, loc="center", ncol=4, frameon=False, fontsize=LEGEND - 1, labelcolor=INK, handletextpad=0.6, columnspacing=1.6)
 fL.savefig(f"{stem}_legend.png", dpi=170, facecolor=SURFACE); fL.savefig(os.path.join(pdf_dir, os.path.basename(stem) + "_legend.pdf"), facecolor=SURFACE); plt.close(fL)
 print("wrote", png_out, "with _a / _b / _legend (PNG + paper PDFs)")
 for k, (pts, per, series, _) in SWEEPS.items():
