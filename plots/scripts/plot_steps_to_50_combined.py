@@ -41,7 +41,7 @@ def hue_ramp(hex_):
 
 
 CBAR_CMAP = LinearSegmentedColormap.from_list("grey_rev", ["#111111", "#6e6e6e", "#d9d9d9"])   # the shared colour bar: lightness alone encodes steps
-TICK, LABEL, TITLE, NOTE, LEGEND, CBAR = 28, 31, 32, 29, 34, 31     # type sizes (points at the rendered figure size)
+TICK, LABEL, TITLE, NOTE, LEGEND, CBAR = 28, 31, 32, 36, 34, 31     # type sizes (points at the rendered figure size)
 MISSING = "#8f8e8a"          # darker grey than the single-panel grids, for contrast against the surface
 STARC = "#52514e"            # the fitted critical batch N*: dark grey dashes (purple would clash with the B = 1024 panel hue)
 FITC = "#d62728"             # the power-law fit: tab:red, distinct from every panel hue and from the grey marks
@@ -131,12 +131,12 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, hue=None):
         if definite(i - 1) and definite(i + 1):
             settled.add(x)
     short = short[~short[xcol].isin(settled)]
-    ax.scatter(miss[xcol], miss["lr"], s=215, facecolors="none", edgecolors=MISSING, linewidths=2.7, zorder=2)
-    ax.scatter(short[xcol], short["lr"], s=190, marker="x", c=MISSING, linewidths=2.7, zorder=2)
-    ax.scatter(ok[xcol], ok["lr"], s=300, c=ok["steps"], cmap=cmap, norm=norm, edgecolors=SURFACE, linewidths=1.5, zorder=3)
+    ax.scatter(miss[xcol], miss["lr"], s=260, facecolors="none", edgecolors=MISSING, linewidths=2.8, zorder=2)
+    ax.scatter(short[xcol], short["lr"], s=220, marker="x", c=MISSING, linewidths=2.8, zorder=2)
+    ax.scatter(ok[xcol], ok["lr"], s=360, c=ok["steps"], cmap=cmap, norm=norm, edgecolors=SURFACE, linewidths=1.5, zorder=3)   # paper marker size, shared with the KL and upsampling figures
 
     best = ok.loc[ok.groupby(xcol)["steps"].idxmin()].sort_values(xcol)
-    ax.scatter(best[xcol], best["lr"], s=800, facecolors="none", edgecolors=INK, linewidths=3.6, zorder=4)
+    ax.scatter(best[xcol], best["lr"], s=900, facecolors="none", edgecolors=INK, linewidths=3.6, zorder=4)
 
     note = None; plateau = False
     if fit and len(best) >= 3:
@@ -155,8 +155,8 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, hue=None):
             note = f"$\\eta^* \\propto B^{{{slope:.2f}}}$ (±{se:.2f})"
         else:
             note = f"$\\eta^* \\propto B^{{{slope:.2f}}}$ (±{se:.2f})"
-        ax.text(0.03, 0.93, note, transform=ax.transAxes, ha="left", va="top", fontsize=NOTE, color=fitc, zorder=10,
-                bbox=dict(boxstyle="round,pad=0.15", fc=SURFACE, ec="none", alpha=0.85))   # top-left corner
+        ax.text(0.97, 0.13, note, transform=ax.transAxes, ha="right", va="bottom", fontsize=NOTE, color=fitc, zorder=10,
+                bbox=dict(boxstyle="round,pad=0.4", fc=SURFACE, ec="none", alpha=1.0))   # lower-right corner, opaque so the B* dashes do not run through the text
     gb = ok[ok["steps"] == ok["steps"].min()]
 
     if star is not None:          # the sweep's fitted critical batch from the steps-vs-sequences fit, in this panel's x units (legend names it)
@@ -238,10 +238,10 @@ cb.set_label("steps to target", color=INK, fontsize=CBAR)
 cb.ax.tick_params(colors=INK, labelsize=TICK - 1, length=0); cb.outline.set_visible(False); cb.ax.invert_yaxis()
 
 legend = [
-    Line2D([], [], marker="o", ls="", ms=17, mfc=RAMP[4] if MONO else "#6e6e6e", mec=SURFACE, label="reached target"),
-    Line2D([], [], marker="o", ls="", ms=17, mfc="none", mec=MISSING, mew=2.7, label="did not reach target"),   # the condition (trained at least as long as the fastest LR) goes in the caption
+    Line2D([], [], marker="o", ls="", ms=18.5, mfc=RAMP[4] if MONO else "#6e6e6e", mec=SURFACE, label="reached target"),
+    Line2D([], [], marker="o", ls="", ms=18.5, mfc="none", mec=MISSING, mew=2.8, label="did not reach target"),   # the condition (trained at least as long as the fastest LR) goes in the caption
     Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6, label="too early to tell"),
-    Line2D([], [], marker="o", ls="", ms=23, mfc="none", mec=INK, mew=3.6, label="fastest LR at each x"),
+    Line2D([], [], marker="o", ls="", ms=24.5, mfc="none", mec=INK, mew=3.6, label="fastest LR at each x"),
     Line2D([], [], ls="-", lw=4.6, color=FITC if MONO else INK2, label="power-law fit (dotted: plateau)" if plateau_b else "power-law fit"),
 ]
 if NSTAR and any(sp.get("star") is not None for sp in specs):
