@@ -16,7 +16,7 @@ that fit uses every B = 128 column, including K = 128, which this figure leaves 
 series is not fitted: four points are too few.
 
 A right-hand panel shows every LR tried at each K for both series, with the fastest ringed (filled = reached the target,
-hollow = never, x = too early to tell, drawn only where the fastest LR is not yet bracketed), to make visible that the LR
+hollow = did not reach it after training at least as long as the fastest LR, x = too early to tell, drawn only where the fastest LR is not yet bracketed), to make visible that the LR
 choice barely moves between the two.
 
 Usage: python plot_rollouts_vs_downsample_clean.py csv/steps_to_50_seqs.csv png/rollouts_vs_downsample_clean.png [--fit]
@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 SURFACE, INK, INK2, GRID, MUTED = "#ffffff", "#0b0b0b", "#52514e", "#e6e5e1", "#a8a7a2"
-GREEN, PURPLE = "#2ca02c", "#c2378f"     # tab:green = the rollout sweep's colour in Figure 1; magenta for upsampling (purple is the B = 1024 rollout sweep in Figure 1)
+GREEN, PURPLE = "#2ca02c", "#c2378f"     # tab:green = the rollout sweep's colour in Figure 1; magenta for upsampling (unused elsewhere; purple is the B = 1024 sweep). Green/magenta stay apart under protan, deutan and tritan simulation (CIE76 92/56/102)
 B = 128
 SHORT_STEPS = 200
 VALID_N_PREFIX = {1, 2, 4, 8, 16}        # K where a pre-fix run is an honest measurement
@@ -65,7 +65,7 @@ SHORT_STEPS = 200
 
 def ladder(src, key):
     """one row per (K, LR): fastest crossing, longest run, and the verdict against the fastest LR at that K
-    (hit / never = ran at least min(best crossing, SHORT_STEPS) steps without crossing / inconclusive = too short to judge)."""
+    (hit / "never" = ran at least min(best crossing, SHORT_STEPS) steps without crossing, shown as "did not reach" / inconclusive = too short to judge)."""
     rows = []
     for (k, lr), s_ in src.groupby([key, "lr"]):
         h = s_.dropna(subset=[COL])
@@ -135,91 +135,102 @@ for series, hits, never in [("more_rollouts", roll, roll_never), ("downsample", 
 pd.DataFrame(rows).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_table.csv")), index=False)
 
 # ------------------------------------------------------------------ figure (styled like plot_steps_to_50_combined.py)
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import paperstyle as PS                                   # shared paper figure style (Figure 1 is the reference)
-PS.apply()
-TICK, LABEL, TITLE, NOTE, LEGEND = PS.FS["tick"], PS.FS["label"], PS.FS["title"], PS.FS["annot"], PS.FS["legend"]
-GREEN, PURPLE = PS.C["b128"], PS.C["upsample"]
+TICK, LABEL, TITLE, NOTE, LEGEND = 28, 31, 32, 29, 34       # type sizes, as in the steps_to_50 figures
 # two panels side by side: steps to target on the left, every LR tried at each K on the right (ring = fastest), to show the
 # LR choice barely moves between the two series
-fig, (ax, axr) = plt.subplots(1, 2, figsize=PS.canvas(1.0, 0.40), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1]))   # a full line width
-fig.subplots_adjust(left=0.08, right=0.99, top=0.82, bottom=0.3, wspace=0.3)
-ax.set_facecolor(SURFACE); axr.set_facecolor(SURFACE)
-
-series = [("more rollouts: generate K, train K", roll, GREEN, "p", 12.5),
-          ("upsampling: generate 64, train K", ds, PURPLE, "D", 10.5)]
+MISSING = "#8f8e8a"
 fits = []
-for label, pts, color, marker, ms in series:
-    if FIT and pts is roll:
-        ft = pd.read_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(FIT_TABLE)) if not os.path.isabs(FIT_TABLE) and not os.path.exists(FIT_TABLE) else FIT_TABLE)
-        f1 = ft[ft["series"] == f"more rollouts, B = {B}"].iloc[0]
-        smin, nstar = float(f1["s_min"]), float(f1["n_star_seqs"])
-        xs = np.geomspace(pts["seqs"].min() / 1.4, pts["seqs"].max() * 1.4, 200)
-        ax.plot(xs, smin * (1 + nstar / xs), ls="-", lw=PS.LW["line"], color=color, zorder=3)
-        fits.append(dict(series=label, S_min=smin, N_crit=nstar, K_crit=nstar / B, rms_log=float(f1["rms_log"]), points=int(f1["n_points"]), source=FIT_TABLE))
-    else:                                   # no fit for this series: join its points
-        ax.plot(pts["seqs"], pts["steps"], lw=PS.LW["line"], color=color, zorder=3)
-    ax.scatter(pts["seqs"], pts["steps"], s=ms ** 2 * 1.5, marker=marker, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=6)
+
+
+def style_axes(a_):
+    a_.set_facecolor(SURFACE); a_.grid(True, which="major", color=GRID, lw=0.6); a_.set_axisbelow(True)
+    a_.tick_params(which="both", colors=INK, labelsize=TICK, length=0)
+    for sp in ("top", "right"):
+        a_.spines[sp].set_visible(False)
+    for sp in ("left", "bottom"):
+        a_.spines[sp].set_color(GRID)
+
+
+def draw_left(ax):
+    """steps to target vs K for both series, the Figure 1 fit of the rollout sweep, sequences per step on top, legend inside"""
+    style_axes(ax)
+    series = [("more rollouts: generate K, train K", roll, GREEN, "p", 19),
+              ("upsampling: generate 64, train the K largest-|advantage|", ds, PURPLE, "D", 16)]
+    for label, pts, color, marker, ms in series:
+        if FIT and pts is roll:
+            ft = pd.read_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(FIT_TABLE)) if not os.path.isabs(FIT_TABLE) and not os.path.exists(FIT_TABLE) else FIT_TABLE)
+            f1 = ft[ft["series"] == f"more rollouts, B = {B}"].iloc[0]
+            smin, nstar = float(f1["s_min"]), float(f1["n_star_seqs"])
+            xs = np.geomspace(pts["seqs"].min() / 1.4, pts["seqs"].max() * 1.4, 200)
+            ax.plot(xs, smin * (1 + nstar / xs), ls="-", lw=4.8, color=color, zorder=3)
+            fits.append(dict(series=label, S_min=smin, N_crit=nstar, K_crit=nstar / B, rms_log=float(f1["rms_log"]), points=int(f1["n_points"]), source=FIT_TABLE))
+        else:                                   # no fit for this series: join its points
+            ax.plot(pts["seqs"], pts["steps"], lw=4.8, color=color, zorder=3)
+        ax.scatter(pts["seqs"], pts["steps"], s=ms ** 2 * 1.5, marker=marker, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=6)
+    if FIT:
+        pd.DataFrame(fits).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_fit_table.csv")), index=False)
+
+    ax.set_xscale("log", base=2); ax.set_yscale("log")
+    ticks = sorted(set(roll["seqs"]) | set(ds["seqs"]))
+    ax.set_xticks(ticks); ax.set_xticklabels([str(t // B) for t in ticks])            # bottom: K (the data stay in sequences = K x B)
+    ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+    ax.set_xlabel(f"trained rollouts K  (B = {B})", color=INK, fontsize=LABEL)
+    ax.set_xlim(min(ticks) / 1.9, max(ticks) * 1.9)     # same K range as the right panel (x is in sequences = K x B)
+    ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
+    # (the sequences-per-step axis along the top was dropped 2026-10-22: K x B = 128 is in the x label)
+    legend = [Line2D([], [], marker="p", ls="", ms=19, color=GREEN, mec=SURFACE, label="generate K, train K"),
+              Line2D([], [], marker="D", ls="", ms=16, color=PURPLE, mec=SURFACE, label="generate 64, train K\n(upsampling)")]
+    if FIT:
+        legend += [Line2D([], [], ls="-", lw=4.8, color=GREEN, label="fit  $S = S_\\min\\,(1 + N^*/N)$\n(as in Fig. 1)")]
+    ax.legend(handles=legend, loc="upper right", frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)   # the upper right is empty: steps fall with N
+
+
+def draw_right(axr):
+    """every LR tried at each K for both series; ring = fastest; legend under the panel"""
+    style_axes(axr)
+    # ---- right panel: every LR tried at each K; filled = reached the target, hollow = did not reach it after training at least as long as the fastest LR, x = too early to tell; ring = fastest
+    for lad, color, marker, ms, nudge in [(roll_lad, GREEN, "p", 19, -0.15), (ds_lad, PURPLE, "D", 16, +0.15)]:
+        x = lad["k"] * 2.0 ** nudge                       # the two series side by side within each K column
+        hit = lad[lad["verdict"].isin(["hit", "best"])]; nev = lad[lad["verdict"] == "never"]; inc = lad[lad["verdict"] == "inconclusive"]
+        axr.scatter(x[hit.index], hit["lr"], s=ms ** 2 * 1.5, marker=marker, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=5)
+        axr.scatter(x[nev.index], nev["lr"], s=ms ** 2 * 1.5, marker=marker, facecolors="none", edgecolors=color, linewidths=2.6, zorder=5)
+        axr.scatter(x[inc.index], inc["lr"], s=220, marker="x", c=MISSING, linewidths=2.8, zorder=5)
+        best = lad[lad["verdict"] == "best"]
+        axr.scatter(x[best.index], best["lr"], s=1050, marker="o", facecolors="none", edgecolors=INK, linewidths=3.8, zorder=6)
+    axr.set_xscale("log", base=2); axr.set_yscale("log")
+    ks = sorted(set(roll_lad["k"]) | set(ds_lad["k"]))
+    axr.set_xticks(ks); axr.set_xticklabels([str(k) for k in ks])
+    axr.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+    axr.set_xlim(min(ks) / 1.9, max(ks) * 1.9)
+    axr.set_xlabel(f"trained rollouts K  (B = {B})", color=INK, fontsize=LABEL)
+    axr.set_ylabel("learning rate", color=INK, fontsize=LABEL)
+    legend_r = [Line2D([], [], marker="o", ls="", ms=26.5, mfc="none", mec=INK, mew=3.8, label="fastest LR"),
+                Line2D([], [], marker="o", ls="", ms=18.5, mfc="none", mec=MISSING, mew=2.8, label="did not reach target")]
+    if (roll_lad["verdict"] == "inconclusive").any() or (ds_lad["verdict"] == "inconclusive").any():
+        legend_r.append(Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6, label="too early to tell"))
+    axr.legend(handles=legend_r, loc="upper center", bbox_to_anchor=(0.5, -0.17), ncol=len(legend_r), frameon=False, fontsize=LEGEND - 4, labelcolor=INK,
+               handletextpad=0.5, columnspacing=1.6)   # directly under the right panel
+
+
+# combined figure (a full line width) and the two sub-figure files (a: 0.53, b: 0.46 of the line width; not cropped, equal height, so
+# they top-align when LaTeX sets them side by side, as for the LR split figure)
+fig, (ax, axr) = plt.subplots(1, 2, figsize=(26.0, 6.6), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1]))
+fig.subplots_adjust(left=0.06, right=0.99, top=0.84, bottom=0.22, wspace=0.22)
+draw_left(ax); draw_right(axr)
 if FIT:
     pd.DataFrame(fits).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_fit_table.csv")), index=False)
-
-ax.set_xscale("log", base=2); ax.set_yscale("log")
-ticks = sorted(set(roll["seqs"]) | set(ds["seqs"]))
-ax.set_xticks(ticks); ax.set_xticklabels([f"{t:,}" if t < 1024 else f"{t // 1024}k" for t in ticks])
-ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
-PS.subcaption(ax, "(a) Steps to target.", xlabel="sequences per step")      # sub-caption under the panel
-ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
-ax.grid(True, which="major", color=GRID, lw=0.6)
-ax.set_axisbelow(True)
-ax.tick_params(which="both", colors=INK, labelsize=TICK, length=0)
-PS.finish(ax)
-
-# ---- right panel: every LR tried at each K; filled = reached the target, hollow = never, x = too early to tell; ring = fastest
-MISSING = "#8f8e8a"
-for lad, color, marker, ms, nudge in [(roll_lad, GREEN, "p", 12.5, -0.12), (ds_lad, PURPLE, "D", 10.5, +0.12)]:
-    x = lad["k"] * 2.0 ** nudge                       # the two series side by side within each K column
-    hit = lad[lad["verdict"].isin(["hit", "best"])]; nev = lad[lad["verdict"] == "never"]; inc = lad[lad["verdict"] == "inconclusive"]
-    axr.scatter(x[hit.index], hit["lr"], s=ms ** 2 * 1.5, marker=marker, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=5)
-    axr.scatter(x[nev.index], nev["lr"], s=ms ** 2 * 1.5, marker=marker, facecolors="none", edgecolors=color, linewidths=2.2, zorder=5)
-    axr.scatter(x[inc.index], inc["lr"], s=110, marker="x", c=MISSING, linewidths=2.2, zorder=5)
-    best = lad[lad["verdict"] == "best"]
-    axr.scatter(x[best.index], best["lr"], s=400, marker="o", facecolors="none", edgecolors=INK, linewidths=2.6, zorder=6)
-axr.set_xscale("log", base=2); axr.set_yscale("log")
-ks = sorted(set(roll_lad["k"]) | set(ds_lad["k"]))
-axr.set_xticks(ks); axr.set_xticklabels([str(k) for k in ks])
-axr.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
-axr.set_xlim(min(ks) / 1.9, max(ks) * 1.9)
-PS.subcaption(axr, "(b) Learning rates.", xlabel="rollouts trained per prompt $K$")
-axr.set_ylabel("learning rate", color=INK, fontsize=LABEL)
-axr.grid(True, which="major", color=GRID, lw=0.6); axr.set_axisbelow(True)
-axr.tick_params(which="both", colors=INK, labelsize=TICK, length=0)
-PS.finish(axr)
-
-top = ax.secondary_xaxis("top", functions=(lambda n: n / B, lambda k: k * B))
-top.set_xticks([t // B for t in ticks]); top.set_xticklabels([str(t // B) for t in ticks])
-top.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
-top.set_xlabel("rollouts trained per prompt K", color=INK, fontsize=LABEL)
-top.tick_params(which="both", colors=INK, labelsize=TICK, length=0)
-for sp in top.spines.values():
-    sp.set_visible(False)
-
-legend = [Line2D([], [], marker="p", ls="", ms=12.5, color=GREEN, mec=SURFACE, label="generate K, train K"),
-          Line2D([], [], marker="D", ls="", ms=10.5, color=PURPLE, mec=SURFACE, label="generate 64, train K\n(upsampling)")]
-if FIT:
-    legend += [Line2D([], [], ls="-", lw=PS.LW["line"], color=GREEN, label="fit (Figure 1)")]
-ax.legend(handles=legend, loc="upper right", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.5, borderaxespad=0.2, labelspacing=0.3)   # the upper right is empty: steps fall with N
-legend_r = [Line2D([], [], marker="o", ls="", ms=16, mfc="none", mec=INK, mew=2.6, label="fastest LR at each K"),
-            Line2D([], [], marker="o", ls="", ms=12, mfc="none", mec=MISSING, mew=2.2, label="never reached target")]
-if (roll_lad["verdict"] == "inconclusive").any() or (ds_lad["verdict"] == "inconclusive").any():
-    legend_r.append(Line2D([], [], marker="x", ls="", ms=11, color=MISSING, mew=2.2, label="too early to tell"))
-fig.legend(handles=legend_r, loc="upper center", bbox_to_anchor=(0.5, 0.06), ncol=len(legend_r), frameon=False, fontsize=LEGEND, labelcolor=INK,
-           handletextpad=0.5, columnspacing=1.6)   # centred under the whole figure, so it adds no width on the right
 fig.savefig(png_out, dpi=170, facecolor=SURFACE, bbox_inches="tight")
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper")   # plots/paper/
 os.makedirs(pdf_dir, exist_ok=True)
 pdf_out = os.path.join(pdf_dir, os.path.basename(png_out).replace(".png", ".pdf"))
 fig.savefig(pdf_out, facecolor=SURFACE, bbox_inches="tight")
-print("wrote", png_out, "and", pdf_out)
+stem = png_out.replace(".png", "")
+for tag, fn, wfrac in (("a", draw_left, 0.53), ("b", draw_right, 0.46)):
+    f_, a_ = plt.subplots(figsize=(wfrac * 26.0, 6.6), facecolor=SURFACE, layout="constrained"); fn(a_)
+    f_.savefig(f"{stem}_{tag}.png", dpi=170, facecolor=SURFACE)
+    f_.savefig(os.path.join(pdf_dir, os.path.basename(stem) + f"_{tag}.pdf"), facecolor=SURFACE)
+    plt.close(f_)
+print("wrote", png_out, "and", pdf_out, "plus the _a / _b sub-figure files")
 for name, hits, never in [("more rollouts", roll, roll_never), ("upsampling", ds, ds_never)]:
     print(f"\n{name}:")
     for _, r in hits.iterrows():
