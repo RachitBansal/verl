@@ -152,10 +152,11 @@ def draw_one(ax):
     smin_p, nstar_p = float(fp["s_min"]), float(fp["n_star_seqs"])
     xs = np.geomspace(prompts["seqs"].min() / 1.5, prompts["seqs"].max() * 1.5, 200)
     ax.plot(xs, smin_p * nstar_p / xs, ls=":", lw=3.2, color=INK2, alpha=0.9, zorder=2.5)
-    # the doubling corollary from (B = 1024, K = 16): doubling prompts vs doubling rollouts, both land on 32k sequences per step
+    # the doubling corollary from the cell both sweeps share, (B = B0, K = 16): doubling prompts vs doubling rollouts, both land on
+    # 2 x B0 x 16 sequences per step (B0 = 1024: from 16k to 32k; B0 = 128: from 2k to 4k)
     P = prompts.set_index("x"); R = rollouts.set_index("x")
-    s0, sp2, sr2 = float(P.loc[1024, "steps"]), float(P.loc[2048, "steps"]), float(R.loc[32, "steps"])
-    x0, x1 = 1024 * K0, 2048 * K0
+    s0, sp2, sr2 = float(P.loc[B0, "steps"]), float(P.loc[2 * B0, "steps"]), float(R.loc[2 * K0, "steps"])
+    x0, x1 = B0 * K0, 2 * B0 * K0
     # the two moves as thick black arrows bowed apart (prompts below the curves, rollouts above) so they are not lost on the lines
     # (the arrows live in the zoom inset; the main panel only marks the zoomed region)
     # zoom inset, lower left: the three cells of the corollary with their step counts
@@ -237,8 +238,11 @@ def draw_lr(ax):
         ax.axvline(n_, ls=(0, (3, 3)), lw=2.6, color=col, alpha=0.55, zorder=2.3)
     # the two exponent labels at the top, each beside its own critical-batch line and facing away from the other, as in panel (a)
     xb_ = 32 * K0; yb_ = np.exp(icpt) * 32 ** slope         # the blue label above its fit at B = 32, in the open space over the line
-    ax.annotate(f"$\\eta^* \\propto B^{{{slope:.2f}}}$", (xb_, yb_), xycoords="data", xytext=(-10, 44), textcoords="offset points",
-                ha="center", va="bottom", fontsize=LEGEND + 2, color=BLUE, zorder=10)
+    if B0 == 128:   # with the B = 128 rollout sweep the space over the blue fit at B = 32 holds the green points: label in the upper left
+        ax.annotate(f"$\\eta^* \\propto B^{{{slope:.2f}}}$", (0.04, 0.95), xycoords="axes fraction", ha="left", va="top", fontsize=LEGEND + 2, color=BLUE, zorder=10)
+    else:
+        ax.annotate(f"$\\eta^* \\propto B^{{{slope:.2f}}}$", (xb_, yb_), xycoords="data", xytext=(-10, 44), textcoords="offset points",
+                    ha="center", va="bottom", fontsize=LEGEND + 2, color=BLUE, zorder=10)
     xk_ = xr.min() / 1.5; yk_ = np.exp(icpt_r) * (xk_ / B0) ** slope_r   # the purple label just left of where its fit starts
     ax.annotate(f"$\\eta^* \\propto K^{{{slope_r:.2f}}}$", (xk_, yk_), xycoords="data", xytext=(-8, 0), textcoords="offset points", ha="right", va="center", fontsize=LEGEND + 2, color=rc, zorder=10,
                 )
