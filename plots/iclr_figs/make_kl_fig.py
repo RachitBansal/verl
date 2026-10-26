@@ -26,6 +26,7 @@ ap.add_argument("--stable", choices=["hold", "peak", "reach"], default="reach",
          "peak = the original rule, last 10%% >= 60%% of its peak; reach = nothing more, crossing tau is enough (default)")
 ap.add_argument("--fit-table", default="csv/steps_vs_seqs_b1024_kl2_fit_fit_table.csv",
     help="Figure 1 fit table; panel (a) draws each KL's fitted S = S_min (1 + B*/B) and marks B*. '' = points only")
+ap.add_argument("--lin", type=float, default=None, help="mark where linear scaling ends, N = LIN N* (the fit is (1 + LIN) x perfect scaling; 0.2 = 20%% above, as in Figures 1-2) instead of B*")
 ap.add_argument("--lr-max", type=float, default=1.2e-4, help="LRs above this are left off panel (b); nothing above 1.2e-4 ever reached the target")
 a = ap.parse_args()
 
@@ -95,17 +96,33 @@ def panel_a(ax):
             f = fits.loc[FIT_KEY[kl]]; smin, nstar = float(f["s_min"]), float(f["n_star_seqs"]); bstar = nstar / K0
             xs = np.geomspace(x.min() / 1.4, x.max() * 1.4, 200)
             ax.plot(xs, smin * (1 + nstar / (K0 * xs)), ls="-", lw=4.8, color=KLC[kl], zorder=3)
-            ax.axvline(bstar, ls=(0, (3, 3)), lw=2.6, color=KLC[kl], alpha=0.55, zorder=2.3)
-            ax.annotate(f"$B^* \\approx$ {bstar / 1000:.1f}k", (bstar, 0.60 - 0.13 * row), xycoords=("data", "axes fraction"), xytext=(-10, 0),
-                        textcoords="offset points", ha="right", va="center", fontsize=LEGEND + 2, color=KLC[kl], zorder=10,
-                        bbox=dict(boxstyle="round,pad=0.15", fc=SURFACE, ec="none", alpha=0.85))
+            if a.lin:      # where linear scaling ends (open circle on the fit), labelled B ~ ... at the bottom left, stacked, clear of the curves
+                bm = a.lin * bstar
+                ax.axvline(bm, ls=(0, (3, 3)), lw=2.6, color=KLC[kl], alpha=0.55, zorder=2.3)
+                ax.plot([bm], [smin * (1 + nstar / (K0 * bm))], marker="o", ms=15, mfc=SURFACE, mec=KLC[kl], mew=3.0, ls="", zorder=8)
+                bx = a.lin * float(fits.loc[FIT_KEY[KLS[0]], "n_star_seqs"]) / K0      # both labels end left of the leftmost (KL 1e-3) line
+                ax.annotate(f"$B \\approx$ {bm:.0f}", (bx, 0.17 - 0.11 * row), xycoords=("data", "axes fraction"), xytext=(-10, 0),
+                            textcoords="offset points", ha="right", va="center", fontsize=LEGEND + 2, color=KLC[kl], zorder=10,
+                            bbox=dict(boxstyle="round,pad=0.15", fc=SURFACE, ec="none", alpha=0.85))
+            else:
+                ax.axvline(bstar, ls=(0, (3, 3)), lw=2.6, color=KLC[kl], alpha=0.55, zorder=2.3)
+                ax.annotate(f"$B^* \\approx$ {bstar / 1000:.1f}k", (bstar, 0.60 - 0.13 * row), xycoords=("data", "axes fraction"), xytext=(-10, 0),
+                            textcoords="offset points", ha="right", va="center", fontsize=LEGEND + 2, color=KLC[kl], zorder=10,
+                            bbox=dict(boxstyle="round,pad=0.15", fc=SURFACE, ec="none", alpha=0.85))
         else:
             ax.plot(x, y, lw=4.8, color=KLC[kl], zorder=3)
         ax.scatter(x, y, s=MS[kl] ** 2 * 1.5, marker=MK[kl], color=KLC[kl], edgecolors=SURFACE, linewidths=1.5, zorder=6)
     style(ax); ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
     hnd = [Line2D([], [], marker=MK[kl], ls="", ms=MS[kl], color=KLC[kl], mec=SURFACE, label=KLN[kl]) for kl in KLS]
     if fits is not None: hnd.append(Line2D([], [], ls="-", lw=4.8, color=INK2, label="fit  $S = S_\\min\\,(1 + N^*/N)$"))
-    ax.legend(handles=hnd, loc="lower left", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)
+    if fits is not None and a.lin:
+        hnd.append(Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8, marker="o", ms=12, mfc=SURFACE, mec=INK2, mew=2.4,
+                          label=f"linear scaling ends\n({a.lin:.0%} above perfect)"))
+    if a.lin:      # B labels sit at the bottom left of their lines, so the legend takes the empty upper right, opaque over the dashed lines
+        ax.legend(handles=hnd, loc="upper right", frameon=True, facecolor=SURFACE, edgecolor="none", framealpha=1.0, fontsize=LEGEND - 2,
+                  labelcolor=INK, handletextpad=0.5, borderaxespad=0.2, labelspacing=0.35, borderpad=0.3)
+    else:
+        ax.legend(handles=hnd, loc="lower left", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)
 
 
 # ---------------- (b) fastest LR vs highest stable LR per KL
