@@ -140,6 +140,7 @@ pd.DataFrame(rows).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)),
 
 # ------------------------------------------------------------------ figure (styled like plot_steps_to_50_combined.py)
 TICK, LABEL, TITLE, NOTE, LEGEND = 28, 31, 32, 29, 27       # type sizes, as in the steps_to_50 figures
+MS_SHRINK = 0.66     # marker size factor (curves keep their width): the two series' markers overlapped at full size
 # two panels side by side: steps to target on the left, every LR tried at each K on the right (ring = fastest), to show the
 # LR choice barely moves between the two series
 MISSING = "#8f8e8a"
@@ -158,8 +159,8 @@ def style_axes(a_):
 def draw_left(ax):
     """steps to target vs K for both series, the Figure 1 fit of the rollout sweep, sequences per step on top, legend inside"""
     style_axes(ax)
-    series = [("more rollouts: generate K, train K", roll, GREEN, "p", 19),
-              ("upsampling: generate 64, train the K largest-|advantage|", ds, PURPLE, "D", 16)]
+    series = [("more rollouts: generate K, train K", roll, GREEN, "p", 19 * MS_SHRINK),
+              ("upsampling: generate 64, train the K largest-|advantage|", ds, PURPLE, "D", 16 * MS_SHRINK)]
     for label, pts, color, marker, ms in series:
         if FIT and pts is roll:
             ft = pd.read_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(FIT_TABLE)) if not os.path.isabs(FIT_TABLE) and not os.path.exists(FIT_TABLE) else FIT_TABLE)
@@ -182,8 +183,8 @@ def draw_left(ax):
     ax.set_xlim(min(ticks) / 1.9, max(ticks) * 1.9)     # same K range as the right panel (x is in sequences = K x B)
     ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
     # (the sequences-per-step axis along the top was dropped 2026-10-22: K x B = 128 is in the x label)
-    legend = [Line2D([], [], marker="p", ls="", ms=19, color=GREEN, mec=SURFACE, label="generate K, train K"),
-              Line2D([], [], marker="D", ls="", ms=16, color=PURPLE, mec=SURFACE, label="generate 64, train K")]
+    legend = [Line2D([], [], marker="p", ls="", ms=19 * MS_SHRINK, color=GREEN, mec=SURFACE, label="generate K, train K"),
+              Line2D([], [], marker="D", ls="", ms=16 * MS_SHRINK, color=PURPLE, mec=SURFACE, label="generate 64, train K")]
     if FIT:
         legend += [Line2D([], [], ls="-", lw=4.8, color=GREEN, label="fit (Figure 2)")]
     ax.legend(handles=legend, loc="upper right", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)   # the upper right is empty: steps fall with N
@@ -193,14 +194,14 @@ def draw_right(axr):
     """every LR tried at each K for both series; ring = fastest; legend under the panel"""
     style_axes(axr)
     # ---- right panel: every LR tried at each K; filled = reached the target, hollow = did not reach it after training at least as long as the fastest LR, x = too early to tell; ring = fastest
-    for lad, color, marker, ms, nudge in [(roll_lad, GREEN, "p", 19, -0.15), (ds_lad, PURPLE, "D", 16, +0.15)]:
+    for lad, color, marker, ms, nudge in [(roll_lad, GREEN, "p", 19 * MS_SHRINK, -0.2), (ds_lad, PURPLE, "D", 16 * MS_SHRINK, +0.2)]:
         x = lad["k"] * 2.0 ** nudge                       # the two series side by side within each K column
         hit = lad[lad["verdict"].isin(["hit", "best"])]; nev = lad[lad["verdict"] == "never"]; inc = lad[lad["verdict"] == "inconclusive"]
         axr.scatter(x[hit.index], hit["lr"], s=ms ** 2 * 1.5, marker=marker, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=5)
-        axr.scatter(x[nev.index], nev["lr"], s=ms ** 2 * 1.5, marker=marker, facecolors="none", edgecolors=color, linewidths=2.6, zorder=5)
+        axr.scatter(x[nev.index], nev["lr"], s=ms ** 2 * 1.5, marker=marker, facecolors="none", edgecolors=color, linewidths=2.2, zorder=5)
         axr.scatter(x[inc.index], inc["lr"], s=220, marker="x", c=MISSING, linewidths=2.8, zorder=5)
         best = lad[lad["verdict"] == "best"]
-        axr.scatter(x[best.index], best["lr"], s=1050, marker="o", facecolors="none", edgecolors=INK, linewidths=3.8, zorder=6)
+        axr.scatter(x[best.index], best["lr"], s=1050 * MS_SHRINK ** 2, marker="o", facecolors="none", edgecolors=INK, linewidths=3.2, zorder=6)
     axr.set_xscale("log", base=2); axr.set_yscale("log")
     ks = sorted(set(roll_lad["k"]) | set(ds_lad["k"]))
     axr.set_xticks(ks); axr.set_xticklabels([str(k) for k in ks])
@@ -208,12 +209,13 @@ def draw_right(axr):
     axr.set_xlim(min(ks) / 1.9, max(ks) * 1.9)
     axr.set_xlabel(f"trained rollouts K  (B = {B})", color=INK, fontsize=LABEL)
     axr.set_ylabel("learning rate", color=INK, fontsize=LABEL)
-    legend_r = [Line2D([], [], marker="o", ls="", ms=26.5, mfc="none", mec=INK, mew=3.8, label="fastest LR"),
-                Line2D([], [], marker="o", ls="", ms=18.5, mfc="none", mec=MISSING, mew=2.8, label="did not reach target")]
+    legend_r = [Line2D([], [], marker="o", ls="", ms=26.5 * MS_SHRINK, mfc="none", mec=INK, mew=3.2, label="fastest LR"),
+                Line2D([], [], marker="o", ls="", ms=18.5 * MS_SHRINK, mfc="none", mec=MISSING, mew=2.4, label="did not reach target")]
     if (roll_lad["verdict"] == "inconclusive").any() or (ds_lad["verdict"] == "inconclusive").any():
         legend_r.append(Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6, label="too early to tell"))
-    global UPS_B_LEGEND
-    UPS_B_LEGEND = legend_r    # drawn as a separate legend strip under both sub-figures (rollouts_vs_downsample_clean_fit_legend)
+    lo, hi = axr.get_ylim(); axr.set_ylim(lo / 2.6, hi)     # an empty band under the lowest LRs for the legend
+    axr.legend(handles=legend_r, loc="lower center", ncol=len(legend_r), frameon=False, fontsize=LEGEND - 3, labelcolor=INK, handletextpad=0.3,
+               columnspacing=1.0, borderaxespad=0.1)   # inside panel (b) (a strip under both panels would read as applying to (a) too)
 
 
 # combined figure (a full line width) and the two sub-figure files (a: 0.53, b: 0.46 of the line width; not cropped, equal height, so
@@ -234,9 +236,6 @@ for tag, fn, wfrac in (("a", draw_left, 0.53), ("b", draw_right, 0.46)):
     f_.savefig(f"{stem}_{tag}.png", dpi=170, facecolor=SURFACE)
     f_.savefig(os.path.join(pdf_dir, os.path.basename(stem) + f"_{tag}.pdf"), facecolor=SURFACE)
     plt.close(f_)
-figL = plt.figure(figsize=(PAPER_SCALE * 26.0, PAPER_SCALE * 1.4), facecolor=SURFACE)    # legend strip for panel (b), under both sub-figures
-figL.legend(handles=UPS_B_LEGEND, loc="center", ncol=len(UPS_B_LEGEND), frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.5, columnspacing=1.6)
-figL.savefig(f"{stem}_legend.png", dpi=170, facecolor=SURFACE); figL.savefig(os.path.join(pdf_dir, os.path.basename(stem) + "_legend.pdf"), facecolor=SURFACE); plt.close(figL)
 print("wrote", png_out, "and", pdf_out, "plus the _a / _b sub-figure files")
 for name, hits, never in [("more rollouts", roll, roll_never), ("upsampling", ds, ds_never)]:
     print(f"\n{name}:")

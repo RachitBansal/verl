@@ -157,7 +157,9 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, hue=None):
         xs_fit = np.geomspace(fitpts[xcol].min(), fitpts[xcol].max(), 50)
         ax.plot(xs_fit, np.exp(icpt) * xs_fit ** slope, ls="-", lw=4.6, color=fitc, alpha=0.95, zorder=2.6)
         if plateau:
-            ax.plot([fitpts[xcol].max(), best[xcol].max()], [lrs[-1]] * 2, ls=":", lw=3.6, color=fitc, alpha=0.95, zorder=2.6)
+            # plateau: heavier dots drawn over the markers and rings, and past the last point, so it is not hidden by the fastest-LR rings
+            ax.plot([fitpts[xcol].max(), best[xcol].max() * 1.6], [lrs[-1]] * 2, ls=(0, (0.7, 1.3)), lw=6.6, color=fitc, alpha=1.0,
+                    dash_capstyle="round", zorder=4.5)
             note = f"$\\eta^* \\propto B^{{{slope:.2f}}}$ (±{se:.2f})"
         else:
             note = f"$\\eta^* \\propto B^{{{slope:.2f}}}$ (±{se:.2f})"

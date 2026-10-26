@@ -123,12 +123,12 @@ def panel_b(ax):
             if x["kl"] == kl and x["out"] in ("reached_collapsed", "never") and x["lr"] > ceil[kl].get(x["B"], 0):
                 ax.scatter([x["B"] * 2.0 ** nudge], [x["lr"]], s=110, marker="o", facecolors="none", edgecolors=KLC[kl], alpha=0.35, linewidths=1.8, zorder=3)
     style(ax); ax.set_ylabel("learning rate", color=INK, fontsize=LABEL); ax.set_xlim(min(Bs) / 1.9, max(Bs) * 1.9)
-    lo = min(min(best[kl].values()) for kl in KLS); ax.set_ylim(min(lo / 1.2, 9e-7), ax.get_ylim()[1])   # down to the 1e-6 tick; the legend sits in the empty lower-right corner
+    lo = min(min(best[kl].values()) for kl in KLS); ax.set_ylim(min(lo / 1.2, 9e-7) / 2.6, ax.get_ylim()[1])   # below the 1e-6 tick: an empty band under the data for the legend
     hnd = [Line2D([], [], ls=(0, (5, 2.5)), lw=4.0, marker="o", ms=12, color=INK2, mec=SURFACE, label="fastest LR"),
            Line2D([], [], ls="-", lw=4.8, color=INK2, label=STABLE_LABEL[a.stable]),
            Line2D([], [], marker="o", ls="", ms=9, mfc="none", mec=INK2, alpha=0.6, mew=1.8, label=FAIL_LABEL[a.stable])]
-    global KL_B_LEGEND
-    KL_B_LEGEND = hnd          # drawn as a separate legend strip under both panels (fig_kl_stability_legend), clear of the data
+    ax.legend(handles=hnd, loc="lower right", frameon=False, fontsize=LEGEND - 3, labelcolor=INK, handletextpad=0.4, borderaxespad=0.2,
+              labelspacing=0.25, handlelength=1.6)      # inside panel (b), in its empty lower-right corner: a strip under both panels would read as applying to (a) too
 
 
 paper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "paper"); os.makedirs(paper, exist_ok=True)
@@ -139,11 +139,6 @@ for tag, fn, wfrac in (("a", panel_a, 0.53), ("b", panel_b, 0.46)):
     for ext in ("pdf", "png"): fig.savefig(os.path.join(a.out, f"fig_kl_stability_{tag}.{ext}"), dpi=170, facecolor=SURFACE)
     fig.savefig(os.path.join(paper, f"fig_kl_stability_{tag}.pdf"), facecolor=SURFACE)
     plt.close(fig)
-# legend strip for panel (b), at the full line width (included under both sub-figures in LaTeX)
-figL = plt.figure(figsize=(PAPER_SCALE * 26.0, PAPER_SCALE * 1.4), facecolor=SURFACE)
-figL.legend(handles=KL_B_LEGEND, loc="center", ncol=3, frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.5, columnspacing=1.6)
-for ext in ("pdf", "png"): figL.savefig(os.path.join(a.out, f"fig_kl_stability_legend.{ext}"), dpi=170, facecolor=SURFACE)
-figL.savefig(os.path.join(paper, "fig_kl_stability_legend.pdf"), facecolor=SURFACE); plt.close(figL)
 fig, (axl, axr) = plt.subplots(1, 2, figsize=(PAPER_SCALE * (26.0), PAPER_SCALE * (8.6)), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1]))
 fig.subplots_adjust(left=0.06, right=0.99, top=0.84, bottom=0.22, wspace=0.22)
 panel_a(axl); panel_b(axr)

@@ -47,7 +47,7 @@ TOP = "--no-top" not in sys.argv
 LIN = opt("--lin", None, float)
 FLAT_ROLL = "--flat-rollouts" in sys.argv   # LR panel: the rollout sweep as two constant levels (dotted, then solid) instead of a power-law fit; no inset tick labels
 mark = lambda nstar: LIN * nstar if LIN else nstar
-MARK_LAB = (lambda u: f"${u[0]}_{{\\mathrm{{lin}}}}$") if LIN else (lambda u: f"${u[0]}^*$")
+MARK_LAB = (lambda u: f"${u[0]}$") if LIN else (lambda u: f"${u[0]}^*$")     # --lin: plain "B ≈ 720" / "K ≈ 12" (the legend says what the line marks)
 MARK_LEG = f"linear scaling ends ({LIN:.0%} above perfect)" if LIN else "critical batch $N^*$"
 
 df = pd.read_csv(csv_in)
