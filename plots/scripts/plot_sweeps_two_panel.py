@@ -24,6 +24,7 @@ from matplotlib.lines import Line2D
 
 SURFACE, INK, INK2, GRID = "#ffffff", "#0b0b0b", "#52514e", "#e6e5e1"
 C = {"n16": "#1f77b4", "n64": "#d66300", "b128": "#2ca02c", "b1024": "#9467bd"}       # Figure 1 colours
+MARKER_SHRINK = 0.72      # smaller markers (curves keep their width) so neighbouring points do not overlap
 MK = {"n16": ("o", 15.5), "n64": ("h", 16.5), "b128": ("p", 17), "b1024": ("v", 17)}
 TICK, LABEL, LEGEND = 28, 31, 27      # with PAPER_SCALE: ~8 / 9 / 7.8 pt printed, as paperstyle.py
 SHORT_STEPS = 200
@@ -93,7 +94,7 @@ def panel(ax, keys, xlabel, star_sym):
         xs = np.geomspace(pts["x"].min() / 1.5, pts["x"].max() * 1.5, 200)
         ax.plot(xs, smin * (1 + nstar / (per * xs)), ls="-", lw=4.8, color=col, zorder=3)
         ax.plot(xs, smin * nstar / (per * xs), ls=":", lw=2.6, color=col, alpha=0.6, zorder=2.5)       # perfect scaling, per sweep
-        ax.scatter(pts["x"], pts["steps"], s=ms ** 2 * 1.5, marker=mk, color=col, edgecolors=SURFACE, linewidths=1.5, zorder=6)
+        ax.scatter(pts["x"], pts["steps"], s=(MARKER_SHRINK * ms) ** 2 * 1.5, marker=mk, color=col, edgecolors=SURFACE, linewidths=1.2, zorder=6)
         ax.axvline(star, ls=(0, (3, 3)), lw=2.6, color=col, alpha=0.55, zorder=2.3)
         txt = f"{star / 1000:.1f}k" if star >= 1000 else f"{star:.0f}"
         # labels at the top, each to the left of its own line, the second sweep's one row lower so the two never collide
@@ -114,7 +115,7 @@ def draw_a(ax): panel(ax, ["n16", "n64"], "prompts B", "$B^*$")
 def draw_b(ax): panel(ax, ["b128", "b1024"], "rollouts K", "$K^*$")
 
 
-hnd = [Line2D([], [], marker=MK[k][0], ls="", ms=MK[k][1], color=C[k], mec=SURFACE) for k in SWEEPS] + \
+hnd = [Line2D([], [], marker=MK[k][0], ls="", ms=MARKER_SHRINK * MK[k][1], color=C[k], mec=SURFACE) for k in SWEEPS] + \
       [Line2D([], [], ls="-", lw=4.8, color=INK2), Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8), Line2D([], [], ls=":", lw=2.6, color=INK2, alpha=0.8),
        Line2D([], [], ls="", color=SURFACE)]
 lab = [NAME[k] for k in SWEEPS] + ["fit $S = S_\\min(1 + N^*/N)$", "critical batch $N^*$", "perfect scaling", ""]

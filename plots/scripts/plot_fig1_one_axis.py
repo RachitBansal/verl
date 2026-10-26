@@ -42,6 +42,12 @@ FIT_TABLE = opt("--fit-table", "csv/steps_vs_seqs_b1024_fit_fit_table.csv", str)
 B0 = opt("--rollout-b", 128, int)
 LR_TABLE = opt("--lr-table", "csv/steps_to_50_split_table.csv", str)   # fastest LR per cell, written by plot_steps_to_50_combined.py --split   # the rollout sweep's fixed B: 128 (pre-fix K <= 16 admitted) or 1024 (fixed code only)
 TOP = "--no-top" not in sys.argv
+# --lin FRAC: mark the end of linear batch-to-steps scaling instead of the fitted N*: the batch at which the fit is (1 + FRAC) x
+# perfect scaling S_min N*/N, i.e. N_lin = FRAC N* (FRAC = 0.2: steps 20% above perfect scaling). Default: the fitted N* itself.
+LIN = opt("--lin", None, float)
+mark = lambda nstar: LIN * nstar if LIN else nstar
+MARK_LAB = (lambda u: f"${u[0]}_{{\\mathrm{{lin}}}}$") if LIN else (lambda u: f"${u[0]}^*$")
+MARK_LEG = f"linear scaling ends ({LIN:.0%} above perfect)" if LIN else "critical batch $N^*$"
 
 df = pd.read_csv(csv_in)
 COL = "steps_to_50_interp" if "steps_to_50_interp" in df else "steps_to_50"
@@ -147,11 +153,16 @@ def draw_one(ax):
         smin, nstar = float(fit["s_min"]), float(fit["n_star_seqs"]); xs = np.geomspace(pts["seqs"].min() / 1.5, pts["seqs"].max() * 1.5, 200)
         ax.plot(xs, smin * (1 + nstar / xs), ls="-", lw=4.8, color=color, zorder=3)
         ax.scatter(pts["seqs"], pts["steps"], s=ms ** 2 * 1.5, marker=mk, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=6, label=lab)
-        ax.axvline(nstar, ls=(0, (3, 3)), lw=2.6, color=color, alpha=0.55, zorder=2.3)
-        star = nstar / per; star_txt = f"{star / 1000:.1f}k" if star >= 1000 else f"{star:.0f}"
+        nm = mark(nstar)
+        ax.axvline(nm, ls=(0, (3, 3)), lw=2.6, color=color, alpha=0.55, zorder=2.3)
+        if LIN:     # the point on the fit where linear scaling ends
+            ax.plot([nm], [smin * (1 + nstar / nm)], marker="o", ms=17, mfc=SURFACE, mec=color, mew=3.2, ls="", zorder=8)
+        star = nm / per; star_txt = f"{star / 1000:.1f}k" if star >= 1000 else f"{star:.0f}"
+        star_lab = MARK_LAB("B" if per == K0 else "K")
         # each label hangs off the top of its own line, on the side away from the other line: K* to the left, B* to the right
-        ax.annotate(f"{star_lab} $\\approx$ {star_txt}", (nstar, 0.80 if per == K0 else 0.90), xycoords=("data", "axes fraction"), xytext=(8 if per == K0 else -8, 0), textcoords="offset points",
-                    ha="left" if per == K0 else "right", va="top", fontsize=LEGEND + 2, color=color, zorder=10, bbox=dict(boxstyle="round,pad=0.2", fc=SURFACE, ec="none", alpha=1.0))
+        ly, lx, lha = (((0.15 if per != K0 else 0.03), -8, "right") if B0 == 128 else ((0.80, 8, "left") if per == K0 else (0.90, -8, "right")))   # B0 = 128: under the curves, left of the line
+        ax.annotate(f"{star_lab} $\\approx$ {star_txt}", (nm, ly), xycoords=("data", "axes fraction"), xytext=(lx, 0), textcoords="offset points",
+                    ha=lha, va="bottom" if B0 == 128 else "top", fontsize=LEGEND + 2, color=color, zorder=10, bbox=dict(boxstyle="round,pad=0.2", fc=SURFACE, ec="none", alpha=1.0))
     # perfect scaling: steps falling as 1/N, the prompt fit's small-batch asymptote S_min N*/N
     smin_p, nstar_p = float(fp["s_min"]), float(fp["n_star_seqs"])
     xs = np.geomspace(prompts["seqs"].min() / 1.5, prompts["seqs"].max() * 1.5, 200)
@@ -164,7 +175,8 @@ def draw_one(ax):
     # the two moves as thick black arrows bowed apart (prompts below the curves, rollouts above) so they are not lost on the lines
     # (the arrows live in the zoom inset; the main panel only marks the zoomed region)
     # zoom inset, lower left: the three cells of the corollary with their step counts
-    ins = ax.inset_axes([0.05, 0.06, 0.40, 0.32]); ins.set_facecolor(SURFACE)
+    INS = [0.56, 0.52, 0.40, 0.34] if B0 == 128 else [0.05, 0.06, 0.40, 0.32]   # B0 = 128: the empty upper right (curves fall to the lower right)
+    ins = ax.inset_axes(INS); ins.set_facecolor(SURFACE)
     for sp_ in ins.spines.values():
         sp_.set_color(INK2); sp_.set_linewidth(1.4)
     xa, xb = x0 / 1.45, x1 * 4.2
@@ -187,8 +199,12 @@ def draw_one(ax):
     ins.annotate("2$\\times$ prompts", (x1, sp2), xytext=(16, 0), textcoords="offset points", ha="left", va="center", fontsize=TICK + 1, color=BLUE, zorder=10)
     # the title as a text box on the main axes, drawn above the curves with an opaque background so nothing shows through it
     ins.set_title("")
-    ax.annotate("doubling the sequences", (0.05, 0.06 + 0.32), xycoords="axes fraction", xytext=(0, 14), textcoords="offset points",
-                ha="left", va="bottom", fontsize=TICK + 1, color=INK, zorder=12, bbox=dict(boxstyle="round,pad=0.25", fc=SURFACE, ec="none", alpha=1.0))
+    if B0 == 128:   # a narrower title, so it stays under the curves (which pass just above the inset near 1k-4k here)
+        ax.annotate("doubling the sequences", (INS[0], INS[1] + INS[3]), xycoords="axes fraction", xytext=(0, 8), textcoords="offset points",
+                    ha="left", va="bottom", fontsize=TICK - 3, color=INK, zorder=12, bbox=dict(boxstyle="round,pad=0.2", fc=SURFACE, ec="none", alpha=1.0))
+    else:
+        ax.annotate("doubling the sequences", (0.05, 0.06 + 0.32), xycoords="axes fraction", xytext=(0, 14), textcoords="offset points",
+                    ha="left", va="bottom", fontsize=TICK + 1, color=INK, zorder=12, bbox=dict(boxstyle="round,pad=0.25", fc=SURFACE, ec="none", alpha=1.0))
     # the marked window on the main panel hugs the three cells (the inset's own axes are wider, to leave room for its labels)
     wx0, wx1, wy0, wy1 = x0 / 1.25, x1 * 1.25, sp2 / 1.25, s0 * 1.6
     ax.indicate_inset([wx0, wy0, wx1 - wx0, wy1 - wy0], inset_ax=ins, edgecolor=INK2, lw=1.4, alpha=0.8)
@@ -199,7 +215,7 @@ def draw_one(ax):
     ax.set_xlabel("sequences per step  $N = BK$", color=INK, fontsize=LABEL); ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
     hnd, lab = ax.get_legend_handles_labels()
     hnd.append(Line2D([], [], ls="-", lw=4.8, color=INK2)); lab.append("fit $S = S_\\min(1 + N^*/N)$")
-    hnd.append(Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8)); lab.append("critical batch $N^*$")
+    hnd.append(Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8, marker="o" if LIN else None, ms=12, mfc=SURFACE, mec=INK2, mew=2.4)); lab.append(MARK_LEG)
     hnd.append(Line2D([], [], ls=":", lw=3.2, color=INK2)); lab.append("perfect scaling")
     if not SHARED_LEGEND:
         ax.legend(hnd, lab, loc="upper right", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3, markerscale=1.0)
@@ -238,7 +254,7 @@ def draw_lr(ax):
     flat = np.exp(np.log(lr_).mean())
     ax.plot([xr.min() / 1.5, xr.max() * 1.5], [flat] * 2, ls=":", lw=3.0, color=rc, alpha=0.7, zorder=2.6)
     ax.scatter(xr * 2.0 ** (0.18 * close_r), lr_, s=17 ** 2 * 1.5, marker=rmk, color=rc, edgecolors=SURFACE, linewidths=1.5, zorder=6, label=f"rollouts, B = {B0}")   # nudged right
-    for n_, col in ((nstar_p, BLUE), (nstar_r, rc)):
+    for n_, col in ((mark(nstar_p), BLUE), (mark(nstar_r), rc)):
         ax.axvline(n_, ls=(0, (3, 3)), lw=2.6, color=col, alpha=0.55, zorder=2.3)
     # the two exponent labels at the top, each beside its own critical-batch line and facing away from the other, as in panel (a)
     xb_ = 32 * K0; yb_ = np.exp(icpt) * 32 ** slope         # the blue label above its fit at B = 32, in the open space over the line
@@ -288,7 +304,7 @@ SHARED_LEGEND = True
 rc_, rmk_ = (GREEN, "p") if B0 == 128 else (PURPLE, "v")
 two_hnd = [Line2D([], [], marker="o", ls="", ms=15.5, color=BLUE, mec=SURFACE), Line2D([], [], marker=rmk_, ls="", ms=17, color=rc_, mec=SURFACE),
            Line2D([], [], ls="-", lw=4.8, color=INK2), Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8), Line2D([], [], ls=":", lw=3.2, color=INK2)]
-two_lab = [f"prompts, K = {K0}", f"rollouts, B = {B0}", "fit $S = S_\\min(1 + N^*/N)$", "critical batch $N^*$", "perfect scaling"]
+two_lab = [f"prompts, K = {K0}", f"rollouts, B = {B0}", "fit $S = S_\\min(1 + N^*/N)$", MARK_LEG, "perfect scaling"]
 fig, (axa, axb) = plt.subplots(1, 2, figsize=(PAPER_SCALE * (26.0), PAPER_SCALE * (H + 2.6)), facecolor=SURFACE)
 fig.subplots_adjust(left=0.06, right=0.99, top=0.86 if TOP else 0.96, bottom=0.30, wspace=0.26)
 draw_a(axa); draw_b(axb)

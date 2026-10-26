@@ -137,12 +137,12 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, hue=None):
     short = short[~short[xcol].isin(settled)]
     if NO_EARLY:
         short = short.iloc[0:0]
-    ax.scatter(miss[xcol], miss["lr"], s=260, facecolors="none", edgecolors=MISSING, linewidths=2.8, zorder=2)
-    ax.scatter(short[xcol], short["lr"], s=220, marker="x", c=MISSING, linewidths=2.8, zorder=2)
-    ax.scatter(ok[xcol], ok["lr"], s=360, c=ok["steps"], cmap=cmap, norm=norm, edgecolors=SURFACE, linewidths=1.5, zorder=3)   # paper marker size, shared with the KL and upsampling figures
+    ax.scatter(miss[xcol], miss["lr"], s=170, facecolors="none", edgecolors=MISSING, linewidths=2.4, zorder=2)
+    ax.scatter(short[xcol], short["lr"], s=150, marker="x", c=MISSING, linewidths=2.8, zorder=2)
+    ax.scatter(ok[xcol], ok["lr"], s=230, c=ok["steps"], cmap=cmap, norm=norm, edgecolors=SURFACE, linewidths=1.5, zorder=3)   # paper marker size, shared with the KL and upsampling figures
 
     best = ok.loc[ok.groupby(xcol)["steps"].idxmin()].sort_values(xcol)
-    ax.scatter(best[xcol], best["lr"], s=900, facecolors="none", edgecolors=INK, linewidths=3.6, zorder=4)
+    ax.scatter(best[xcol], best["lr"], s=560, facecolors="none", edgecolors=INK, linewidths=3.0, zorder=4)
 
     note = None; plateau = False
     if fit and len(best) >= 3:
@@ -258,10 +258,10 @@ cb.set_label("steps to target", color=INK, fontsize=CBAR)
 cb.ax.tick_params(colors=INK, labelsize=TICK - 1, length=0); cb.outline.set_visible(False); cb.ax.invert_yaxis()
 
 legend = [
-    Line2D([], [], marker="o", ls="", ms=18.5, mfc=RAMP[4] if MONO else "#6e6e6e", mec=SURFACE, label="reached target"),
-    Line2D([], [], marker="o", ls="", ms=18.5, mfc="none", mec=MISSING, mew=2.8, label="did not reach target"),   # the condition (trained at least as long as the fastest LR) goes in the caption
+    Line2D([], [], marker="o", ls="", ms=15, mfc=RAMP[4] if MONO else "#6e6e6e", mec=SURFACE, label="reached target"),
+    Line2D([], [], marker="o", ls="", ms=15, mfc="none", mec=MISSING, mew=2.4, label="did not reach target"),   # the condition (trained at least as long as the fastest LR) goes in the caption
 ] + ([] if NO_EARLY else [Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6, label="too early to tell")]) + [
-    Line2D([], [], marker="o", ls="", ms=24.5, mfc="none", mec=INK, mew=3.6, label="fastest LR at each x"),
+    Line2D([], [], marker="o", ls="", ms=19.5, mfc="none", mec=INK, mew=3.0, label="fastest LR at each x"),
     Line2D([], [], ls="-", lw=4.6, color=FITC if MONO else INK2, label="power-law fit (dotted: plateau)" if plateau_b else "power-law fit"),
 ]
 if NSTAR and any(sp.get("star") is not None for sp in specs):
