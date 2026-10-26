@@ -45,6 +45,7 @@ TOP = "--no-top" not in sys.argv
 # --lin FRAC: mark the end of linear batch-to-steps scaling instead of the fitted N*: the batch at which the fit is (1 + FRAC) x
 # perfect scaling S_min N*/N, i.e. N_lin = FRAC N* (FRAC = 0.2: steps 20% above perfect scaling). Default: the fitted N* itself.
 LIN = opt("--lin", None, float)
+FLAT_ROLL = "--flat-rollouts" in sys.argv   # LR panel: the rollout sweep as two constant levels (dotted, then solid) instead of a power-law fit; no inset tick labels
 mark = lambda nstar: LIN * nstar if LIN else nstar
 MARK_LAB = (lambda u: f"${u[0]}_{{\\mathrm{{lin}}}}$") if LIN else (lambda u: f"${u[0]}^*$")
 MARK_LEG = f"linear scaling ends ({LIN:.0%} above perfect)" if LIN else "critical batch $N^*$"
@@ -193,7 +194,11 @@ def draw_one(ax):
         ins.annotate("", (x1, y1), (x0, s0), zorder=8, arrowprops=dict(arrowstyle="-|>", color=INK, lw=3.4, shrinkA=16, shrinkB=16, mutation_scale=34, connectionstyle=f"arc3,rad={rad}"))
     ins.set_xscale("log", base=2); ins.set_yscale("log"); ins.set_xlim(xa, xb); ins.set_ylim(sp2 / 1.55, s0 * 1.45)
     ins.set_xticks([]); ins.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
-    ins.set_yticks([sp2, sr2]); ins.set_yticklabels([f"{sp2:.0f}", f"{sr2:.0f}"], fontsize=TICK - 6); ins.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())   # 14 and 20 (21 would overprint 20)
+    if FLAT_ROLL:   # no step-count tick labels on the inset (the B0 = 128 variant)
+        ins.set_yticks([])
+    else:
+        ins.set_yticks([sp2, sr2]); ins.set_yticklabels([f"{sp2:.0f}", f"{sr2:.0f}"], fontsize=TICK - 6)
+    ins.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())   # 14 and 20 (21 would overprint 20)
     ins.tick_params(which="both", colors=INK, length=0); ins.grid(False)
     ins.annotate("2$\\times$ rollouts", (x1, sr2), xytext=(16, 0), textcoords="offset points", ha="left", va="center", fontsize=TICK + 1, color=rc, zorder=10)
     ins.annotate("2$\\times$ prompts", (x1, sp2), xytext=(16, 0), textcoords="offset points", ha="left", va="center", fontsize=TICK + 1, color=BLUE, zorder=10)
@@ -249,10 +254,19 @@ def draw_lr(ax):
     ax.scatter(xp * 2.0 ** (-0.18 * close_p), lp, s=15.5 ** 2 * 1.5, marker="o", color=BLUE, edgecolors=SURFACE, linewidths=1.5, zorder=7, label=f"prompts, K = {K0}")   # nudged left
     # rollout sweep: its own power-law fit of eta* against K (shallow), with a flat reference at the geometric mean, dotted
     lxr, lyr = np.log(Kr), np.log(lr_); slope_r, icpt_r = np.polyfit(lxr, lyr, 1)
-    xs_r = np.geomspace(xr.min() / 1.5, xr.max() * 1.5, 100)
-    ax.plot(xs_r, np.exp(icpt_r) * (xs_r / B0) ** slope_r, ls="-", lw=4.8, color=rc, zorder=3)
-    flat = np.exp(np.log(lr_).mean())
-    ax.plot([xr.min() / 1.5, xr.max() * 1.5], [flat] * 2, ls=":", lw=3.0, color=rc, alpha=0.7, zorder=2.6)
+    if FLAT_ROLL:
+        # rollout sweep as two constant levels, no fit: split at the largest jump between consecutive fastest LRs; the small-K
+        # level dotted (as the prompt sweep's plateau is), the rest solid, each at the median LR of its group
+        k = int(np.argmax(np.abs(np.diff(np.log(lr_))))) + 1
+        lo_lv, hi_lv = float(np.median(lr_[:k])), float(np.median(lr_[k:]))
+        xm = np.sqrt(xr[k - 1] * xr[k])
+        ax.plot([xr.min() / 1.5, xm], [lo_lv] * 2, ls=":", lw=4.0, color=rc, zorder=3)
+        ax.plot([xm, xr.max() * 1.5], [hi_lv] * 2, ls="-", lw=4.8, color=rc, zorder=3)
+    else:
+        xs_r = np.geomspace(xr.min() / 1.5, xr.max() * 1.5, 100)
+        ax.plot(xs_r, np.exp(icpt_r) * (xs_r / B0) ** slope_r, ls="-", lw=4.8, color=rc, zorder=3)
+        flat = np.exp(np.log(lr_).mean())
+        ax.plot([xr.min() / 1.5, xr.max() * 1.5], [flat] * 2, ls=":", lw=3.0, color=rc, alpha=0.7, zorder=2.6)
     ax.scatter(xr * 2.0 ** (0.18 * close_r), lr_, s=17 ** 2 * 1.5, marker=rmk, color=rc, edgecolors=SURFACE, linewidths=1.5, zorder=6, label=f"rollouts, B = {B0}")   # nudged right
     for n_, col in ((mark(nstar_p), BLUE), (mark(nstar_r), rc)):
         ax.axvline(n_, ls=(0, (3, 3)), lw=2.6, color=col, alpha=0.55, zorder=2.3)
@@ -264,7 +278,7 @@ def draw_lr(ax):
         ax.annotate(f"$\\eta^* \\propto B^{{{slope:.2f}}}$", (xb_, yb_), xycoords="data", xytext=(-10, 44), textcoords="offset points",
                     ha="center", va="bottom", fontsize=LEGEND + 2, color=BLUE, zorder=10)
     xk_ = xr.min() / 1.5; yk_ = np.exp(icpt_r) * (xk_ / B0) ** slope_r   # the purple label just left of where its fit starts
-    ax.annotate(f"$\\eta^* \\propto K^{{{slope_r:.2f}}}$", (xk_, yk_), xycoords="data", xytext=(-8, 0), textcoords="offset points", ha="right", va="center", fontsize=LEGEND + 2, color=rc, zorder=10,
+    if not FLAT_ROLL: ax.annotate(f"$\\eta^* \\propto K^{{{slope_r:.2f}}}$", (xk_, yk_), xycoords="data", xytext=(-8, 0), textcoords="offset points", ha="right", va="center", fontsize=LEGEND + 2, color=rc, zorder=10,
                 )
     allx = sorted(set(xp) | set(xr)); major = [x for x in allx if int(round(np.log2(x))) % 2 == 0]
     ax.set_xticks(major); ax.set_xticklabels([fmt(x) for x in major]); ax.set_xticks([x for x in allx if x not in major], minor=True)
