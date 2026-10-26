@@ -3,7 +3,7 @@
   (a) scaling prompts: steps to the target against the prompt batch size B, for the K = 16 and K = 64 sweeps;
   (b) scaling rollouts: steps against the rollouts per prompt K, for the B = 128 and B = 1024 sweeps.
 Each sweep is drawn in its Figure 1 colour with its own fit S = S_min (1 + N*/N) (read from the Figure 1 fit table, not refitted)
-and its critical point, B* = N*/K or K* = N*/B, as a light dashed vertical labelled at the top. Both panels share the y range.
+and its critical point, B* = N*/K or K* = N*/B (with --lin 0.2: where linear scaling ends, 0.2 N*), as a light dashed vertical labelled at the top. Both panels share the y range.
 Data and admission rules are those of plot_steps_vs_seqs_paper.py (KL 1e-3; fastest LR per cell; pre-fix runs admitted at
 K = 16 and for K <= 16 at B = 128; K = 64 and B = 1024 fixed code only, dense reruns replacing coarse runs at K = 64).
 
@@ -34,6 +34,9 @@ FIXED_ONLY_N = {32, 64, 128}
 
 def opt(flag, default, cast):
     return cast(sys.argv[sys.argv.index(flag) + 1]) if flag in sys.argv else default
+# --lin FRAC (as in plot_fig1_one_axis.py): mark where linear batch-to-steps scaling ends, N_lin = FRAC N* (the fit is (1 + FRAC) x
+# perfect scaling there; FRAC = 0.2: 20% above), with an open circle on the fit, instead of the fitted N* itself
+LIN = opt("--lin", None, float)
 
 
 args = [a for i, a in enumerate(sys.argv[1:]) if not a.startswith("--") and not sys.argv[i].startswith("--")]
@@ -85,21 +88,24 @@ def style(ax):
     ax.set_xscale("log", base=2); ax.set_yscale("log"); ax.set_ylim(ylo, yhi)
 
 
-def panel(ax, keys, xlabel, star_sym):
+def panel(ax, keys, xlabel, star_sym, side="left"):
     """the sweeps of one panel: points, fit, perfect-scaling reference and critical point for each, labels at the top"""
     xs_all = set()
     for i, key in enumerate(keys):
         pts, per, series, _ = SWEEPS[key]; col = C[key]; mk, ms = MK[key]
-        f = fits.loc[series]; smin, nstar = float(f["s_min"]), float(f["n_star_seqs"]); star = nstar / per
+        f = fits.loc[series]; smin, nstar = float(f["s_min"]), float(f["n_star_seqs"])
+        nm = LIN * nstar if LIN else nstar; star = nm / per
         xs = np.geomspace(pts["x"].min() / 1.5, pts["x"].max() * 1.5, 200)
         ax.plot(xs, smin * (1 + nstar / (per * xs)), ls="-", lw=4.8, color=col, zorder=3)
         ax.plot(xs, smin * nstar / (per * xs), ls=":", lw=2.6, color=col, alpha=0.6, zorder=2.5)       # perfect scaling, per sweep
         ax.scatter(pts["x"], pts["steps"], s=(MARKER_SHRINK * ms) ** 2 * 1.5, marker=mk, color=col, edgecolors=SURFACE, linewidths=1.2, zorder=6)
         ax.axvline(star, ls=(0, (3, 3)), lw=2.6, color=col, alpha=0.55, zorder=2.3)
+        if LIN:     # the point on the fit where linear scaling ends
+            ax.plot([star], [smin * (1 + nstar / nm)], marker="o", ms=15, mfc=SURFACE, mec=col, mew=3.0, ls="", zorder=8)
         txt = f"{star / 1000:.1f}k" if star >= 1000 else f"{star:.0f}"
         # labels at the top, each to the left of its own line, the second sweep's one row lower so the two never collide
-        ax.annotate(f"{star_sym} $\\approx$ {txt}", (star, 0.96 - 0.10 * i), xycoords=("data", "axes fraction"), xytext=(-10, 0), textcoords="offset points",
-                    ha="right", va="top", fontsize=LEGEND, color=col, zorder=10,
+        ax.annotate(f"{star_sym} $\\approx$ {txt}", (star, 0.96 - 0.10 * i), xycoords=("data", "axes fraction"), xytext=(-10 if side == "left" else 10, 0), textcoords="offset points",
+                    ha="right" if side == "left" else "left", va="top", fontsize=LEGEND, color=col, zorder=10,
                     bbox=dict(boxstyle="round,pad=0.2", fc=SURFACE, ec="none", alpha=1.0))
         xs_all |= set(pts["x"])
     style(ax)
@@ -111,14 +117,16 @@ def panel(ax, keys, xlabel, star_sym):
     ax.set_xlabel(xlabel, color=INK, fontsize=LABEL); ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
 
 
-def draw_a(ax): panel(ax, ["n16", "n64"], "prompts B", "$B^*$")
-def draw_b(ax): panel(ax, ["b128", "b1024"], "rollouts K", "$K^*$")
+def draw_a(ax): panel(ax, ["n16", "n64"], "prompts B", "$B$" if LIN else "$B^*$")
+def draw_b(ax): panel(ax, ["b128", "b1024"], "rollouts K", "$K$" if LIN else "$K^*$", side="right" if LIN else "left")   # --lin: the K lines sit where the curves are high; labels to the right
 
 
 hnd = [Line2D([], [], marker=MK[k][0], ls="", ms=MARKER_SHRINK * MK[k][1], color=C[k], mec=SURFACE) for k in SWEEPS] + \
-      [Line2D([], [], ls="-", lw=4.8, color=INK2), Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8), Line2D([], [], ls=":", lw=2.6, color=INK2, alpha=0.8),
+      [Line2D([], [], ls="-", lw=4.8, color=INK2),
+       Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8, marker="o" if LIN else None, ms=12, mfc=SURFACE, mec=INK2, mew=2.4), Line2D([], [], ls=":", lw=2.6, color=INK2, alpha=0.8),
        Line2D([], [], ls="", color=SURFACE)]
-lab = [NAME[k] for k in SWEEPS] + ["fit $S = S_\\min(1 + N^*/N)$", "critical batch $N^*$", "perfect scaling", ""]
+lab = [NAME[k] for k in SWEEPS] + ["fit $S = S_\\min(1 + N^*/N)$", f"linear scaling ends ({LIN:.0%} above perfect)" if LIN else "critical batch $N^*$",
+                                   "perfect scaling", ""]
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper"); os.makedirs(pdf_dir, exist_ok=True)
 H = 7.4
 fig, (axa, axb) = plt.subplots(1, 2, figsize=(PAPER_SCALE * (26.0), PAPER_SCALE * (H + 2.8)), facecolor=SURFACE)
