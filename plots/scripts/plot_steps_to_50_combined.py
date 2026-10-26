@@ -24,6 +24,10 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+# Paper scale (shared style with the iclr_figs figures and paperstyle.py): this script lays figures out on a 26-inch "line width"
+# with 28-34 pt type; drawing it on a 19-inch canvas instead (x 19/26) prints the type at ~8-10 pt and lines at ~1.4 pt when the
+# figure is scaled to the 5.5-inch text width, the same as the other paper figures.
+PAPER_SCALE = 19.0 / 26.0
 from matplotlib.colors import LinearSegmentedColormap, LogNorm
 from matplotlib.lines import Line2D
 
@@ -41,7 +45,7 @@ def hue_ramp(hex_):
 
 
 CBAR_CMAP = LinearSegmentedColormap.from_list("grey_rev", ["#111111", "#6e6e6e", "#d9d9d9"])   # the shared colour bar: lightness alone encodes steps
-TICK, LABEL, TITLE, NOTE, LEGEND, CBAR = 28, 31, 32, 36, 34, 31     # type sizes (points at the rendered figure size)
+TICK, LABEL, TITLE, NOTE, LEGEND, CBAR = 28, 31, 32, 29, 27, 31     # type sizes (points at the rendered figure size)
 MISSING = "#8f8e8a"          # darker grey than the single-panel grids, for contrast against the surface
 STARC = "#52514e"            # the fitted critical batch N*: dark grey dashes (purple would clash with the B = 1024 panel hue)
 FITC = "#d62728"             # the power-law fit: tab:red, distinct from every panel hue and from the grey marks
@@ -131,6 +135,8 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, hue=None):
         if definite(i - 1) and definite(i + 1):
             settled.add(x)
     short = short[~short[xcol].isin(settled)]
+    if NO_EARLY:
+        short = short.iloc[0:0]
     ax.scatter(miss[xcol], miss["lr"], s=260, facecolors="none", edgecolors=MISSING, linewidths=2.8, zorder=2)
     ax.scatter(short[xcol], short["lr"], s=220, marker="x", c=MISSING, linewidths=2.8, zorder=2)
     ax.scatter(ok[xcol], ok["lr"], s=360, c=ok["steps"], cmap=cmap, norm=norm, edgecolors=SURFACE, linewidths=1.5, zorder=3)   # paper marker size, shared with the KL and upsampling figures
@@ -155,7 +161,7 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, hue=None):
             note = f"$\\eta^* \\propto B^{{{slope:.2f}}}$ (±{se:.2f})"
         else:
             note = f"$\\eta^* \\propto B^{{{slope:.2f}}}$ (±{se:.2f})"
-        ax.text(0.97, 0.13, note, transform=ax.transAxes, ha="right", va="bottom", fontsize=NOTE, color=fitc, zorder=10,
+        ax.text(0.98, 0.02, note, transform=ax.transAxes, ha="right", va="bottom", fontsize=NOTE, color=fitc, zorder=10,
                 bbox=dict(boxstyle="round,pad=0.4", fc=SURFACE, ec="none", alpha=1.0))   # lower-right corner, opaque so the B* dashes do not run through the text
     gb = ok[ok["steps"] == ok["steps"].min()]
 
@@ -178,6 +184,9 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, hue=None):
 
 # panels in order: the batch sweeps (K = N_ROLL, then K = N2 if given), then the rollout sweep at B = BSZ (unless --batch-only)
 FIT_N2 = "--fit-n2" in sys.argv           # the second batch sweep's LRs were chosen from the K = 16 rule, so its fit is off by default
+NO_EARLY = "--no-early" in sys.argv          # do not draw the "too early to tell" runs (nor their legend entry)
+NO_NSTAR_N2 = "--no-nstar-n2" in sys.argv    # no critical-batch line on the second batch sweep
+SHARE_B = "--share-b" in sys.argv            # the prompt-sweep panels share the K = 16 batch-size axis (4 ... 16k) and equal widths
 MONO = "--mono" in sys.argv               # one blue colour scale for every panel (the old look) instead of per-panel Figure 1 hues
 hue = lambda key: CMAP if MONO else hue_ramp(FIG1.get(key, "#1f77b4"))
 hue1 = lambda key: None if MONO else FIG1.get(key, "#1f77b4")      # the panel's line colour (fit, critical batch)
@@ -191,6 +200,8 @@ if NSTAR:
     for sp in specs:
         key = f"more prompts, K = {N_ROLL if sp is specs[0] else N2}" if sp["xcol"] == "bsz" else f"more rollouts, B = {BSZ}"
         sp["star"] = float(ft[key]) if key in ft else None
+        if NO_NSTAR_N2 and N2 and sp is not specs[0] and sp["xcol"] == "bsz":
+            sp["star"] = None; continue
         if sp["star"] is None:
             print(f"note: no N* for '{key}' in {NSTAR}")
 widths = [max(sp["data"][sp["xcol"]].nunique(), 1) for sp in specs]
@@ -199,17 +210,17 @@ if SPLIT:
     # (a) the batch sweeps side by side, (b) the rollout sweep; widths 0.655 : 0.33 of the same line, so the type matches in the paper
     W = 26.0
     bspecs, rspecs = [sp for sp in specs if sp["xcol"] == "bsz"], [sp for sp in specs if sp["xcol"] == "n"]
-    figA, gA = plt.subplots(1, len(bspecs), figsize=(0.655 * W, H), facecolor=SURFACE, sharey=True, layout="constrained",
-                            gridspec_kw=dict(width_ratios=[max(sp["data"]["bsz"].nunique(), 1) for sp in bspecs]), squeeze=False)
+    figA, gA = plt.subplots(1, len(bspecs), figsize=(PAPER_SCALE * (0.655 * W), PAPER_SCALE * (H)), facecolor=SURFACE, sharey=True, layout="constrained",
+                            gridspec_kw=dict(width_ratios=[1] * len(bspecs) if SHARE_B else [max(sp["data"]["bsz"].nunique(), 1) for sp in bspecs]), squeeze=False)
     figA.get_layout_engine().set(wspace=0.04)
-    figB, gB = plt.subplots(1, 1, figsize=(0.33 * W, H), facecolor=SURFACE, layout="constrained", squeeze=False)
+    figB, gB = plt.subplots(1, 1, figsize=(PAPER_SCALE * (0.33 * W), PAPER_SCALE * (H)), facecolor=SURFACE, layout="constrained", squeeze=False)
     axes = list(gA[0]) + list(gB[0]); specs = bspecs + rspecs; fig = figA
 else:
     fig_w = {1: 14.0, 2: 20.0, 3: 26.0}[len(specs)]
     GAP = 1.4 if (N2 and not BATCH_ONLY) else 0          # several batch sweeps: an empty spacer column sets the rollout sweep apart
     cols = widths[:-1] + ([GAP] if GAP else []) + widths[-1:]
     LEG_H = 2.4 if len(specs) == 1 else 1.7                # room for the in-figure legend below the axes (one column / two or three)
-    fig, grid = plt.subplots(1, len(cols), figsize=(fig_w, H + LEG_H), facecolor=SURFACE, sharey=True, layout="constrained",
+    fig, grid = plt.subplots(1, len(cols), figsize=(PAPER_SCALE * (fig_w), PAPER_SCALE * (H + LEG_H)), facecolor=SURFACE, sharey=True, layout="constrained",
                              gridspec_kw=dict(width_ratios=cols), squeeze=False)
     grid = list(grid[0])
     if GAP:
@@ -223,6 +234,15 @@ for ax, sp in zip(axes, specs):
     best, gb, note, drawn, plateau = panel(ax, sp["data"], sp["xcol"], sp["xlabel"], fit=sp["fit"], star=sp.get("star"), cmap=sp["cmap"], hue=sp["hue"])
     if sp["title"]: ax.set_title(sp["title"], loc="left", fontsize=TITLE if (len(specs) < 3 or SPLIT) else TITLE - 2, color=INK, pad=4)   # no titles: what is fixed goes in the x label
     results.append(dict(spec=sp, best=best, note=note, drawn=drawn, plateau=plateau))
+if SHARE_B:      # the prompt-sweep panels on one batch-size axis (the K = 16 range), so the two sweeps line up
+    bax = [(ax, sp) for ax, sp in zip(axes, specs) if sp["xcol"] == "bsz"]
+    lo = min(sp["data"]["bsz"].min() for _, sp in bax); hi = max(sp["data"]["bsz"].max() for _, sp in bax)
+    allb = [2 ** i for i in range(int(np.log2(lo)), int(np.log2(hi)) + 1)]
+    major = [b for b in allb if int(round(np.log2(b))) % 2 == 0]
+    for ax, _ in bax:
+        ax.set_xlim(lo / 1.6, hi * 1.6)
+        ax.set_xticks(major); ax.set_xticklabels([f"{b // 1024}k" if b >= 1024 else str(b) for b in major])
+        ax.set_xticks([b for b in allb if b not in major], minor=True); ax.set_xticklabels([], minor=True)
 lr_all = pd.concat([r["drawn"] for r in results])["lr"]          # shared y-limits from what the panels actually draw
 for ax in axes:
     ax.set_ylim(lr_all.min() / 1.7, lr_all.max() * 1.7)
@@ -240,12 +260,12 @@ cb.ax.tick_params(colors=INK, labelsize=TICK - 1, length=0); cb.outline.set_visi
 legend = [
     Line2D([], [], marker="o", ls="", ms=18.5, mfc=RAMP[4] if MONO else "#6e6e6e", mec=SURFACE, label="reached target"),
     Line2D([], [], marker="o", ls="", ms=18.5, mfc="none", mec=MISSING, mew=2.8, label="did not reach target"),   # the condition (trained at least as long as the fastest LR) goes in the caption
-    Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6, label="too early to tell"),
+] + ([] if NO_EARLY else [Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6, label="too early to tell")]) + [
     Line2D([], [], marker="o", ls="", ms=24.5, mfc="none", mec=INK, mew=3.6, label="fastest LR at each x"),
     Line2D([], [], ls="-", lw=4.6, color=FITC if MONO else INK2, label="power-law fit (dotted: plateau)" if plateau_b else "power-law fit"),
 ]
 if NSTAR and any(sp.get("star") is not None for sp in specs):
-    legend.append(Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=STARC if MONO else INK2, alpha=0.8, label="critical batch (B* or K*)"))
+    legend.append(Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=STARC if MONO else INK2, alpha=0.8, label="critical batch"))
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper"); os.makedirs(pdf_dir, exist_ok=True)
 if SPLIT:
     stem = png_out.replace(".png", "")
@@ -256,8 +276,8 @@ if SPLIT:
         f.savefig(os.path.join(pdf_dir, os.path.basename(stem) + f"_{tag}.pdf"), facecolor=SURFACE)
         print("wrote", f"{stem}_{tag}.png")
     # legend strip at the full line width (W), so its type comes out at the same size as the panels; not cropped, to keep that scale
-    figL = plt.figure(figsize=(W, 2.3), facecolor=SURFACE)
-    figL.legend(handles=legend, loc="center", ncol=3, frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, columnspacing=1.5, borderaxespad=0.0)
+    figL = plt.figure(figsize=(PAPER_SCALE * (W), PAPER_SCALE * (2.3)), facecolor=SURFACE)
+    figL.legend(handles=legend, loc="center", ncol=3, frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.5, columnspacing=1.2, borderaxespad=0.0)
     figL.savefig(f"{stem}_legend.png", dpi=170, facecolor=SURFACE)
     figL.savefig(os.path.join(pdf_dir, os.path.basename(stem) + "_legend.pdf"), facecolor=SURFACE)
     print("wrote", f"{stem}_legend.png")

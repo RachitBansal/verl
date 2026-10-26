@@ -4,7 +4,7 @@ x,seqs,lr,steps,run,sweep
 16,256,4e-06,1073.611111111111,n16_bsz16_lr4e-6,prompts
 32,512,6e-06,548.6842105263158,n16_bsz32_lr6e-6_kl1e-3_v2,prompts
 64,1024,6e-06,309.2105263157894,n16_bsz64_lr6e-6_kl1e-3_v2,prompts
-128,2048,1e-05,191.07142857142856,n16_bsz128_lr1e-5_kl1e-3_v2,prompts
+128,2048,7.5e-06,157.24137931034485,n16_bsz128_lr7.5e-6_kl0.001_updated_scaling,prompts
 256,4096,2e-05,84.78260869565217,n16_bsz256_lr2e-5_kl1e-3_v2,prompts
 512,8192,2e-05,43.90909090909091,n16_bsz512_lr2e-5_kl0.001_updated_scaling_dense,prompts
 1024,16384,3e-05,20.954545454545457,n16_bsz1024_lr3e-5_kl0.001_updated_scaling_dense,prompts

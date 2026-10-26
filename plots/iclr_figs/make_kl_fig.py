@@ -12,6 +12,10 @@ Usage: python make_kl_fig.py --traj csv/traj_from_curves.csv --meta csv/meta_fro
 Writes fig_kl_stability.{png,pdf} (both panels; the PDF also to plots/paper/) and fig_kl_stability_{a,b}.{png,pdf}; prints the ceiling per B and KL."""
 import argparse, os, sys, numpy as np, pandas as pd, matplotlib
 matplotlib.use("Agg"); import matplotlib.pyplot as plt
+# Paper scale (shared style with the iclr_figs figures and paperstyle.py): this script lays figures out on a 26-inch "line width"
+# with 28-34 pt type; drawing it on a 19-inch canvas instead (x 19/26) prints the type at ~8-10 pt and lines at ~1.4 pt when the
+# figure is scaled to the 5.5-inch text width, the same as the other paper figures.
+PAPER_SCALE = 19.0 / 26.0
 from matplotlib.lines import Line2D
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cbs_data import load_runs, best_per_cell
@@ -29,7 +33,7 @@ a = ap.parse_args()
 SURFACE, INK, INK2, GRID = "#ffffff", "#0b0b0b", "#52514e", "#e6e5e1"
 KLC = {0.001: "#1f77b4", 0.01: "#c2185b"}   # KL 1e-3 blue (Figure 1 K = 16 blue), KL 1e-2 pink
 KLN = {0.001: "KL 1e-3", 0.01: "KL 1e-2"}; MK = {0.001: "o", 0.01: "s"}; MS = {0.001: 15.5, 0.01: 13.8}   # paper marker size shared with the LR split and upsampling figures (s = 360 for circles)
-TICK, LABEL, TITLE, LEGEND = 28, 31, 32, 34
+TICK, LABEL, TITLE, LEGEND = 28, 31, 32, 27
 K0 = 16; KLS = (0.001, 0.01)
 runs = load_runs(a.traj, a.meta)
 fmt = lambda x: f"{int(x) // 1024}k" if x >= 1024 else str(int(x))
@@ -101,7 +105,7 @@ def panel_a(ax):
     style(ax); ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
     hnd = [Line2D([], [], marker=MK[kl], ls="", ms=MS[kl], color=KLC[kl], mec=SURFACE, label=KLN[kl]) for kl in KLS]
     if fits is not None: hnd.append(Line2D([], [], ls="-", lw=4.8, color=INK2, label="fit  $S = S_\\min\\,(1 + N^*/N)$"))
-    ax.legend(handles=hnd, loc="lower left", frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)
+    ax.legend(handles=hnd, loc="lower left", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)
 
 
 # ---------------- (b) fastest LR vs highest stable LR per KL
@@ -123,19 +127,24 @@ def panel_b(ax):
     hnd = [Line2D([], [], ls=(0, (5, 2.5)), lw=4.0, marker="o", ms=12, color=INK2, mec=SURFACE, label="fastest LR"),
            Line2D([], [], ls="-", lw=4.8, color=INK2, label=STABLE_LABEL[a.stable]),
            Line2D([], [], marker="o", ls="", ms=9, mfc="none", mec=INK2, alpha=0.6, mew=1.8, label=FAIL_LABEL[a.stable])]
-    ax.legend(handles=hnd, loc="lower right", frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.4, borderaxespad=0.2,
-              labelspacing=0.25, handlelength=1.6)      # the lower-right quadrant of the panel is empty, so the legend sits there instead of under the figure
+    global KL_B_LEGEND
+    KL_B_LEGEND = hnd          # drawn as a separate legend strip under both panels (fig_kl_stability_legend), clear of the data
 
 
 paper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "paper"); os.makedirs(paper, exist_ok=True)
 # sub-figures for a LaTeX subfigure layout (a: 0.53, b: 0.46 of the line width): not cropped, same canvas height and top margin, so the
 # two top-align when LaTeX sets them side by side (as for the LR split figure)
 for tag, fn, wfrac in (("a", panel_a, 0.53), ("b", panel_b, 0.46)):
-    fig, ax = plt.subplots(figsize=(wfrac * 26.0, 8.6), facecolor=SURFACE, layout="constrained"); fn(ax)
+    fig, ax = plt.subplots(figsize=(PAPER_SCALE * (wfrac * 26.0), PAPER_SCALE * (8.6)), facecolor=SURFACE, layout="constrained"); fn(ax)
     for ext in ("pdf", "png"): fig.savefig(os.path.join(a.out, f"fig_kl_stability_{tag}.{ext}"), dpi=170, facecolor=SURFACE)
     fig.savefig(os.path.join(paper, f"fig_kl_stability_{tag}.pdf"), facecolor=SURFACE)
     plt.close(fig)
-fig, (axl, axr) = plt.subplots(1, 2, figsize=(26.0, 8.6), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1]))
+# legend strip for panel (b), at the full line width (included under both sub-figures in LaTeX)
+figL = plt.figure(figsize=(PAPER_SCALE * 26.0, PAPER_SCALE * 1.4), facecolor=SURFACE)
+figL.legend(handles=KL_B_LEGEND, loc="center", ncol=3, frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.5, columnspacing=1.6)
+for ext in ("pdf", "png"): figL.savefig(os.path.join(a.out, f"fig_kl_stability_legend.{ext}"), dpi=170, facecolor=SURFACE)
+figL.savefig(os.path.join(paper, "fig_kl_stability_legend.pdf"), facecolor=SURFACE); plt.close(figL)
+fig, (axl, axr) = plt.subplots(1, 2, figsize=(PAPER_SCALE * (26.0), PAPER_SCALE * (8.6)), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1]))
 fig.subplots_adjust(left=0.06, right=0.99, top=0.84, bottom=0.22, wspace=0.22)
 panel_a(axl); panel_b(axr)
 for ext in ("pdf", "png"): fig.savefig(os.path.join(a.out, f"fig_kl_stability.{ext}"), dpi=170, facecolor=SURFACE, bbox_inches="tight")

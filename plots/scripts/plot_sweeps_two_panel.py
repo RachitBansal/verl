@@ -16,12 +16,16 @@ import numpy as np, pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+# Paper scale (shared style with the iclr_figs figures and paperstyle.py): this script lays figures out on a 26-inch "line width"
+# with 28-34 pt type; drawing it on a 19-inch canvas instead (x 19/26) prints the type at ~8-10 pt and lines at ~1.4 pt when the
+# figure is scaled to the 5.5-inch text width, the same as the other paper figures.
+PAPER_SCALE = 19.0 / 26.0
 from matplotlib.lines import Line2D
 
 SURFACE, INK, INK2, GRID = "#ffffff", "#0b0b0b", "#52514e", "#e6e5e1"
 C = {"n16": "#1f77b4", "n64": "#d66300", "b128": "#2ca02c", "b1024": "#9467bd"}       # Figure 1 colours
 MK = {"n16": ("o", 15.5), "n64": ("h", 16.5), "b128": ("p", 17), "b1024": ("v", 17)}
-TICK, LABEL, LEGEND = 28, 31, 34
+TICK, LABEL, LEGEND = 28, 31, 27      # with PAPER_SCALE: ~8 / 9 / 7.8 pt printed, as paperstyle.py
 SHORT_STEPS = 200
 VALID_N_PREFIX = {1, 2, 4, 8, 16}
 FIXED_ONLY_N = {32, 64, 128}
@@ -113,22 +117,22 @@ def draw_b(ax): panel(ax, ["b128", "b1024"], "rollouts K", "$K^*$")
 hnd = [Line2D([], [], marker=MK[k][0], ls="", ms=MK[k][1], color=C[k], mec=SURFACE) for k in SWEEPS] + \
       [Line2D([], [], ls="-", lw=4.8, color=INK2), Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8), Line2D([], [], ls=":", lw=2.6, color=INK2, alpha=0.8),
        Line2D([], [], ls="", color=SURFACE)]
-lab = [NAME[k] for k in SWEEPS] + ["fit  $S = S_\\min\\,(1 + N^*/N)$", "critical batch  $N^*$", "perfect scaling", ""]
+lab = [NAME[k] for k in SWEEPS] + ["fit $S = S_\\min(1 + N^*/N)$", "critical batch $N^*$", "perfect scaling", ""]
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper"); os.makedirs(pdf_dir, exist_ok=True)
 H = 7.4
-fig, (axa, axb) = plt.subplots(1, 2, figsize=(26.0, H + 2.8), facecolor=SURFACE)
+fig, (axa, axb) = plt.subplots(1, 2, figsize=(PAPER_SCALE * (26.0), PAPER_SCALE * (H + 2.8)), facecolor=SURFACE)
 fig.subplots_adjust(left=0.06, right=0.99, top=0.96, bottom=0.31, wspace=0.26)
 draw_a(axa); draw_b(axb)
-fig.legend(hnd, lab, loc="lower center", ncol=4, frameon=False, fontsize=LEGEND - 1, labelcolor=INK, handletextpad=0.6, columnspacing=1.6, bbox_to_anchor=(0.5, 0.0))
+fig.legend(hnd, lab, loc="lower center", ncol=4, frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, columnspacing=1.2, bbox_to_anchor=(0.5, 0.0))
 fig.savefig(png_out, dpi=170, facecolor=SURFACE, bbox_inches="tight")
 fig.savefig(os.path.join(pdf_dir, os.path.basename(png_out).replace(".png", ".pdf")), facecolor=SURFACE, bbox_inches="tight")
 stem = png_out.replace(".png", "")
 for tag, fn in (("a", draw_a), ("b", draw_b)):
-    f_, a_ = plt.subplots(figsize=(0.495 * 26.0, H), facecolor=SURFACE, layout="constrained"); fn(a_)
+    f_, a_ = plt.subplots(figsize=(PAPER_SCALE * (0.495 * 26.0), PAPER_SCALE * (H)), facecolor=SURFACE, layout="constrained"); fn(a_)
     f_.savefig(f"{stem}_{tag}.png", dpi=170, facecolor=SURFACE)
     f_.savefig(os.path.join(pdf_dir, os.path.basename(stem) + f"_{tag}.pdf"), facecolor=SURFACE); plt.close(f_)
-fL = plt.figure(figsize=(26.0, 2.6), facecolor=SURFACE)
-fL.legend(hnd, lab, loc="center", ncol=4, frameon=False, fontsize=LEGEND - 1, labelcolor=INK, handletextpad=0.6, columnspacing=1.6)
+fL = plt.figure(figsize=(PAPER_SCALE * (26.0), PAPER_SCALE * (2.6)), facecolor=SURFACE)
+fL.legend(hnd, lab, loc="center", ncol=4, frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, columnspacing=1.2)
 fL.savefig(f"{stem}_legend.png", dpi=170, facecolor=SURFACE); fL.savefig(os.path.join(pdf_dir, os.path.basename(stem) + "_legend.pdf"), facecolor=SURFACE); plt.close(fL)
 print("wrote", png_out, "with _a / _b / _legend (PNG + paper PDFs)")
 for k, (pts, per, series, _) in SWEEPS.items():

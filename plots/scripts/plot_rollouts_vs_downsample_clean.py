@@ -26,6 +26,10 @@ import numpy as np, pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+# Paper scale (shared style with the iclr_figs figures and paperstyle.py): this script lays figures out on a 26-inch "line width"
+# with 28-34 pt type; drawing it on a 19-inch canvas instead (x 19/26) prints the type at ~8-10 pt and lines at ~1.4 pt when the
+# figure is scaled to the 5.5-inch text width, the same as the other paper figures.
+PAPER_SCALE = 19.0 / 26.0
 from matplotlib.lines import Line2D
 
 SURFACE, INK, INK2, GRID, MUTED = "#ffffff", "#0b0b0b", "#52514e", "#e6e5e1", "#a8a7a2"
@@ -135,7 +139,7 @@ for series, hits, never in [("more_rollouts", roll, roll_never), ("downsample", 
 pd.DataFrame(rows).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_table.csv")), index=False)
 
 # ------------------------------------------------------------------ figure (styled like plot_steps_to_50_combined.py)
-TICK, LABEL, TITLE, NOTE, LEGEND = 28, 31, 32, 29, 34       # type sizes, as in the steps_to_50 figures
+TICK, LABEL, TITLE, NOTE, LEGEND = 28, 31, 32, 29, 27       # type sizes, as in the steps_to_50 figures
 # two panels side by side: steps to target on the left, every LR tried at each K on the right (ring = fastest), to show the
 # LR choice barely moves between the two series
 MISSING = "#8f8e8a"
@@ -179,10 +183,10 @@ def draw_left(ax):
     ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
     # (the sequences-per-step axis along the top was dropped 2026-10-22: K x B = 128 is in the x label)
     legend = [Line2D([], [], marker="p", ls="", ms=19, color=GREEN, mec=SURFACE, label="generate K, train K"),
-              Line2D([], [], marker="D", ls="", ms=16, color=PURPLE, mec=SURFACE, label="generate 64, train K\n(upsampling)")]
+              Line2D([], [], marker="D", ls="", ms=16, color=PURPLE, mec=SURFACE, label="generate 64, train K")]
     if FIT:
-        legend += [Line2D([], [], ls="-", lw=4.8, color=GREEN, label="fit  $S = S_\\min\\,(1 + N^*/N)$\n(as in Fig. 1)")]
-    ax.legend(handles=legend, loc="upper right", frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)   # the upper right is empty: steps fall with N
+        legend += [Line2D([], [], ls="-", lw=4.8, color=GREEN, label="fit (Figure 2)")]
+    ax.legend(handles=legend, loc="upper right", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)   # the upper right is empty: steps fall with N
 
 
 def draw_right(axr):
@@ -208,13 +212,13 @@ def draw_right(axr):
                 Line2D([], [], marker="o", ls="", ms=18.5, mfc="none", mec=MISSING, mew=2.8, label="did not reach target")]
     if (roll_lad["verdict"] == "inconclusive").any() or (ds_lad["verdict"] == "inconclusive").any():
         legend_r.append(Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6, label="too early to tell"))
-    axr.legend(handles=legend_r, loc="upper center", bbox_to_anchor=(0.5, -0.17), ncol=len(legend_r), frameon=False, fontsize=LEGEND - 4, labelcolor=INK,
-               handletextpad=0.5, columnspacing=1.6)   # directly under the right panel
+    global UPS_B_LEGEND
+    UPS_B_LEGEND = legend_r    # drawn as a separate legend strip under both sub-figures (rollouts_vs_downsample_clean_fit_legend)
 
 
 # combined figure (a full line width) and the two sub-figure files (a: 0.53, b: 0.46 of the line width; not cropped, equal height, so
 # they top-align when LaTeX sets them side by side, as for the LR split figure)
-fig, (ax, axr) = plt.subplots(1, 2, figsize=(26.0, 6.6), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1]))
+fig, (ax, axr) = plt.subplots(1, 2, figsize=(PAPER_SCALE * (26.0), PAPER_SCALE * (6.6)), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1]))
 fig.subplots_adjust(left=0.06, right=0.99, top=0.84, bottom=0.22, wspace=0.22)
 draw_left(ax); draw_right(axr)
 if FIT:
@@ -226,10 +230,13 @@ pdf_out = os.path.join(pdf_dir, os.path.basename(png_out).replace(".png", ".pdf"
 fig.savefig(pdf_out, facecolor=SURFACE, bbox_inches="tight")
 stem = png_out.replace(".png", "")
 for tag, fn, wfrac in (("a", draw_left, 0.53), ("b", draw_right, 0.46)):
-    f_, a_ = plt.subplots(figsize=(wfrac * 26.0, 6.6), facecolor=SURFACE, layout="constrained"); fn(a_)
+    f_, a_ = plt.subplots(figsize=(PAPER_SCALE * (wfrac * 26.0), PAPER_SCALE * (6.6)), facecolor=SURFACE, layout="constrained"); fn(a_)
     f_.savefig(f"{stem}_{tag}.png", dpi=170, facecolor=SURFACE)
     f_.savefig(os.path.join(pdf_dir, os.path.basename(stem) + f"_{tag}.pdf"), facecolor=SURFACE)
     plt.close(f_)
+figL = plt.figure(figsize=(PAPER_SCALE * 26.0, PAPER_SCALE * 1.4), facecolor=SURFACE)    # legend strip for panel (b), under both sub-figures
+figL.legend(handles=UPS_B_LEGEND, loc="center", ncol=len(UPS_B_LEGEND), frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.5, columnspacing=1.6)
+figL.savefig(f"{stem}_legend.png", dpi=170, facecolor=SURFACE); figL.savefig(os.path.join(pdf_dir, os.path.basename(stem) + "_legend.pdf"), facecolor=SURFACE); plt.close(figL)
 print("wrote", png_out, "and", pdf_out, "plus the _a / _b sub-figure files")
 for name, hits, never in [("more rollouts", roll, roll_never), ("upsampling", ds, ds_never)]:
     print(f"\n{name}:")

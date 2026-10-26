@@ -17,11 +17,15 @@ import numpy as np, pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+# Paper scale (shared style with the iclr_figs figures and paperstyle.py): this script lays figures out on a 26-inch "line width"
+# with 28-34 pt type; drawing it on a 19-inch canvas instead (x 19/26) prints the type at ~8-10 pt and lines at ~1.4 pt when the
+# figure is scaled to the 5.5-inch text width, the same as the other paper figures.
+PAPER_SCALE = 19.0 / 26.0
 from matplotlib.lines import Line2D
 
 SURFACE, INK, INK2, GRID = "#ffffff", "#0b0b0b", "#52514e", "#e6e5e1"
 BLUE, GREEN, PURPLE = "#1f77b4", "#2ca02c", "#9467bd"   # Figure 1 colours: K = 16 prompt sweep, B = 128 rollout sweep, B = 1024 rollout sweep
-TICK, LABEL, LEGEND = 28, 31, 34
+TICK, LABEL, LEGEND = 28, 31, 27      # with PAPER_SCALE: ~8 / 9 / 7.8 pt printed, as paperstyle.py
 SHORT_STEPS = 200
 VALID_N_PREFIX = {1, 2, 4, 8, 16}
 FIXED_ONLY_N = {32, 64, 128}
@@ -119,8 +123,8 @@ def draw_a(ax):
     ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
     if not SHARED_LEGEND:
         hnd = [Line2D([], [], marker="o", ls="", ms=15.5, color=BLUE, mec=SURFACE, label="fastest LR at each B"),
-               Line2D([], [], ls="-", lw=4.8, color=BLUE, label="fit  $S = S_\\min\\,(1 + N^*/N)$")]
-        ax.legend(handles=hnd, loc="lower left", frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)
+               Line2D([], [], ls="-", lw=4.8, color=BLUE, label="fit $S = S_\\min(1 + N^*/N)$")]
+        ax.legend(handles=hnd, loc="lower left", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)
 
 
 def draw_b(ax):
@@ -130,24 +134,24 @@ def draw_b(ax):
     ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
     if not SHARED_LEGEND:
         hnd = [Line2D([], [], marker=mk, ls="", ms=ms, color=col, mec=SURFACE, label="fastest LR at each K"),
-               Line2D([], [], ls="-", lw=4.8, color=col, label="fit  $S = S_\\min\\,(1 + N^*/N)$")]
-        ax.legend(handles=hnd, loc="upper right" if B0 != 128 else "lower left", frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)
+               Line2D([], [], ls="-", lw=4.8, color=col, label="fit $S = S_\\min(1 + N^*/N)$")]
+        ax.legend(handles=hnd, loc="upper right" if B0 != 128 else "lower left", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)
 
 
 def draw_one(ax):
     """both sweeps on one axis of sequences per step (the only x they share): the prompt sweep in B x 16, the rollout sweep in 1024 x K"""
     style(ax)
     rc, rmk = (GREEN, "p") if B0 == 128 else (PURPLE, "v")
-    for pts, fit, per, color, mk, ms, lab, star_lab, dy in ((prompts, fp, K0, BLUE, "o", 15.5, f"scaling prompts  (K = {K0})", "$B^*$", 0.96),
-                                                            (rollouts, fr, B0, rc, rmk, 17, f"scaling rollouts  (B = {B0})", "$K^*$", 0.96)):
+    for pts, fit, per, color, mk, ms, lab, star_lab, dy in ((prompts, fp, K0, BLUE, "o", 15.5, f"prompts, K = {K0}", "$B^*$", 0.96),
+                                                            (rollouts, fr, B0, rc, rmk, 17, f"rollouts, B = {B0}", "$K^*$", 0.96)):
         smin, nstar = float(fit["s_min"]), float(fit["n_star_seqs"]); xs = np.geomspace(pts["seqs"].min() / 1.5, pts["seqs"].max() * 1.5, 200)
         ax.plot(xs, smin * (1 + nstar / xs), ls="-", lw=4.8, color=color, zorder=3)
         ax.scatter(pts["seqs"], pts["steps"], s=ms ** 2 * 1.5, marker=mk, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=6, label=lab)
         ax.axvline(nstar, ls=(0, (3, 3)), lw=2.6, color=color, alpha=0.55, zorder=2.3)
         star = nstar / per; star_txt = f"{star / 1000:.1f}k" if star >= 1000 else f"{star:.0f}"
         # each label hangs off the top of its own line, on the side away from the other line: K* to the left, B* to the right
-        ax.annotate(f"{star_lab} $\\approx$ {star_txt}", (nstar, 0.80 if per == K0 else 0.90), xycoords=("data", "axes fraction"), xytext=(24 if per == K0 else -24, 0), textcoords="offset points",
-                    ha="center", va="top", fontsize=LEGEND + 2, color=color, zorder=10, bbox=dict(boxstyle="round,pad=0.2", fc=SURFACE, ec="none", alpha=1.0))
+        ax.annotate(f"{star_lab} $\\approx$ {star_txt}", (nstar, 0.80 if per == K0 else 0.90), xycoords=("data", "axes fraction"), xytext=(8 if per == K0 else -8, 0), textcoords="offset points",
+                    ha="left" if per == K0 else "right", va="top", fontsize=LEGEND + 2, color=color, zorder=10, bbox=dict(boxstyle="round,pad=0.2", fc=SURFACE, ec="none", alpha=1.0))
     # perfect scaling: steps falling as 1/N, the prompt fit's small-batch asymptote S_min N*/N
     smin_p, nstar_p = float(fp["s_min"]), float(fp["n_star_seqs"])
     xs = np.geomspace(prompts["seqs"].min() / 1.5, prompts["seqs"].max() * 1.5, 200)
@@ -192,13 +196,13 @@ def draw_one(ax):
     ax.set_xticks(major); ax.set_xticklabels([fmt(x) for x in major]); ax.set_xticks([x for x in allx if x not in major], minor=True)
     ax.set_xticklabels([""] * len([x for x in allx if x not in major]), minor=True); ax.tick_params(axis="x", which="minor", length=0)
     ax.set_xlim(min(allx) / 1.9, max(allx) * 1.9)
-    ax.set_xlabel("sequences per step  (prompts $\\times$ rollouts)", color=INK, fontsize=LABEL); ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
+    ax.set_xlabel("sequences per step  $N = BK$", color=INK, fontsize=LABEL); ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
     hnd, lab = ax.get_legend_handles_labels()
-    hnd.append(Line2D([], [], ls="-", lw=4.8, color=INK2)); lab.append("fit  $S = S_\\min\\,(1 + N^*/N)$")
-    hnd.append(Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8)); lab.append("critical batch  $N^*$  ($B^*$ or $K^*$)")
-    hnd.append(Line2D([], [], ls=":", lw=3.2, color=INK2)); lab.append("perfect scaling (steps $\\propto 1/N$)")
+    hnd.append(Line2D([], [], ls="-", lw=4.8, color=INK2)); lab.append("fit $S = S_\\min(1 + N^*/N)$")
+    hnd.append(Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8)); lab.append("critical batch $N^*$")
+    hnd.append(Line2D([], [], ls=":", lw=3.2, color=INK2)); lab.append("perfect scaling")
     if not SHARED_LEGEND:
-        ax.legend(hnd, lab, loc="upper right", frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3, markerscale=1.0)
+        ax.legend(hnd, lab, loc="upper right", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3, markerscale=1.0)
     ax._fig1_legend = (hnd, lab)
 
 def draw_lr(ax):
@@ -226,14 +230,14 @@ def draw_lr(ax):
     # nudge apart only where the two sweeps have a point in the same column AND the two LRs are close enough to overlap
     lrr = dict(zip(xr, lr_)); close_p = np.array([x in lrr and abs(np.log(lrr[x] / l)) < 0.35 for x, l in zip(xp, lp)])
     lrp = dict(zip(xp, lp)); close_r = np.array([x in lrp and abs(np.log(lrp[x] / l)) < 0.35 for x, l in zip(xr, lr_)])
-    ax.scatter(xp * 2.0 ** (-0.18 * close_p), lp, s=15.5 ** 2 * 1.5, marker="o", color=BLUE, edgecolors=SURFACE, linewidths=1.5, zorder=7, label=f"scaling prompts  (K = {K0})")   # nudged left
+    ax.scatter(xp * 2.0 ** (-0.18 * close_p), lp, s=15.5 ** 2 * 1.5, marker="o", color=BLUE, edgecolors=SURFACE, linewidths=1.5, zorder=7, label=f"prompts, K = {K0}")   # nudged left
     # rollout sweep: its own power-law fit of eta* against K (shallow), with a flat reference at the geometric mean, dotted
     lxr, lyr = np.log(Kr), np.log(lr_); slope_r, icpt_r = np.polyfit(lxr, lyr, 1)
     xs_r = np.geomspace(xr.min() / 1.5, xr.max() * 1.5, 100)
     ax.plot(xs_r, np.exp(icpt_r) * (xs_r / B0) ** slope_r, ls="-", lw=4.8, color=rc, zorder=3)
     flat = np.exp(np.log(lr_).mean())
     ax.plot([xr.min() / 1.5, xr.max() * 1.5], [flat] * 2, ls=":", lw=3.0, color=rc, alpha=0.7, zorder=2.6)
-    ax.scatter(xr * 2.0 ** (0.18 * close_r), lr_, s=17 ** 2 * 1.5, marker=rmk, color=rc, edgecolors=SURFACE, linewidths=1.5, zorder=6, label=f"scaling rollouts  (B = {B0})")   # nudged right
+    ax.scatter(xr * 2.0 ** (0.18 * close_r), lr_, s=17 ** 2 * 1.5, marker=rmk, color=rc, edgecolors=SURFACE, linewidths=1.5, zorder=6, label=f"rollouts, B = {B0}")   # nudged right
     for n_, col in ((nstar_p, BLUE), (nstar_r, rc)):
         ax.axvline(n_, ls=(0, (3, 3)), lw=2.6, color=col, alpha=0.55, zorder=2.3)
     # the two exponent labels at the top, each beside its own critical-batch line and facing away from the other, as in panel (a)
@@ -250,31 +254,31 @@ def draw_lr(ax):
     ax.set_xticks(major); ax.set_xticklabels([fmt(x) for x in major]); ax.set_xticks([x for x in allx if x not in major], minor=True)
     ax.set_xticklabels([""] * len([x for x in allx if x not in major]), minor=True); ax.tick_params(axis="x", which="minor", length=0)
     ax.set_xlim(min(allx) / 1.9, max(allx) * 1.9); ax.set_ylim(min(lp.min(), lr_.min()) / 1.6, max(max(lp.max(), lr_.max()) * 1.8, 1.15e-4))   # keep the 1e-4 tick
-    ax.set_xlabel("sequences per step  (prompts $\\times$ rollouts)", color=INK, fontsize=LABEL); ax.set_ylabel("fastest learning rate", color=INK, fontsize=LABEL)
+    ax.set_xlabel("sequences per step  $N = BK$", color=INK, fontsize=LABEL); ax.set_ylabel("fastest learning rate", color=INK, fontsize=LABEL)
     if not SHARED_LEGEND:
-        ax.legend(loc="lower right", frameon=False, fontsize=LEGEND - 6, labelcolor=INK, handletextpad=0.5, borderaxespad=0.3, labelspacing=0.3)
+        ax.legend(loc="lower right", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.5, borderaxespad=0.3, labelspacing=0.3)
 
 
 SHARED_LEGEND = False
 if "--one" in sys.argv:       # single-panel variant: both sweeps on one sequences-per-step axis; with --lr-panel a second panel of the fastest LRs
     pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper"); os.makedirs(pdf_dir, exist_ok=True)
-    f1, a1 = plt.subplots(figsize=(15.0, 9.4), facecolor=SURFACE, layout="constrained"); draw_one(a1)
+    f1, a1 = plt.subplots(figsize=(PAPER_SCALE * (15.0), PAPER_SCALE * (9.4)), facecolor=SURFACE, layout="constrained"); draw_one(a1)
     one = png_out.replace(".png", "_one.png"); f1.savefig(one, dpi=170, facecolor=SURFACE)
     f1.savefig(os.path.join(pdf_dir, os.path.basename(one).replace(".png", ".pdf")), facecolor=SURFACE); plt.close(f1); print("wrote", one)
     if "--lr-panel" in sys.argv:    # (a) steps, (b) fastest LR: a full line width, plus _a / _b sub-figure files at 0.55 / 0.44
         SHARED_LEGEND = True
-        f2, (c1, c2) = plt.subplots(1, 2, figsize=(26.0, 10.4), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.3, 1]))
+        f2, (c1, c2) = plt.subplots(1, 2, figsize=(PAPER_SCALE * (26.0), PAPER_SCALE * (10.4)), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.3, 1]))
         f2.subplots_adjust(left=0.06, right=0.99, top=0.97, bottom=0.27, wspace=0.24); draw_one(c1); draw_lr(c2)
         hnd, lab = c1._fig1_legend
-        f2.legend(hnd, lab, loc="lower center", ncol=3, frameon=False, fontsize=LEGEND - 2, labelcolor=INK, handletextpad=0.6, columnspacing=2.2, bbox_to_anchor=(0.5, 0.0))
+        f2.legend(hnd, lab, loc="lower center", ncol=3, frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, columnspacing=1.4, bbox_to_anchor=(0.5, 0.0))
         two = png_out.replace(".png", "_with_lr.png"); f2.savefig(two, dpi=170, facecolor=SURFACE, bbox_inches="tight")
         f2.savefig(os.path.join(pdf_dir, os.path.basename(two).replace(".png", ".pdf")), facecolor=SURFACE, bbox_inches="tight"); plt.close(f2)
         for tag, fn, wf in (("a", draw_one, 0.55), ("b", draw_lr, 0.44)):
-            f_, a_ = plt.subplots(figsize=(wf * 26.0, 9.4), facecolor=SURFACE, layout="constrained"); fn(a_)
+            f_, a_ = plt.subplots(figsize=(PAPER_SCALE * (wf * 26.0), PAPER_SCALE * (9.4)), facecolor=SURFACE, layout="constrained"); fn(a_)
             f_.savefig(two.replace(".png", f"_{tag}.png"), dpi=170, facecolor=SURFACE)
             f_.savefig(os.path.join(pdf_dir, os.path.basename(two).replace(".png", f"_{tag}.pdf")), facecolor=SURFACE); plt.close(f_)
-        fL = plt.figure(figsize=(26.0, 2.4), facecolor=SURFACE)     # the shared legend as its own strip, for the LaTeX subfigure layout
-        fL.legend(hnd, lab, loc="center", ncol=3, frameon=False, fontsize=LEGEND - 2, labelcolor=INK, handletextpad=0.6, columnspacing=2.2)
+        fL = plt.figure(figsize=(PAPER_SCALE * (26.0), PAPER_SCALE * (2.4)), facecolor=SURFACE)     # the shared legend as its own strip, for the LaTeX subfigure layout
+        fL.legend(hnd, lab, loc="center", ncol=3, frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, columnspacing=1.4)
         fL.savefig(two.replace(".png", "_legend.png"), dpi=170, facecolor=SURFACE)
         fL.savefig(os.path.join(pdf_dir, os.path.basename(two).replace(".png", "_legend.pdf")), facecolor=SURFACE); plt.close(fL)
         print("wrote", two, "and its _a / _b files")
@@ -284,21 +288,21 @@ SHARED_LEGEND = True
 rc_, rmk_ = (GREEN, "p") if B0 == 128 else (PURPLE, "v")
 two_hnd = [Line2D([], [], marker="o", ls="", ms=15.5, color=BLUE, mec=SURFACE), Line2D([], [], marker=rmk_, ls="", ms=17, color=rc_, mec=SURFACE),
            Line2D([], [], ls="-", lw=4.8, color=INK2), Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8), Line2D([], [], ls=":", lw=3.2, color=INK2)]
-two_lab = [f"scaling prompts  (K = {K0})", f"scaling rollouts  (B = {B0})", "fit  $S = S_\\min\\,(1 + N^*/N)$", "critical batch  $N^*$  ($B^*$ or $K^*$)", "perfect scaling (steps $\\propto 1/N$)"]
-fig, (axa, axb) = plt.subplots(1, 2, figsize=(26.0, H + 2.6), facecolor=SURFACE)
+two_lab = [f"prompts, K = {K0}", f"rollouts, B = {B0}", "fit $S = S_\\min(1 + N^*/N)$", "critical batch $N^*$", "perfect scaling"]
+fig, (axa, axb) = plt.subplots(1, 2, figsize=(PAPER_SCALE * (26.0), PAPER_SCALE * (H + 2.6)), facecolor=SURFACE)
 fig.subplots_adjust(left=0.06, right=0.99, top=0.86 if TOP else 0.96, bottom=0.30, wspace=0.26)
 draw_a(axa); draw_b(axb)
-fig.legend(two_hnd, two_lab, loc="lower center", ncol=3, frameon=False, fontsize=LEGEND - 2, labelcolor=INK, handletextpad=0.6, columnspacing=2.2, bbox_to_anchor=(0.5, 0.0))
+fig.legend(two_hnd, two_lab, loc="lower center", ncol=3, frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, columnspacing=1.4, bbox_to_anchor=(0.5, 0.0))
 fig.savefig(png_out, dpi=170, facecolor=SURFACE, bbox_inches="tight")
-fL2 = plt.figure(figsize=(26.0, 2.4), facecolor=SURFACE)
-fL2.legend(two_hnd, two_lab, loc="center", ncol=3, frameon=False, fontsize=LEGEND - 2, labelcolor=INK, handletextpad=0.6, columnspacing=2.2)
+fL2 = plt.figure(figsize=(PAPER_SCALE * (26.0), PAPER_SCALE * (2.4)), facecolor=SURFACE)
+fL2.legend(two_hnd, two_lab, loc="center", ncol=3, frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, columnspacing=1.4)
 fL2.savefig(png_out.replace(".png", "_legend.png"), dpi=170, facecolor=SURFACE)
 fL2.savefig(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper", os.path.basename(png_out).replace(".png", "_legend.pdf")), facecolor=SURFACE); plt.close(fL2)
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper"); os.makedirs(pdf_dir, exist_ok=True)
 fig.savefig(os.path.join(pdf_dir, os.path.basename(png_out).replace(".png", ".pdf")), facecolor=SURFACE, bbox_inches="tight")
 stem = png_out.replace(".png", "")
 for tag, fn in (("a", draw_a), ("b", draw_b)):     # sub-figures: 0.5 of the line width each, uncropped, equal height -> top-align in LaTeX
-    f_, a_ = plt.subplots(figsize=(0.5 * 26.0, H), facecolor=SURFACE, layout="constrained"); fn(a_)
+    f_, a_ = plt.subplots(figsize=(PAPER_SCALE * (0.5 * 26.0), PAPER_SCALE * (H)), facecolor=SURFACE, layout="constrained"); fn(a_)
     f_.savefig(f"{stem}_{tag}.png", dpi=170, facecolor=SURFACE)
     f_.savefig(os.path.join(pdf_dir, os.path.basename(stem) + f"_{tag}.pdf"), facecolor=SURFACE)
     plt.close(f_)

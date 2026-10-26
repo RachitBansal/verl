@@ -1,3 +1,3 @@
 series,S_min,N_crit,K_crit,rms_log,points,source
-"more rollouts: generate K, train K",41.85979033368712,7929.378983244038,61.94827330659405,0.1144218844941828,7,csv/steps_vs_seqs_fit_fit_table.csv
-"more rollouts: generate K, train K",41.85979033368712,7929.378983244038,61.94827330659405,0.1144218844941828,7,csv/steps_vs_seqs_fit_fit_table.csv
+"more rollouts: generate K, train K",41.81725082875065,7639.786216954093,59.68582981995385,0.1459390999890898,7,csv/steps_vs_seqs_fit_fit_table.csv
+"more rollouts: generate K, train K",41.81725082875065,7639.786216954093,59.68582981995385,0.1459390999890898,7,csv/steps_vs_seqs_fit_fit_table.csv
