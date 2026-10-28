@@ -99,7 +99,7 @@ def panel(ax, keys, xlabel, star_sym, side="left"):
         ax.plot(xs, smin * (1 + nstar / (per * xs)), ls="-", lw=4.8, color=col, zorder=3)
         ax.plot(xs, smin * nstar / (per * xs), ls=":", lw=2.6, color=col, alpha=0.6, zorder=2.5)       # perfect scaling, per sweep
         ax.scatter(pts["x"], pts["steps"], s=(MARKER_SHRINK * ms) ** 2 * 1.5, marker=mk, color=col, edgecolors=SURFACE, linewidths=1.2, zorder=6)
-        ax.axvline(star, ls=(0, (3, 3)), lw=2.6, color=col, alpha=0.55, zorder=2.3)
+        ax.axvline(star, ls=(0, (4, 2.5)), lw=4.6, color=col, alpha=0.9, zorder=2.3)
         if LIN:     # the point on the fit where linear scaling ends
             ax.plot([star], [smin * (1 + nstar / nm)], marker="o", ms=15, mfc=SURFACE, mec=col, mew=3.0, ls="", zorder=8)
         txt = f"{star / 1000:.1f}k" if star >= 1000 else f"{star:.0f}"
@@ -127,7 +127,7 @@ BLANK = Line2D([], [], ls="", color=SURFACE)
 sw = [Line2D([], [], marker=MK[k][0], ls="", ms=MARKER_SHRINK * MK[k][1], color=C[k], mec=SURFACE) for k in SWEEPS]
 hnd = sw[:2] + [BLANK] + sw[2:] + [BLANK] + \
       [Line2D([], [], ls="-", lw=4.8, color=INK2),
-       Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8, marker="o" if LIN else None, ms=12, mfc=SURFACE, mec=INK2, mew=2.4),
+       Line2D([], [], ls=(0, (4, 2.5)), lw=4.6, color=INK2, alpha=0.9, marker="o" if LIN else None, ms=12, mfc=SURFACE, mec=INK2, mew=2.4),
        Line2D([], [], ls=":", lw=2.6, color=INK2, alpha=0.8)]
 names = [NAME[k] for k in SWEEPS]
 lab = names[:2] + [""] + names[2:] + [""] + ["fit $S = S_\\min(1 + N^*/N)$", f"linear scaling ends (${LIN:g} \\times N^*$)" if LIN else "critical batch $N^*$",

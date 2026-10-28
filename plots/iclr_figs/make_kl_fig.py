@@ -98,14 +98,14 @@ def panel_a(ax):
             ax.plot(xs, smin * (1 + nstar / (K0 * xs)), ls="-", lw=4.8, color=KLC[kl], zorder=3)
             if a.lin:      # where linear scaling ends (open circle on the fit), labelled B ~ ... at the bottom left, stacked, clear of the curves
                 bm = a.lin * bstar
-                ax.axvline(bm, ls=(0, (3, 3)), lw=2.6, color=KLC[kl], alpha=0.55, zorder=2.3)
+                ax.axvline(bm, ls=(0, (4, 2.5)), lw=4.6, color=KLC[kl], alpha=0.9, zorder=2.3)
                 ax.plot([bm], [smin * (1 + nstar / (K0 * bm))], marker="o", ms=15, mfc=SURFACE, mec=KLC[kl], mew=3.0, ls="", zorder=8)
                 bx = a.lin * float(fits.loc[FIT_KEY[KLS[0]], "n_star_seqs"]) / K0      # both labels end left of the leftmost (KL 1e-3) line
                 ax.annotate(f"$B \\approx$ {bm:.0f}", (bx, 0.17 - 0.11 * row), xycoords=("data", "axes fraction"), xytext=(-10, 0),
                             textcoords="offset points", ha="right", va="center", fontsize=LEGEND + 2, color=KLC[kl], zorder=10,
                             bbox=dict(boxstyle="round,pad=0.15", fc=SURFACE, ec="none", alpha=0.85))
             else:
-                ax.axvline(bstar, ls=(0, (3, 3)), lw=2.6, color=KLC[kl], alpha=0.55, zorder=2.3)
+                ax.axvline(bstar, ls=(0, (4, 2.5)), lw=4.6, color=KLC[kl], alpha=0.9, zorder=2.3)
                 ax.annotate(f"$B^* \\approx$ {bstar / 1000:.1f}k", (bstar, 0.60 - 0.13 * row), xycoords=("data", "axes fraction"), xytext=(-10, 0),
                             textcoords="offset points", ha="right", va="center", fontsize=LEGEND + 2, color=KLC[kl], zorder=10,
                             bbox=dict(boxstyle="round,pad=0.15", fc=SURFACE, ec="none", alpha=0.85))
@@ -116,7 +116,7 @@ def panel_a(ax):
     hnd = []      # the KL colours are in the shared strip under both panels (fig_kl_stability_legend)
     if fits is not None: hnd.append(Line2D([], [], ls="-", lw=4.8, color=INK2, label="fit  $S = S_\\min\\,(1 + N^*/N)$"))
     if fits is not None and a.lin:
-        hnd.append(Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8, marker="o", ms=12, mfc=SURFACE, mec=INK2, mew=2.4,
+        hnd.append(Line2D([], [], ls=(0, (4, 2.5)), lw=4.6, color=INK2, alpha=0.9, marker="o", ms=12, mfc=SURFACE, mec=INK2, mew=2.4,
                           label=f"linear scaling ends\n(${a.lin:g} \\times N^*$)"))
     if a.lin:      # B labels sit at the bottom left of their lines, so the legend takes the empty upper right, opaque over the dashed lines
         ax.legend(handles=hnd, loc="upper right", frameon=True, facecolor=SURFACE, edgecolor="none", framealpha=1.0, fontsize=LEGEND - 2,

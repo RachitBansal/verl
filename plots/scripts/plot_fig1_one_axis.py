@@ -97,7 +97,7 @@ def panel(ax, pts, fit, per, color, marker, ms, xlabel, star_label, star_y=0.93)
     xs = np.geomspace(pts["x"].min() / 1.5, pts["x"].max() * 1.5, 200)
     ax.plot(xs, smin * (1 + nstar / (per * xs)), ls="-", lw=4.8, color=color, zorder=3)
     ax.scatter(pts["x"], pts["steps"], s=ms ** 2 * 1.5, marker=marker, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=6)
-    ax.axvline(star, ls=(0, (3, 3)), lw=2.6, color=color, alpha=0.55, zorder=2.3)
+    ax.axvline(star, ls=(0, (4, 2.5)), lw=4.6, color=color, alpha=0.9, zorder=2.3)
     star_txt = f"{star / 1000:.1f}k" if star >= 1000 else f"{star:.0f}"
     ax.annotate(f"{star_label} $\\approx$ {star_txt}", (star, 0.96), xycoords=("data", "axes fraction"),
                 xytext=(10, 0), textcoords="offset points", ha="left", va="top", fontsize=LEGEND + 2, color=color, zorder=10,
@@ -155,7 +155,7 @@ def draw_one(ax):
         ax.plot(xs, smin * (1 + nstar / xs), ls="-", lw=4.8, color=color, zorder=3)
         ax.scatter(pts["seqs"], pts["steps"], s=ms ** 2 * 1.5, marker=mk, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=6, label=lab)
         nm = mark(nstar)
-        ax.axvline(nm, ls=(0, (3, 3)), lw=2.6, color=color, alpha=0.55, zorder=2.3)
+        ax.axvline(nm, ls=(0, (4, 2.5)), lw=4.6, color=color, alpha=0.9, zorder=2.3)
         if LIN:     # the point on the fit where linear scaling ends
             ax.plot([nm], [smin * (1 + nstar / nm)], marker="o", ms=17, mfc=SURFACE, mec=color, mew=3.2, ls="", zorder=8)
         star = nm / per; star_txt = f"{star / 1000:.1f}k" if star >= 1000 else f"{star:.0f}"
@@ -220,7 +220,7 @@ def draw_one(ax):
     ax.set_xlabel("sequences per step  $N = BK$", color=INK, fontsize=LABEL); ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
     hnd, lab = ax.get_legend_handles_labels()
     hnd.append(Line2D([], [], ls="-", lw=4.8, color=INK2)); lab.append("fit $S = S_\\min(1 + N^*/N)$")
-    hnd.append(Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8, marker="o" if LIN else None, ms=12, mfc=SURFACE, mec=INK2, mew=2.4)); lab.append(MARK_LEG)
+    hnd.append(Line2D([], [], ls=(0, (4, 2.5)), lw=4.6, color=INK2, alpha=0.9, marker="o" if LIN else None, ms=12, mfc=SURFACE, mec=INK2, mew=2.4)); lab.append(MARK_LEG)
     hnd.append(Line2D([], [], ls=":", lw=3.2, color=INK2)); lab.append("perfect scaling")
     if not SHARED_LEGEND:
         ax.legend(hnd, lab, loc="upper right", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3, markerscale=1.0)
@@ -269,7 +269,7 @@ def draw_lr(ax):
         ax.plot([xr.min() / 1.5, xr.max() * 1.5], [flat] * 2, ls=":", lw=3.0, color=rc, alpha=0.7, zorder=2.6)
     ax.scatter(xr * 2.0 ** (0.18 * close_r), lr_, s=17 ** 2 * 1.5, marker=rmk, color=rc, edgecolors=SURFACE, linewidths=1.5, zorder=6, label=f"rollouts, B = {B0}")   # nudged right
     for n_, col in ((mark(nstar_p), BLUE), (mark(nstar_r), rc)):
-        ax.axvline(n_, ls=(0, (3, 3)), lw=2.6, color=col, alpha=0.55, zorder=2.3)
+        ax.axvline(n_, ls=(0, (4, 2.5)), lw=4.6, color=col, alpha=0.9, zorder=2.3)
     # the two exponent labels at the top, each beside its own critical-batch line and facing away from the other, as in panel (a)
     xb_ = 32 * K0; yb_ = np.exp(icpt) * 32 ** slope         # the blue label above its fit at B = 32, in the open space over the line
     if B0 == 128:   # with the B = 128 rollout sweep the space over the blue fit at B = 32 holds the green points: label in the upper left
@@ -317,7 +317,7 @@ H = 8.6 if TOP else 7.4
 SHARED_LEGEND = True
 rc_, rmk_ = (GREEN, "p") if B0 == 128 else (PURPLE, "v")
 two_hnd = [Line2D([], [], marker="o", ls="", ms=15.5, color=BLUE, mec=SURFACE), Line2D([], [], marker=rmk_, ls="", ms=17, color=rc_, mec=SURFACE),
-           Line2D([], [], ls="-", lw=4.8, color=INK2), Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8), Line2D([], [], ls=":", lw=3.2, color=INK2)]
+           Line2D([], [], ls="-", lw=4.8, color=INK2), Line2D([], [], ls=(0, (4, 2.5)), lw=4.6, color=INK2, alpha=0.9), Line2D([], [], ls=":", lw=3.2, color=INK2)]
 two_lab = [f"prompts, K = {K0}", f"rollouts, B = {B0}", "fit $S = S_\\min(1 + N^*/N)$", MARK_LEG, "perfect scaling"]
 fig, (axa, axb) = plt.subplots(1, 2, figsize=(PAPER_SCALE * (26.0), PAPER_SCALE * (H + 2.6)), facecolor=SURFACE)
 fig.subplots_adjust(left=0.06, right=0.99, top=0.86 if TOP else 0.96, bottom=0.30, wspace=0.26)
