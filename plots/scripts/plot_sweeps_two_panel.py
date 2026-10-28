@@ -130,7 +130,7 @@ hnd = sw[:2] + [BLANK] + sw[2:] + [BLANK] + \
        Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8, marker="o" if LIN else None, ms=12, mfc=SURFACE, mec=INK2, mew=2.4),
        Line2D([], [], ls=":", lw=2.6, color=INK2, alpha=0.8)]
 names = [NAME[k] for k in SWEEPS]
-lab = names[:2] + [""] + names[2:] + [""] + ["fit $S = S_\\min(1 + N^*/N)$", f"linear scaling ends ({LIN:.0%} above perfect)" if LIN else "critical batch $N^*$",
+lab = names[:2] + [""] + names[2:] + [""] + ["fit $S = S_\\min(1 + N^*/N)$", f"linear scaling ends (${LIN:g} \\times N^*$)" if LIN else "critical batch $N^*$",
                                              "perfect scaling"]
 
 

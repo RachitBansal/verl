@@ -113,11 +113,11 @@ def panel_a(ax):
             ax.plot(x, y, lw=4.8, color=KLC[kl], zorder=3)
         ax.scatter(x, y, s=MS[kl] ** 2 * 1.5, marker=MK[kl], color=KLC[kl], edgecolors=SURFACE, linewidths=1.5, zorder=6)
     style(ax); ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
-    hnd = [Line2D([], [], marker=MK[kl], ls="", ms=MS[kl], color=KLC[kl], mec=SURFACE, label=KLN[kl]) for kl in KLS]
+    hnd = []      # the KL colours are in the shared strip under both panels (fig_kl_stability_legend)
     if fits is not None: hnd.append(Line2D([], [], ls="-", lw=4.8, color=INK2, label="fit  $S = S_\\min\\,(1 + N^*/N)$"))
     if fits is not None and a.lin:
         hnd.append(Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=INK2, alpha=0.8, marker="o", ms=12, mfc=SURFACE, mec=INK2, mew=2.4,
-                          label=f"linear scaling ends\n({a.lin:.0%} above perfect)"))
+                          label=f"linear scaling ends\n(${a.lin:g} \\times N^*$)"))
     if a.lin:      # B labels sit at the bottom left of their lines, so the legend takes the empty upper right, opaque over the dashed lines
         ax.legend(handles=hnd, loc="upper right", frameon=True, facecolor=SURFACE, edgecolor="none", framealpha=1.0, fontsize=LEGEND - 2,
                   labelcolor=INK, handletextpad=0.5, borderaxespad=0.2, labelspacing=0.35, borderpad=0.3)
@@ -160,6 +160,16 @@ fig, (axl, axr) = plt.subplots(1, 2, figsize=(PAPER_SCALE * (26.0), PAPER_SCALE 
 fig.subplots_adjust(left=0.06, right=0.99, top=0.84, bottom=0.22, wspace=0.22)
 panel_a(axl); panel_b(axr)
 for ext in ("pdf", "png"): fig.savefig(os.path.join(a.out, f"fig_kl_stability.{ext}"), dpi=170, facecolor=SURFACE, bbox_inches="tight")
+# shared legend strip under both sub-figures (the KL colours apply to (a) and (b)); fixed canvas at the full line width, checked to fit
+KL_HND = [Line2D([], [], marker=MK[kl], ls="-", lw=4.8, ms=MS[kl], color=KLC[kl], mec=SURFACE, label=KLN[kl]) for kl in KLS]
+fl = plt.figure(figsize=(PAPER_SCALE * 26.0, PAPER_SCALE * 1.5), facecolor=SURFACE)
+leg = fl.legend(handles=KL_HND, loc="center", ncol=len(KLS), frameon=False, fontsize=LEGEND, labelcolor=INK, handlelength=2.2,
+                handletextpad=0.6, columnspacing=3.0)
+fl.canvas.draw(); bb = leg.get_window_extent()
+if bb.x0 < -1 or bb.x1 > fl.bbox.x1 + 1 or bb.y0 < -1 or bb.y1 > fl.bbox.y1 + 1:
+    raise SystemExit(f"KL legend strip {bb.bounds} does not fit in {fl.bbox.bounds}")
+for ext in ("pdf", "png"): fl.savefig(os.path.join(a.out, f"fig_kl_stability_legend.{ext}"), dpi=170, facecolor=SURFACE)
+fl.savefig(os.path.join(paper, "fig_kl_stability_legend.pdf"), facecolor=SURFACE)
 fig.savefig(os.path.join(paper, "fig_kl_stability.pdf"), facecolor=SURFACE, bbox_inches="tight")   # paper copy, next to the other paper-ready PDFs
 print("wrote", os.path.join(a.out, "fig_kl_stability.png"), "and paper/fig_kl_stability.pdf")
 for kl in KLS:

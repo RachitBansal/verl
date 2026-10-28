@@ -137,6 +137,14 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, hue=None):
     short = short[~short[xcol].isin(settled)]
     if NO_EARLY:
         short = short.iloc[0:0]
+    best = ok.loc[ok.groupby(xcol)["steps"].idxmin()].sort_values(xcol)
+    if NEAR is not None:      # declutter: per column keep the fastest LR and the NEAR nearest tried LRs below and above it (any outcome)
+        keep = set()
+        for x, col in pd.concat([ok, miss, short]).groupby(xcol):
+            lrs = sorted(col["lr"].unique()); i = lrs.index(best.loc[best[xcol] == x, "lr"].iloc[0])
+            keep |= {(x, l) for l in lrs[max(0, i - NEAR): i + NEAR + 1]}
+        near = lambda d: d[[(x, l) in keep for x, l in zip(d[xcol], d["lr"])]] if len(d) else d
+        ok, miss, short = near(ok), near(miss), near(short)
     ax.scatter(miss[xcol], miss["lr"], s=170, facecolors="none", edgecolors=MISSING, linewidths=2.4, zorder=2)
     ax.scatter(short[xcol], short["lr"], s=150, marker="x", c=MISSING, linewidths=2.8, zorder=2)
     ax.scatter(ok[xcol], ok["lr"], s=230, c=ok["steps"], cmap=cmap, norm=norm, edgecolors=SURFACE, linewidths=1.5, zorder=3)   # paper marker size, shared with the KL and upsampling figures
@@ -168,7 +176,7 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, hue=None):
     gb = ok[ok["steps"] == ok["steps"].min()]
 
     if star is not None:          # the sweep's fitted critical batch from the steps-vs-sequences fit, in this panel's x units (legend names it)
-        ax.axvline(star, ls=(0, (3, 3)), lw=2.6, color=starc, alpha=0.55, zorder=2.3)
+        ax.axvline(star, ls=(0, (4, 2.5)), lw=4.6, color=starc, alpha=0.9, zorder=2.3)      # bold so it reads against the markers (2026-10-28)
     ax.set_xscale("log", base=2); ax.set_yscale("log")
     drawn = pd.concat([ok, miss, short])
     xs = sorted(sub[xcol].unique())
@@ -186,6 +194,7 @@ def panel(ax, sub, xcol, xlabel, fit, star=None, cmap=CMAP, hue=None):
 
 # panels in order: the batch sweeps (K = N_ROLL, then K = N2 if given), then the rollout sweep at B = BSZ (unless --batch-only)
 FIT_N2 = "--fit-n2" in sys.argv           # the second batch sweep's LRs were chosen from the K = 16 rule, so its fit is off by default
+NEAR = opt("--near", None, int)              # draw only the NEAR tried LRs either side of each column's fastest LR (display only; fits unchanged)
 NO_EARLY = "--no-early" in sys.argv          # do not draw the "too early to tell" runs (nor their legend entry)
 NO_NSTAR_N2 = "--no-nstar-n2" in sys.argv    # no critical-batch line on the second batch sweep
 SHARE_B = "--share-b" in sys.argv            # the prompt-sweep panels share the K = 16 batch-size axis (4 ... 16k) and equal widths
@@ -267,7 +276,7 @@ legend = [
     Line2D([], [], ls="-", lw=4.6, color=FITC if MONO else INK2, label="power-law fit (dotted: plateau)" if plateau_b else "power-law fit"),
 ]
 if NSTAR and any(sp.get("star") is not None for sp in specs):
-    legend.append(Line2D([], [], ls=(0, (3, 3)), lw=2.6, color=STARC if MONO else INK2, alpha=0.8, label="critical batch"))
+    legend.append(Line2D([], [], ls=(0, (4, 2.5)), lw=4.6, color=STARC if MONO else INK2, alpha=0.9, label="critical batch"))
 pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(png_out))), "paper"); os.makedirs(pdf_dir, exist_ok=True)
 if SPLIT:
     stem = png_out.replace(".png", "")
