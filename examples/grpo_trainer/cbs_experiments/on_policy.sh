@@ -28,6 +28,12 @@ STOP_AT=${STOP_AT:-0.52}      # end the run once AIME val >= this (brackets the 
 TEST_FREQ=${TEST_FREQ:-25}   # validation interval in steps; 10 for bsz>=1024 where 50% arrives in ~25-50 steps
 NCCL_TIMEOUT=${NCCL_TIMEOUT:-600}   # seconds a rank may wait in a collective; raise (e.g. 7200) for very large steps, where generation length differs across ranks
 SAVE_FREQ=${SAVE_FREQ:-100}        # checkpoint every this many steps (one kept); set to 1 for runs of a few very long steps so a time-limit kill can be resumed (resume_mode auto: resubmit the same command)
+TOTAL_EPOCHS=${TOTAL_EPOCHS:-15}   # step cap = epochs x floor(17917/BSZ); raise it to continue a run that already ended at the cap
+RESUME_FROM=${RESUME_FROM:-}       # optional .../global_step_N of ANY run (e.g. another user's dir): continue it under this run's name/dir
+RESUME_ARGS=""
+if [ -n "${RESUME_FROM}" ]; then
+    RESUME_ARGS="trainer.resume_mode=resume_path trainer.resume_from_path=${RESUME_FROM}"
+fi
 
 project_name="grpo_on_policy_cbs"
 # _updated_scaling marks runs on the fixed dp_actor loss normalisation (2026-09-11);
@@ -108,4 +114,4 @@ python3 -m verl.trainer.main_ppo \
     trainer.test_freq=${TEST_FREQ} \
     trainer.stop_val_threshold=${STOP_AT} \
     actor_rollout_ref.nccl_timeout=${NCCL_TIMEOUT} \
-    trainer.total_epochs=15
+    trainer.total_epochs=${TOTAL_EPOCHS} ${RESUME_ARGS}
