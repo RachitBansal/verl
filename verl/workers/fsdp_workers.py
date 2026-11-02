@@ -1031,6 +1031,17 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         return output
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
+    def save_hf_model(self, local_path):
+        """Weights-only HF snapshot of the actor (see FSDPCheckpointManager.save_hf_model)."""
+        assert self._is_actor
+        if self._is_offload_param:
+            load_fsdp_model_to_gpu(self.actor_module_fsdp)
+        self.checkpoint_manager.save_hf_model(local_path)
+        dist.barrier()
+        if self._is_offload_param:
+            offload_fsdp_model_to_cpu(self.actor_module_fsdp)
+
+    @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def save_checkpoint(self, local_path, hdfs_path=None, global_step=0, max_ckpt_to_keep=None):
         from verl.utils.logger import log_with_rank
 

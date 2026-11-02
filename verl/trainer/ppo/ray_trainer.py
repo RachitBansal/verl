@@ -20,6 +20,7 @@ This trainer supports model-agonistic model initialization with huggingface
 
 import json
 import os
+import time
 import uuid
 from collections import defaultdict
 from copy import deepcopy
@@ -600,6 +601,11 @@ class RayPPOTrainer:
             output_ids = test_output_gen_batch.batch["responses"]
             output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
             sample_outputs.extend(output_texts)
+            # per-source response length / clip ratio (reported through process_validation_metrics as
+            # val-aux/<source>/response_length/mean@n and val-aux/<source>/response_clipped/mean@n)
+            _resp_len = test_output_gen_batch.batch["attention_mask"][:, -output_ids.shape[1] :].sum(-1)
+            reward_extra_infos_dict["response_length"].extend(_resp_len.float().tolist())
+            reward_extra_infos_dict["response_clipped"].extend((_resp_len >= output_ids.shape[1]).float().tolist())
 
             test_batch = test_batch.union(test_output_gen_batch)
             test_batch.meta_info["validate"] = True
@@ -1026,6 +1032,540 @@ class RayPPOTrainer:
             return True
         return False
 
+    # ---- Fixed-dataset study (trainer.fixed_dataset; Phase2a_Fixed_PiRef_Dataset_Plan.md) -----------------
+    def _generate_rows(self, prompts: DataProto, gen_batch: DataProto, n_roll: int, timing_raw: dict) -> DataProto:
+        """``n_roll`` rollouts per prompt of ``prompts`` (whose generation inputs are ``gen_batch``), joined
+        into one row per rollout exactly as the main loop does."""
+        gen_in = gen_batch.repeat(repeat_times=n_roll, interleave=True)
+        with marked_timer("gen", timing_raw, color="red"):
+            if not self.async_rollout_mode:
+                gen_out = self.actor_rollout_wg.generate_sequences(gen_in)
+            else:
+                gen_out = self.async_rollout_manager.generate_sequences(gen_in)
+        gen_out.meta_info.pop("timing", None)
+        rows = prompts.repeat(repeat_times=n_roll, interleave=True)
+        return rows.union(gen_out)
+
+    def _build_fixed_bank(self, path: str, logger) -> DataProto:
+        """Sample the bank from the *current* (= reference, asserted) policy and save it to ``path``.
+
+        Rows: ``data.train_batch_size`` training prompts x rollout.n (flag ``kimi_holdout`` 0), the
+        ``data.kimi_holdout_prompts`` extra prompts drawn by the dataloader x n (flag 1, fresh prompts), and a
+        second, independent set of n rollouts for the first ``holdout_sample_prompts`` training prompts
+        (flag 2, fresh samples of seen prompts; new uids so their group baseline is their own).  Stores the
+        reward, the group-mean advantages, the trainer-recomputed log-probs as both ``old_log_probs`` (the frozen
+        anchor) and ``ref_log_probs``, each row's prompt pass rate (``ref_pass_rate``), the probe flag
+        (``kimi_probe``: complete groups of ``probe_prompts`` random training prompts) and ``bank_prompt_uid``
+        (the training prompt a flag-2 row duplicates).  Logs a ``bank/*`` summary at step 0 and writes it to
+        ``<path>.summary.json``."""
+        fd = self.config.trainer.fixed_dataset
+        assert self.global_steps == 0, "the fixed bank must be generated at the reference weights (no checkpoint)"
+        n_roll = self.config.actor_rollout_ref.rollout.n
+        bsz = self.config.data.train_batch_size
+        n_hold_prompts = int(self.config.data.get("kimi_holdout_prompts", 0) or 0)
+        n_sample_prompts = int(fd.get("holdout_sample_prompts", 0) or 0)
+        timing_raw: dict = {}
+        metrics: dict = {}
+        with marked_timer("bank_build", timing_raw):
+            batch = DataProto.from_single_dict(next(iter(self.train_dataloader)))
+            assert len(batch) == bsz + n_hold_prompts, (
+                f"fixed bank: the dataloader gave {len(batch)} prompts, expected train_batch_size {bsz} + "
+                f"kimi_holdout_prompts {n_hold_prompts} (prompts filtered out? use a pre-filtered prompt file)"
+            )
+            batch.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in range(len(batch))], dtype=object)
+            gen_batch = self._get_gen_batch(batch)
+            gen_batch.meta_info["global_steps"] = 0
+            rows = self._generate_rows(batch, gen_batch, n_roll, timing_raw)
+            rows.non_tensor_batch["kimi_holdout"] = np.concatenate(
+                [np.zeros(bsz * n_roll, dtype=np.int64), np.ones(n_hold_prompts * n_roll, dtype=np.int64)]
+            )
+            rows.non_tensor_batch["bank_prompt_uid"] = rows.non_tensor_batch["uid"].copy()
+            parts = [rows]
+            if n_sample_prompts > 0:
+                assert n_sample_prompts <= bsz
+                sub = batch.slice(0, n_sample_prompts)
+                sub.non_tensor_batch["bank_prompt_uid"] = sub.non_tensor_batch["uid"].copy()
+                sub.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in range(len(sub))], dtype=object)
+                rows2 = self._generate_rows(sub, gen_batch.slice(0, n_sample_prompts), n_roll, timing_raw)
+                rows2.non_tensor_batch["kimi_holdout"] = np.full(len(rows2), 2, dtype=np.int64)
+                parts.append(rows2)
+            bank = DataProto.concat(parts)
+            bank.batch["response_mask"] = compute_response_mask(bank)
+            bank.meta_info["global_token_num"] = torch.sum(bank.batch["attention_mask"], dim=-1).tolist()
+            with marked_timer("reward", timing_raw, color="yellow"):
+                reward_tensor, reward_extra_infos_dict = compute_reward(bank, self.reward_fn)
+            bank.batch["token_level_scores"] = reward_tensor
+            bank.batch["token_level_rewards"] = reward_tensor
+            if reward_extra_infos_dict:
+                bank.non_tensor_batch.update({k: np.array(v) for k, v in reward_extra_infos_dict.items()})
+            with marked_timer("old_log_prob", timing_raw, color="blue"):
+                old_log_prob = self.actor_rollout_wg.compute_log_prob(bank)
+            loss_agg_mode = self.config.actor_rollout_ref.actor.loss_agg_mode
+            metrics["bank/entropy_ref"] = agg_loss(
+                loss_mat=old_log_prob.batch["entropys"],
+                loss_mask=bank.batch["response_mask"],
+                loss_agg_mode=loss_agg_mode,
+            ).item()
+            old_log_prob.batch.pop("entropys")
+            bank = bank.union(old_log_prob)
+            bank.batch["ref_log_probs"] = bank.batch["old_log_probs"].clone()
+            bank = self._finalize_fixed_bank(bank, n_roll, metrics)
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            bank.save_to_disk(path)
+            with open(path + ".summary.json", "w") as f:
+                json.dump(metrics, f, indent=2, default=float)
+        metrics.update({f"timing_s/{k}": v for k, v in timing_raw.items()})
+        print(f"fixed bank saved to {path}: {len(bank)} rows; summary: {metrics}")
+        logger.log(data=metrics, step=0)
+        return bank
+
+    def _finalize_fixed_bank(self, bank: DataProto, n_roll: int, metrics: dict) -> DataProto:
+        """Shared tail of the bank build and the master-bank load: group-mean advantages (uid groups), per-row
+        reference pass rate ``ref_pass_rate``, the probe flag ``kimi_probe`` (complete groups of
+        ``probe_prompts`` random training prompts, seeded) and the ``bank/*`` summary written into ``metrics``.
+        Needs ``token_level_scores/rewards``, ``response_mask`` and non-tensor ``uid`` / ``kimi_holdout``."""
+        from verl.trainer.ppo.kimi_fixed_bank import bank_floor_summary
+
+        fd = self.config.trainer.fixed_dataset
+        n_probe_prompts = int(fd.get("probe_prompts", 0) or 0)
+        max_resp = self.config.data.max_response_length
+        bank = compute_advantage(
+            bank,
+            adv_estimator=self.config.algorithm.adv_estimator,
+            gamma=self.config.algorithm.gamma,
+            lam=self.config.algorithm.lam,
+            num_repeat=n_roll,
+            norm_adv_by_std_in_grpo=self.config.algorithm.get("norm_adv_by_std_in_grpo", True),
+            config=self.config.algorithm,
+        )
+        # per-row reference pass rate (group mean reward) and the probe flag (complete groups)
+        uid = bank.non_tensor_batch["uid"].astype(str)
+        flags = bank.non_tensor_batch["kimi_holdout"].astype(np.int64)
+        seq_r = bank.batch["token_level_scores"].sum(-1).float().numpy()
+        _, inv = np.unique(uid, return_inverse=True)
+        gsum, gcnt = np.bincount(inv, weights=seq_r), np.bincount(inv)
+        bank.non_tensor_batch["ref_pass_rate"] = (gsum / gcnt)[inv].astype(np.float32)
+        probe = np.zeros(len(bank), dtype=np.int64)
+        if n_probe_prompts > 0:
+            rng = np.random.default_rng(int(fd.get("seed", 0)))
+            train_uids = np.unique(uid[flags == 0])
+            chosen = set(rng.choice(train_uids, size=min(n_probe_prompts, len(train_uids)), replace=False).tolist())
+            probe = np.array([int(f == 0 and u in chosen) for u, f in zip(uid, flags, strict=True)], dtype=np.int64)
+        bank.non_tensor_batch["kimi_probe"] = probe
+        bank.meta_info = {}
+        # summary
+        resp_len = bank.batch["response_mask"].sum(-1).float()
+        for v, name in ((0, "train"), (1, "holdout_prompt"), (2, "holdout_sample")):
+            m = flags == v
+            if m.any():
+                mt = torch.from_numpy(m)
+                metrics[f"bank/{name}_rows"] = int(m.sum())
+                metrics[f"bank/{name}_reward_mean"] = float(seq_r[m].mean())
+                metrics[f"bank/{name}_response_length_mean"] = resp_len[mt].mean().item()
+                metrics[f"bank/{name}_clip_ratio"] = (resp_len[mt] >= max_resp).float().mean().item()
+        k = np.rint(gsum[np.unique(inv[flags == 0])]).astype(np.int64)
+        metrics["bank/train_prompts"] = int(len(k))
+        metrics["bank/zero_adv_prompt_frac"] = float(((k == 0) | (k == n_roll)).mean())
+        metrics["bank/pass_at_n"] = float((k > 0).mean())
+        for kk in range(n_roll + 1):
+            metrics[f"bank/pass_count_hist/{kk}"] = int((k == kk).sum())
+        metrics.update(bank_floor_summary(k, n_roll, [float(t) for t in fd.get("floor_taus", [0.3, 0.1, 0.03])]))
+        metrics["bank/probe_rows"] = int(probe.sum())
+        return bank
+
+    def _layout_fixed_bank(self, bank: DataProto, metrics: dict) -> DataProto:
+        """Per-step row order of the bank: every actor DP rank's contiguous dispatch chunk is
+        [its length-balanced share of the non-probe training rows, its share of the probe rows, its share of
+        each held-out set].  Probe and held-out rows stay in bank (interleaved-group) order so each rank holds
+        complete prompt groups of them (needed by the per-prompt coverage metrics).  Returns a new DataProto."""
+        flags = bank.non_tensor_batch["kimi_holdout"].astype(np.int64)
+        probe = bank.non_tensor_batch["kimi_probe"].astype(bool)
+        ws = self.actor_rollout_wg.world_size
+        main = bank.select_idxs((flags == 0) & ~probe)
+        if self.config.trainer.balance_batch:
+            self._balance_batch(main, metrics=metrics)
+        blocks = [main]
+        if probe.any():
+            blocks.append(bank.select_idxs((flags == 0) & probe))
+        for v in sorted(set(flags.tolist()) - {0}):
+            blocks.append(bank.select_idxs(flags == v))
+        n_roll = self.config.actor_rollout_ref.rollout.n
+        for b in blocks:
+            assert len(b) % ws == 0, f"fixed bank: block of {len(b)} rows not divisible by world size {ws}"
+        for b in blocks[1:]:
+            if (len(b) // ws) % n_roll != 0:
+                print(
+                    f"WARNING fixed bank: a tracked block of {len(b)} rows gives {len(b) // ws} rows per rank, not a "
+                    f"multiple of rollout.n={n_roll}; per-prompt coverage metrics will see split groups"
+                )
+        per_rank = []
+        for r in range(ws):
+            for b in blocks:
+                nb = len(b) // ws
+                per_rank.append(b.slice(r * nb, (r + 1) * nb))
+        out = DataProto.concat(per_rank)
+        out.meta_info = {}
+        return out
+
+    def _rebaseline_fixed_bank(self, bank: DataProto, baseline: str) -> dict:
+        """Set the bank's regression targets in place.  ``mean``: keep the stored group-mean advantages
+        (r - rbar).  ``tau_logz``: A = r - tau log Zhat(x), Zhat = mean_j exp(r_j/tau) over the prompt's group
+        (kimi_fixed_bank.soft_value_baseline; tau = actor.policy_loss.kimi_tau), which makes the targets A/tau the
+        log-ratios of a normalised policy.  The per-row baseline is stored as ``kimi_baseline`` (the actor's
+        coverage metrics recover the reward as A + baseline).  Returns ``bank_baseline/*`` summary metrics."""
+        assert baseline in ("mean", "tau_logz"), f"unknown fixed_dataset.baseline={baseline}"
+        if baseline == "mean":
+            return {}
+        from verl.trainer.ppo.kimi_fixed_bank import soft_value_baseline
+
+        tau = float(self.config.actor_rollout_ref.actor.policy_loss.kimi_tau)
+        seq_r = bank.batch["token_level_scores"].sum(-1).double().numpy()
+        uid = bank.non_tensor_batch["uid"]
+        b = soft_value_baseline(seq_r, uid, tau)
+        adv = torch.from_numpy(seq_r - b).to(bank.batch["advantages"].dtype)
+        mask = bank.batch["response_mask"].to(adv.dtype)
+        bank.batch["advantages"] = adv.unsqueeze(-1) * mask
+        if "returns" in bank.batch.keys():
+            bank.batch["returns"] = bank.batch["advantages"].clone()
+        bank.non_tensor_batch["kimi_baseline"] = b.astype(np.float32)
+        out: dict = {}
+        flags = bank.non_tensor_batch["kimi_holdout"].astype(np.int64)
+        tgt = (seq_r - b) / tau
+        for v, name in ((0, "train"), (1, "holdout_prompt"), (2, "holdout_sample")):
+            m = flags == v
+            if not m.any():
+                continue
+            pos, neg = m & (tgt > 1e-8), m & (tgt < -1e-8)
+            out[f"bank_baseline/{name}_target_correct_mean"] = float(tgt[pos].mean()) if pos.any() else 0.0
+            out[f"bank_baseline/{name}_target_wrong_mean"] = float(tgt[neg].mean()) if neg.any() else 0.0
+            out[f"bank_baseline/{name}_target_rms"] = float(np.sqrt((tgt[m] ** 2).mean()))
+            out[f"bank_baseline/{name}_loss_at_zero_delta"] = float(((seq_r[m] - b[m]) ** 2).mean())
+        print(f"fixed bank re-baselined with tau log Zhat (tau={tau}): {out}")
+        return out
+
+    # ---- master bank (trainer.fixed_dataset.master_dir; verl/trainer/ppo/kimi_master_bank.py) ----------------
+    def _build_master_bank(self, logger) -> None:
+        """Sample ``rollout.n`` reference rollouts of *every* prompt of ``data.train_files`` (in file order) and
+        store them as compact shards of ``master_chunk_prompts`` prompts under ``master_dir``.  Job
+        ``master_job_index`` of ``master_num_jobs`` builds chunks c with c % num_jobs == job_index and skips
+        chunks already on disk, so several jobs can split the work and a resubmitted job resumes.  The job that
+        finds every shard done writes ``manifest.json`` / ``summary.json``."""
+        import pandas as pd
+
+        from verl.trainer.ppo import kimi_master_bank as mb
+        from verl.utils.dataset.rl_dataset import collate_fn
+
+        fd = self.config.trainer.fixed_dataset
+        assert self.global_steps == 0, "the master bank must be generated at the reference weights (no checkpoint)"
+        out_dir = fd.master_dir
+        chunk = int(fd.get("master_chunk_prompts", 512))
+        job, num_jobs = int(fd.get("master_job_index", 0)), int(fd.get("master_num_jobs", 1))
+        assert 0 <= job < num_jobs
+        n_roll = self.config.actor_rollout_ref.rollout.n
+        ws = self.actor_rollout_wg.world_size
+        assert n_roll % ws == 0 or (chunk * n_roll) % ws == 0, "rows per chunk must split evenly over the workers"
+        max_resp = self.config.data.max_response_length
+        ds = self.train_dataset
+        train_files = self.config.data.train_files
+        train_file = train_files if isinstance(train_files, str) else list(train_files)[0]
+        n_file = len(pd.read_parquet(train_file, columns=["data_source"]))
+        assert len(ds) == n_file, (
+            f"master bank: the dataset kept {len(ds)} of {n_file} prompts (length filter?); prompt rows would not "
+            "match the file. Pre-filter the prompt file (prepare_master_prompts.py)."
+        )
+        n_chunks = (len(ds) + chunk - 1) // chunk
+        rollout = self.config.actor_rollout_ref.rollout
+        cfg = {
+            "format_version": mb.FORMAT_VERSION,
+            "model": self.config.actor_rollout_ref.model.path,
+            "prompt_file": train_file,
+            "num_prompts": len(ds),
+            "n": n_roll,
+            "chunk_prompts": chunk,
+            "num_shards": n_chunks,
+            "temperature": float(rollout.temperature),
+            "top_p": float(rollout.get("top_p", 1.0)),
+            "top_k": int(rollout.get("top_k", -1)),
+            "max_prompt_length": int(self.config.data.max_prompt_length),
+            "max_response_length": int(max_resp),
+            "ref_log_probs": "FSDP actor compute_log_prob at the initial weights (the trainer's frozen anchor)",
+        }
+        os.makedirs(out_dir, exist_ok=True)
+        cfg_path = os.path.join(out_dir, "build_config.json")
+        if os.path.exists(cfg_path):
+            with open(cfg_path) as f:
+                old = json.load(f)
+            diff = {k: (old.get(k), v) for k, v in cfg.items() if old.get(k) != v}
+            assert not diff, f"master bank {out_dir} was started with different settings: {diff}"
+        else:
+            mb.atomic_write_json(cfg_path, cfg)
+        mine = [c for c in range(n_chunks) if c % num_jobs == job and not mb.shard_done(out_dir, c)]
+        print(
+            f"master bank {out_dir}: {len(ds)} prompts x {n_roll}, {n_chunks} shards; "
+            f"job {job}/{num_jobs} builds {mine}"
+        )
+        for c in mine:
+            timing_raw: dict = {}
+            with marked_timer("shard", timing_raw):
+                idx = list(range(c * chunk, min(len(ds), (c + 1) * chunk)))
+                batch = DataProto.from_single_dict(collate_fn([ds[i] for i in idx]))
+                assert (len(idx) * n_roll) % ws == 0, f"shard {c}: {len(idx)} x {n_roll} rows not divisible by {ws}"
+                batch.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in idx], dtype=object)
+                gen_batch = self._get_gen_batch(batch)
+                gen_batch.meta_info["global_steps"] = 0
+                rows = self._generate_rows(batch, gen_batch, n_roll, timing_raw)
+                rows.batch["response_mask"] = compute_response_mask(rows)
+                rows.meta_info["global_token_num"] = torch.sum(rows.batch["attention_mask"], dim=-1).tolist()
+                with marked_timer("reward", timing_raw, color="yellow"):
+                    reward_tensor, extras = compute_reward(rows, self.reward_fn)
+                rows.batch["token_level_scores"] = reward_tensor
+                with marked_timer("old_log_prob", timing_raw, color="blue"):
+                    lp = self.actor_rollout_wg.compute_log_prob(rows)
+                rmask = rows.batch["response_mask"]
+                numeric = {}
+                for k, v in (extras or {}).items():
+                    try:
+                        numeric[k] = np.asarray(v, dtype=np.float32)
+                    except (TypeError, ValueError):
+                        pass
+                with marked_timer("save", timing_raw):
+                    prompt_len = rows.batch["prompts"].shape[-1]
+                    sh = mb.pack_shard(
+                        prompts=rows.batch["prompts"],
+                        prompt_mask=rows.batch["attention_mask"][:, :prompt_len],
+                        responses=rows.batch["responses"],
+                        response_mask=rmask,
+                        ref_log_probs=lp.batch["old_log_probs"],
+                        rollout_log_probs=rows.batch["rollout_log_probs"]
+                        if "rollout_log_probs" in rows.batch.keys()
+                        else None,
+                        scores=reward_tensor.sum(-1),
+                        entropy_sum=(lp.batch["entropys"].float() * rmask).sum(-1),
+                        n=n_roll,
+                        prompt_rows=np.asarray(idx, dtype=np.int64),
+                        dapo_index=np.asarray(rows.non_tensor_batch["index"][::n_roll], dtype=np.int64)
+                        if "index" in rows.non_tensor_batch
+                        else np.asarray(idx, dtype=np.int64),
+                        data_source=np.asarray(rows.non_tensor_batch["data_source"][::n_roll]),
+                        extras=numeric,
+                    )
+                    side = mb.save_shard(out_dir, c, sh, max_resp)
+            m = {f"master_build/timing_s/{k}": v for k, v in timing_raw.items()}
+            m["master_build/shard"] = c
+            m["master_build/reward_mean"] = side["reward_sum"] / side["num_rows"]
+            m["master_build/response_length_mean"] = side["response_tokens"] / side["num_rows"]
+            m["master_build/clip_ratio"] = side["clipped_rows"] / side["num_rows"]
+            print(f"master shard {c} done: {m}")
+            logger.log(data=m, step=c)
+        if all(mb.shard_done(out_dir, c) for c in range(n_chunks)):
+            summary = mb.write_manifest(
+                out_dir, n_chunks, chunk, max_resp, [float(t) for t in fd.get("floor_taus", [0.3, 0.1, 0.03])]
+            )
+            print(f"master bank complete: {summary}")
+            logger.log(data=summary, step=n_chunks)
+        else:
+            missing = [c for c in range(n_chunks) if not mb.shard_done(out_dir, c)]
+            print(f"master bank: job {job} done; shards still missing (other jobs): {missing}")
+
+    def _load_master_bank(self) -> tuple[DataProto, dict]:
+        """Bank of one run from the master bank: rows chosen by ``fixed_dataset.master_selection`` (json written
+        by examples/kimi_k2/fixed_ref/prepare_master_selection.py): training prompts x their sample indices
+        (flag 0), fresh prompts (flag 1) and second sample sets of some training prompts (flag 2, own uids,
+        ``bank_prompt_uid`` = the training prompt's uid).  Then the same finalisation as a built bank."""
+        from verl.trainer.ppo import kimi_master_bank as mb
+
+        fd = self.config.trainer.fixed_dataset
+        with open(fd.master_selection) as f:
+            sel = json.load(f)
+        master_dir = sel.get("master_dir") or fd.master_dir
+        assert master_dir, "master bank: set fixed_dataset.master_dir or master_dir in the selection file"
+        n_roll = self.config.actor_rollout_ref.rollout.n
+        k = int(sel["k"])
+        assert k == n_roll, f"selection has k={k} samples per prompt; set actor_rollout_ref.rollout.n={k}"
+        roles = [(0, "train"), (1, "holdout_prompt"), (2, "holdout_sample")]
+        requests, flags, uids, puids = [], [], [], []
+        for flag, name in roles:
+            samples = [int(s) for s in sel["samples"][name]]
+            assert len(samples) == k or not sel[name], f"{name}: {len(samples)} sample indices, expected {k}"
+            for prow in sel[name]:
+                requests.append((int(prow), samples))
+                uid = f"{name}:{int(prow)}"
+                own = f"train:{int(prow)}" if flag == 2 else uid
+                flags += [flag] * k
+                uids += [uid] * k
+                puids += [own] * k
+        t0 = time.time()
+        got = mb.gather_rows(master_dir, requests)
+        pieces = got["pieces"]
+        tensors = mb.unpack_rows(
+            pieces,
+            pad_token_id=self.tokenizer.pad_token_id,
+            max_prompt_length=int(self.config.data.max_prompt_length),
+            max_response_length=int(self.config.data.max_response_length),
+        )
+        non_tensors = {
+            "uid": np.array(uids, dtype=object),
+            "bank_prompt_uid": np.array(puids, dtype=object),
+            "kimi_holdout": np.array(flags, dtype=np.int64),
+            "index": np.array([p["dapo_index"] for p in pieces for _ in range(k)], dtype=object),
+            "data_source": np.array([p["data_source"] for p in pieces for _ in range(k)], dtype=object),
+            "master_sample": np.array([s for p in pieces for s in p["samples"]], dtype=np.int64),
+        }
+        bank = DataProto.from_dict(tensors=tensors, non_tensors=non_tensors)
+        metrics: dict = {}
+        ent = torch.cat([p["ref_entropy_sum"] for p in pieces]).double()
+        train = torch.from_numpy(non_tensors["kimi_holdout"] == 0)
+        metrics["bank/entropy_ref_token_mean"] = float(
+            ent[train].sum() / bank.batch["response_mask"][train].sum().clamp(min=1)
+        )
+        bank = self._finalize_fixed_bank(bank, n_roll, metrics)
+        metrics["bank/load_s"] = time.time() - t0
+        print(
+            f"master bank {master_dir}: loaded {len(bank)} rows for selection {fd.master_selection} in "
+            f"{metrics['bank/load_s']:.0f}s; summary: {metrics}"
+        )
+        return bank, metrics
+
+    def _save_hf_weights(self):
+        path = os.path.join(self.config.trainer.default_local_dir, f"hf_step_{self.global_steps}")
+        self.actor_rollout_wg.save_hf_model(path)
+
+    def _fit_fixed_dataset(self, logger):
+        """Training loop of the fixed-dataset study: every step is one pass of ``update_actor`` over the same
+        bank (built at step 0 from the reference policy or loaded from ``trainer.fixed_dataset.path``), with
+        ``old_log_probs`` frozen at the reference log-probs (anchor=ref) or recomputed each step
+        (anchor=current); then validation / checkpoints as in ``fit``."""
+        fd = self.config.trainer.fixed_dataset
+        path = fd.get("path", None)
+        build_only = bool(fd.get("build_only", False))
+        if fd.get("master_dir", None) and build_only:
+            self._build_master_bank(logger)
+            if hasattr(logger, "finish"):
+                logger.finish()
+            return
+        if fd.get("master_selection", None):
+            bank, bank_metrics = self._load_master_bank()
+            if self.global_steps == 0:
+                logger.log(data=bank_metrics, step=0)
+        elif not path:
+            raise ValueError("trainer.fixed_dataset needs path (pickled bank) or master_selection (master bank)")
+        elif os.path.exists(path):
+            print(f"Loading fixed bank from {path}")
+            bank = DataProto.load_from_disk(path)
+            if build_only:
+                print("fixed bank exists and build_only=True: nothing to do")
+                return
+        else:
+            bank = self._build_fixed_bank(path, logger)
+            if build_only:
+                if hasattr(logger, "finish"):
+                    logger.finish()
+                return
+        anchor = fd.get("anchor", "ref")
+        assert anchor in ("ref", "current"), f"unknown fixed_dataset.anchor={anchor}"
+        holdout_prefixes = {1: "kimi_holdout_prompt", 2: "kimi_holdout_sample"}
+        flags_all = bank.non_tensor_batch["kimi_holdout"].astype(np.int64)
+        print(
+            f"fixed bank: {len(bank)} rows, {int((flags_all == 0).sum())} training "
+            f"({int(bank.non_tensor_batch['kimi_probe'].sum())} probe), "
+            f"{int((flags_all == 1).sum())} held-out fresh-prompt, {int((flags_all == 2).sum())} held-out "
+            f"fresh-sample rows; anchor={anchor}"
+        )
+        bank.meta_info = {}
+        baseline_metrics = self._rebaseline_fixed_bank(bank, fd.get("baseline", "mean"))
+        if baseline_metrics and self.global_steps == 0:
+            logger.log(data=baseline_metrics, step=0)
+        loss_agg_mode = self.config.actor_rollout_ref.actor.loss_agg_mode
+        hf_freq = int(fd.get("hf_save_freq", 0) or 0)
+        hf_dense = int(fd.get("hf_save_dense_until", 0) or 0)
+
+        progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training (fixed bank)")
+        self.global_steps += 1
+        last_val_metrics = None
+        self.max_steps_duration = 0
+        while self.global_steps <= self.total_training_steps:
+            metrics: dict = {}
+            timing_raw: dict = {}
+            is_last_step = self.global_steps >= self.total_training_steps
+            with marked_timer("step", timing_raw):
+                with marked_timer("layout", timing_raw):
+                    batch = self._layout_fixed_bank(bank, metrics)
+                batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
+                if anchor == "current":
+                    with marked_timer("old_log_prob", timing_raw, color="blue"):
+                        old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
+                        batch.batch["old_log_probs"] = old_log_prob.batch["old_log_probs"]
+                        keep = torch.from_numpy(batch.non_tensor_batch["kimi_holdout"] == 0)
+                        metrics["actor/entropy"] = agg_loss(
+                            loss_mat=old_log_prob.batch["entropys"][keep],
+                            loss_mask=batch.batch["response_mask"][keep],
+                            loss_agg_mode=loss_agg_mode,
+                        ).item()
+                batch.meta_info["kimi_holdout_prefixes"] = holdout_prefixes
+                batch.meta_info["kimi_frozen_anchor"] = True  # stored old_log_probs, no on-policy shortcut
+                batch.meta_info["multi_turn"] = self.config.actor_rollout_ref.rollout.multi_turn.enable
+                # the main loop inherits these from generate_sequences' meta_info; the bank carries none
+                batch.meta_info["temperature"] = self.config.actor_rollout_ref.rollout.temperature
+                with marked_timer("update_actor", timing_raw, color="red"):
+                    actor_output = self.actor_rollout_wg.update_actor(batch)
+                metrics.update(reduce_metrics(actor_output.meta_info["metrics"]))
+                # global solve ratios: every rank holds an equal share of each tracked set, so the rank-mean
+                # of reg_loss is the set's loss; the per-rank ratios averaged by reduce_metrics are not
+                # (a rank whose rows all have zero advantage has loss_before = 0)
+                for pfx in ("kimi_probe", *holdout_prefixes.values()):
+                    lb = metrics.get(f"{pfx}/reg_loss_before")
+                    la = metrics.get(f"{pfx}/reg_loss_after")
+                    l0 = metrics.get(f"{pfx}/reg_loss_at_zero_delta_before")
+                    if lb is None or la is None or l0 is None:
+                        continue
+                    metrics[f"{pfx}/solve_ratio"] = la / max(lb, 1e-12)  # this step
+                    metrics[f"{pfx}/solve_ratio_vs_zero_delta"] = la / max(l0, 1e-12)  # vs theta_ref (anchor=ref)
+                    metrics[f"{pfx}/recompute_floor_share"] = (lb - l0) / max(l0, 1e-12)
+                train_rows = batch.select_idxs(batch.non_tensor_batch["kimi_holdout"] == 0)
+                train_rows.meta_info = {
+                    "global_token_num": torch.sum(train_rows.batch["attention_mask"], dim=-1).tolist()
+                }
+
+            if (
+                self.val_reward_fn is not None
+                and self.config.trainer.test_freq > 0
+                and (is_last_step or self.global_steps % self.config.trainer.test_freq == 0)
+            ):
+                with marked_timer("testing", timing_raw, color="green"):
+                    val_metrics: dict = self._validate()
+                if self._val_reached_stop_threshold(val_metrics):
+                    is_last_step = True
+                    metrics["training/stopped_at_val_threshold"] = 1
+                if is_last_step:
+                    last_val_metrics = val_metrics
+                metrics.update(val_metrics)
+
+            if self.config.trainer.save_freq > 0 and (
+                is_last_step or self.global_steps % self.config.trainer.save_freq == 0
+            ):
+                with marked_timer("save_checkpoint", timing_raw, color="green"):
+                    self._save_checkpoint()
+            if (hf_freq > 0 and self.global_steps % hf_freq == 0) or self.global_steps <= hf_dense:
+                with marked_timer("save_hf", timing_raw, color="green"):
+                    self._save_hf_weights()
+
+            self.max_steps_duration = max(self.max_steps_duration, timing_raw["step"])
+            metrics.update({"training/global_step": self.global_steps, "training/epoch": self.global_steps})
+            metrics.update(compute_data_metrics(batch=train_rows, use_critic=self.use_critic))
+            metrics.update(compute_timing_metrics(batch=train_rows, timing_raw=timing_raw))
+            n_gpus = self.resource_pool_manager.get_n_gpus()
+            metrics.update(compute_throughout_metrics(batch=train_rows, timing_raw=timing_raw, n_gpus=n_gpus))
+            logger.log(data=metrics, step=self.global_steps)
+
+            progress_bar.update(1)
+            self.global_steps += 1
+            if is_last_step:
+                pprint(f"Final validation metrics: {last_val_metrics}")
+                progress_bar.close()
+                if hasattr(logger, "finish"):
+                    logger.finish()
+                return
+
     def fit(self):
         """
         The training loop of PPO.
@@ -1058,6 +1598,11 @@ class RayPPOTrainer:
             logger.log(data=val_metrics, step=self.global_steps)
             if self.config.trainer.get("val_only", False):
                 return
+
+        fixed_cfg = self.config.trainer.get("fixed_dataset", None)
+        if fixed_cfg is not None and fixed_cfg.get("enable", False):
+            self._fit_fixed_dataset(logger)
+            return
 
         if self.config.actor_rollout_ref.rollout.get("skip_rollout", False):
             rollout_skip = RolloutSkip(self.config, self.actor_rollout_wg)

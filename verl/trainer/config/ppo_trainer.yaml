@@ -180,6 +180,50 @@ trainer:
   # Validation frequency (in training iterations)
   test_freq: -1
 
+  # ---- Fixed-dataset study (Phase2a_Fixed_PiRef_Dataset_Plan.md): train the policy loss on one bank of
+  # rollouts sampled once from the reference policy, with the regression anchor (old_log_probs) frozen at the
+  # reference log-probs.  Every step is one pass over the bank (set ppo_mini_batch_size = train_batch_size for
+  # one full-batch optimizer step per step).  The bank is built at step 0 (reference weights) and saved to
+  # `path`; later runs / resumes load it.  See RayPPOTrainer._fit_fixed_dataset.
+  fixed_dataset:
+    enable: false
+    # pickle of the bank DataProto (built if missing, at the reference weights only)
+    path: null
+    # build the bank, log its summary and exit
+    build_only: false
+    # ref: old_log_probs frozen at the reference log-probs (fixed regression problem)
+    # current: old_log_probs recomputed with the current policy every step (re-anchored; a contrast cell)
+    anchor: ref
+    # training prompts that also get a second, held-out set of rollout.n fresh reference samples
+    # (kimi_holdout flag 2 -> metrics kimi_holdout_sample/*); data.kimi_holdout_prompts gives the
+    # held-out fresh prompts (flag 1 -> kimi_holdout_prompt/*)
+    holdout_sample_prompts: 0
+    # training prompts whose rows form the in-sample probe (complete groups, random; flag kimi_probe)
+    probe_prompts: 0
+    # rng seed for the probe draw
+    seed: 0
+    # weights-only HF snapshots (hf_step_{k}/) every hf_save_freq steps, and every step up to hf_save_dense_until
+    hf_save_freq: 0
+    hf_save_dense_until: 0
+    # tau values for which the bank summary reports the population solve-ratio floor
+    floor_taus: [0.3, 0.1, 0.03]
+    # regression baseline b(x) in A = r - b: "mean" = stored group mean (published K2); "tau_logz" =
+    # tau log mean_j exp(r_j/tau) over the prompt's group (plug-in tau log Z, A*-PO style), which makes the
+    # targets A/tau the log-ratios of a normalised policy; recomputed at load time with actor kimi_tau
+    baseline: mean
+    # ---- master bank (verl/trainer/ppo/kimi_master_bank.py): every prompt of data.train_files x rollout.n
+    # reference samples, built once as compact shards, subsets loaded per run ----
+    # directory of the master bank; with build_only=True the job builds (its share of) the shards
+    master_dir: null
+    # prompts per shard (= per generate call) when building
+    master_chunk_prompts: 512
+    # this build job builds shards c with c % master_num_jobs == master_job_index (existing shards are skipped)
+    master_job_index: 0
+    master_num_jobs: 1
+    # selection json (examples/kimi_k2/fixed_ref/prepare_master_selection.py): when set, the run's bank is loaded
+    # from the master bank (rollout.n must equal the selection's k) instead of from path
+    master_selection: null
+
   # Stop training once a validation metric reaches this value (null = never). The final
   # checkpoint is saved and the last validation is logged before the trainer returns.
   stop_val_threshold: null

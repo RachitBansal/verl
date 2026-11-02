@@ -365,3 +365,45 @@ class FSDPCheckpointManager(BaseCheckpointManager):
             torch.distributed.barrier()
 
         self.previous_saved_paths.append(local_path)
+
+    def save_hf_model(self, local_path: str):
+        """Dump only the HF-format weights (bf16) + config/tokenizer of the current model to ``local_path``.
+
+        A lightweight per-step snapshot for later re-evaluation (no optimizer / sharded state, so it is not
+        resumable); used by ``trainer.fixed_dataset.hf_save_freq``.  All ranks take part in the full-state-dict
+        gather; rank 0 writes.
+        """
+        local_path = local_mkdir_safe(local_path)
+        torch.distributed.barrier()
+        if fsdp_version(self.model) == 1:
+            unwrap_model = self.model._fsdp_wrapped_module
+        else:
+            unwrap_model = self.model
+        model_config = unwrap_model.config
+        state_dict = get_fsdp_full_state_dict(self.model, offload_to_cpu=True, rank0_only=True)
+        if self.rank == 0:
+            from transformers import AutoModelForCausalLM
+
+            # fp32 master weights -> bf16 on disk (the model's dtype; halves the snapshot size)
+            state_dict = {k: (v.to(torch.bfloat16) if v.is_floating_point() else v) for k, v in state_dict.items()}
+
+            with init_empty_weights():
+                save_model = AutoModelForCausalLM.from_config(model_config, torch_dtype=torch.bfloat16)
+            save_model.to_empty(device="cpu")
+            if save_model.can_generate() and hasattr(model_config, "name_or_path") and model_config.name_or_path:
+                try:
+                    save_model.generation_config = GenerationConfig.from_pretrained(model_config.name_or_path)
+                except Exception:
+                    pass
+            save_model.save_pretrained(local_path, state_dict=state_dict)
+            if self.processing_class is not None:
+                self.processing_class.save_pretrained(local_path)
+            log_with_rank(
+                f"Saved hf weights to {os.path.abspath(local_path)}",
+                rank=self.rank,
+                logger=logger,
+                log_only_rank_0=True,
+            )
+            del save_model
+        del state_dict
+        torch.distributed.barrier()

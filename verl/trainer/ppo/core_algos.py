@@ -1455,6 +1455,82 @@ def kimi_k2_summary_metrics(
     return out
 
 
+def kimi_k2_group_metrics(
+    stats: dict[str, torch.Tensor],
+    uid,
+    rbar,
+    prefix: str,
+    entropy: Optional[torch.Tensor] = None,
+    response_mask: Optional[torch.Tensor] = None,
+    baseline=None,
+) -> dict[str, float]:
+    """Per-class and per-prompt coverage diagnostics of the sequence log-ratio Delta = log pi_theta/pi_anchor.
+
+    Used by the fixed-dataset (mu = anchor = pi_ref) study, where Delta is the sequence-level density ratio of
+    the current policy to the sampler, so the self-normalised importance weights w_i ∝ exp(Delta_i) within a
+    prompt's group give the bank's own view of the policy: the SNIS estimate of E_{pi_theta} r, the effective
+    sample size and a chi^2 estimate (per prompt, averaged).  Per-class means of Delta (correct / wrong rows of
+    mixed groups, rows of zero-advantage groups) are compared against the population optimum's shifts
+    log u_+ <= log(1/p), log u_- (see Phase2a_Fixed_PiRef_Dataset_Plan.md §1), not against the targets A/tau.
+
+    Args:
+        stats: output of ``kimi_k2_regression_stats`` (per-sequence ``adv``, ``delta``).
+        uid: array-like (B,) prompt ids; rows of a prompt need not be contiguous.
+        rbar: array-like (B,) the prompt's mean reward over its group (the reference pass rate for a pi_ref bank).
+        entropy, response_mask: optional (B, T) token entropies to report the masked mean.
+        baseline: optional array-like (B,) the row's regression baseline (A = r - baseline) when it is not the
+            group mean, e.g. tau log Zhat (fixed_dataset.baseline=tau_logz); None means baseline = rbar.
+    """
+    adv = stats["adv"].detach().float().cpu()
+    delta = stats["delta"].detach().float().cpu()
+    rbar_t = torch.as_tensor(np.asarray(rbar, dtype=np.float32))
+    base_t = rbar_t if baseline is None else torch.as_tensor(np.asarray(baseline, dtype=np.float32))
+    r = adv + base_t  # the row's reward (advantage = r - baseline)
+    out: dict[str, float] = {}
+
+    def _mean(x: torch.Tensor, m: torch.Tensor) -> float:
+        return x[m].mean().item() if bool(m.any()) else 0.0
+
+    pos, neg = adv > 1e-8, adv < -1e-8
+    zero = ~(pos | neg)
+    out[f"{prefix}/delta_mean"] = delta.mean().item()
+    out[f"{prefix}/delta_correct_mean"] = _mean(delta, pos)
+    out[f"{prefix}/delta_wrong_mean"] = _mean(delta, neg)
+    out[f"{prefix}/delta_zeroadv_mean"] = _mean(delta, zero)
+    out[f"{prefix}/delta_zeroadv_rms"] = (delta[zero].pow(2).mean().sqrt().item() if bool(zero.any()) else 0.0)
+    out[f"{prefix}/frac_delta_below_m10"] = (delta < -10.0).float().mean().item()
+    # population-optimum reference for the correct rows of mixed groups: log u_+ -> log(1/p) as tau -> 0
+    p_mixed = rbar_t[pos]
+    out[f"{prefix}/log_inv_p_correct_mean"] = (
+        (-torch.log(p_mixed.clamp(min=1e-6))).mean().item() if bool(pos.any()) else 0.0
+    )
+
+    # per-prompt self-normalised importance sampling from the bank
+    _, inv = np.unique(np.asarray(uid, dtype=object).astype(str), return_inverse=True)
+    inv_t = torch.from_numpy(inv.astype(np.int64))
+    n_groups = int(inv_t.max().item()) + 1
+    gmax = torch.full((n_groups,), -float("inf")).scatter_reduce(0, inv_t, delta, reduce="amax", include_self=True)
+    w = torch.exp(delta - gmax[inv_t])
+    z = torch.zeros(n_groups).scatter_add(0, inv_t, w)
+    wn = w / z[inv_t]
+    n_g = torch.zeros(n_groups).scatter_add(0, inv_t, torch.ones_like(w))
+    snis_r = torch.zeros(n_groups).scatter_add(0, inv_t, wn * r)
+    ref_r = torch.zeros(n_groups).scatter_add(0, inv_t, r) / n_g
+    w2 = torch.zeros(n_groups).scatter_add(0, inv_t, wn.pow(2))
+    ess_frac = (1.0 / w2) / n_g
+    chi2 = n_g * w2 - 1.0
+    out[f"{prefix}/snis_reward"] = snis_r.mean().item()
+    out[f"{prefix}/ref_reward"] = ref_r.mean().item()
+    out[f"{prefix}/ess_frac"] = ess_frac.mean().item()
+    out[f"{prefix}/ess_frac_median"] = ess_frac.median().item()
+    out[f"{prefix}/chi2_hat"] = chi2.mean().item()
+    out[f"{prefix}/frac_groups_ess_below_quarter"] = (ess_frac < 0.25).float().mean().item()
+    out[f"{prefix}/num_groups"] = float(n_groups)
+    if entropy is not None and response_mask is not None:
+        out[f"{prefix}/entropy"] = verl_F.masked_mean(entropy.detach().float(), response_mask).item()
+    return out
+
+
 @register_policy_loss("kimi_k2")
 def compute_policy_loss_kimi_k2(
     old_log_prob: torch.Tensor,

@@ -56,7 +56,11 @@ def default_compute_score(
 
         # from . import math_verify
         # res = math_verify.compute_score(solution_str, ground_truth)
-    elif data_source in ["math_dapo", "math", "math_dapo_reasoning"] or data_source.startswith("aime"):
+    elif (
+        data_source in ["math_dapo", "math", "math_dapo_reasoning"]
+        or data_source.startswith("aime")
+        or data_source.startswith("math_dapo")  # fixed-dataset monitor splits (math_dapo_bank / math_dapo_fresh)
+    ):
         from . import math_reward
 
         res = math_reward.compute_score(solution_str, ground_truth)
