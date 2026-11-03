@@ -46,7 +46,8 @@ class McoreEngineConfig(BaseConfig):
         override_ddp_config (dict[str, Any]): Override configuration for DDP.
         override_transformer_config (dict[str, Any]): Override configuration for transformer.
         use_mbridge (bool): Whether to use MBridge for communication.
-        dtype (str): Mixed precision training param dtype, default "bfloat16"
+        dtype (str): Mixed precision training param dtype, default "bfloat16" ("fp32": full-precision compute)
+        allow_tf32 (bool): Allow TF32 tensor-core matmuls (only matters for fp32 compute), default False
     """
 
     # sequence_parallel is not listed as a frozen field for auto-correction purpose
@@ -72,7 +73,8 @@ class McoreEngineConfig(BaseConfig):
     use_mbridge: bool = False
     forward_only: bool = False
     strategy: str = "megatron"
-    dtype: str = "bfloat16"  # ["bfloat16", "float16"]
+    dtype: str = "bfloat16"  # ["bfloat16", "float16", "fp32"]
+    allow_tf32: bool = False
 
     def __post_init__(self) -> None:
         """config validation logics go here"""
@@ -100,7 +102,8 @@ class FSDPEngineConfig(BaseConfig):
         model_dtype (str): Model data type used to initialize the transformers model. default "fp32"
         use_orig_params (bool): Whether to use original parameters when initialize FSDP1, default False
         mixed_precision (Optional[dict[str, Any]]): Mixed precision configuration for FSDP, default None
-        dtype (str): Mixed precision training param dtype, default "bfloat16"
+        dtype (str): Mixed precision training param dtype, default "bfloat16" ("fp32": full-precision compute)
+        allow_tf32 (bool): Allow TF32 tensor-core matmuls (only matters for fp32 compute), default False
     """
 
     wrap_policy: dict[str, Any] = field(default_factory=dict)
@@ -119,7 +122,8 @@ class FSDPEngineConfig(BaseConfig):
     entropy_checkpointing: bool = False
     forward_only: bool = False
     strategy: str = "fsdp"
-    dtype: str = "bfloat16"  # ["bfloat16", "float16"]
+    dtype: str = "bfloat16"  # ["bfloat16", "float16", "fp32"]
+    allow_tf32: bool = False
 
     def __post_init__(self):
         assert self.strategy in ["fsdp", "fsdp2"], f"strategy {self.strategy} not supported"

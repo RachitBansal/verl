@@ -209,8 +209,15 @@ python examples/kimi_k2/fixed_ref/prepare_master_selection.py --master $MASTER_D
 SELECTION=$SEL TAU=0.03 LR=3e-6 sbatch --mem=400G examples/kimi_k2/fixed_ref/launch.sh   # B, n read from $SEL
 ```
 
-Smoke tests: `smoke_test.sh` (pickled bank) and `smoke_master.sh` (master build split over 2 jobs → selection →
-3 training steps).
+Smoke tests: `smoke_test.sh` (pickled bank), `smoke_master.sh` (master build split over 2 jobs → selection →
+3 training steps) and `smoke_precision.sh` (tf32 anchor + 3 tf32 steps vs 3 bf16 steps on the smoke master bank).
+
+```bash
+# fp32/TF32 actor (needed for tau >= 0.3, see "Numerical precision" below)
+for j in 0 1 2 3; do MODE=master_anchor PRECISION=tf32 JOB_INDEX=$j NUM_JOBS=4 sbatch -J k2anchor_j$j --mem=400G \
+    examples/kimi_k2/fixed_ref/launch.sh; done                                    # anchors/tf32/, once per master bank
+SELECTION=$SEL PRECISION=tf32 TAU=1 LR=1e-6 sbatch --mem=1400G examples/kimi_k2/fixed_ref/launch.sh
+```
 
 The current master bank is at `/n/netscratch/dam_lab/Everyone/brachit/kimi_k2_fixed/master_dapo_n64/`
 (prompts in `prompts/`, shards in `shards/`). It is world-readable.
@@ -227,10 +234,14 @@ The current master bank is at `/n/netscratch/dam_lab/Everyone/brachit/kimi_k2_fi
 | `holdout_sample_prompts`, `probe_prompts`, `seed` | held-out fresh samples (pickled build), in-sample probe groups |
 | `master_dir`, `master_chunk_prompts`, `master_job_index`, `master_num_jobs` | master build |
 | `master_selection` | selection.json, so the bank is loaded from the master bank |
+| `master_anchor` | anchor tag: read `anchors/<tag>/` instead of the stored (bf16) anchor |
+| `master_anchor_build` | compute `anchors/<master_anchor>/` with the actor's current precision and exit |
 | `hf_save_freq`, `hf_save_dense_until` | weights-only snapshots |
 | `floor_taus` | τ values for the `bank/floor_tau*` summary |
 
 Other settings that matter:
+- `actor.fsdp_config.dtype` (`bfloat16` | `fp32`) and `actor.fsdp_config.allow_tf32`: the actor's compute
+  precision (launch knob `PRECISION=bf16|tf32|fp32`).
 - `actor.ppo_mini_batch_size` = B gives one full-batch Adam step per step.
 - `actor.policy_loss.loss_mode=kimi_k2`, with `kimi_tau`, `kimi_target_level=seq_sum` and `kimi_form=squared`.
 - `algorithm.adv_estimator=grpo` with `norm_adv_by_std_in_grpo=False`.
@@ -282,3 +293,56 @@ Checkpoints:
   (`rollout_log_probs`) for mismatch diagnostics only.
 - **Cost scales with the selected rows.** Every training step costs ~8 ms per selected row on 4×H200. A full-batch
   step over all 1.15M master rows would take ~2.6 h, so select a subset per run.
+
+---
+
+## 7. Numerical precision
+
+**Symptom (full-batch grid, 2026-11-03).** After one Adam step the probe's sequence-level Δ rms jumped from 0.02 to
+≈0.50 for *every* lr from 1e-7 to 3e-6 (0.77 at 1e-5), and the τ=1 regression loss went from 0.097 to 0.34 at
+every lr. The step size had no effect.
+
+**Cause.** bf16 forward noise. A bf16 forward is a chaotic function of the weights: any weight change, even one
+that flips 0.1% of bf16 parameters by one ulp, re-rounds every activation and moves each token's log-prob by
+≈0.018 nats, i.e. Σ_t log π by ≈0.5 nats rms over ~800 tokens. Before the first step, the probe and the anchor run
+the same weights through the same kernels, so the gap is only 0.02; after any step it is the full noise. The true
+change from a 1e-7 step is ≈2e-4 nats. Measured with `diag/delta_probe.py` (seq-sum Δ rms vs the unperturbed
+model, 30 bank rows, random-sign perturbation of size lr):
+
+| actor compute | lr 1e-7 | lr 1e-6 | lr 1e-5 | forward cost |
+|---|---|---|---|---|
+| bf16 (verl default) | 0.56 | 0.63 | 0.58 | 1× |
+| fp32 matmuls, bf16 flash attention | 0.08 | 0.09 | 0.08–0.11 | 1.6× |
+| TF32 matmuls, fp16 flash attention (`PRECISION=tf32`) | 0.019 | 0.024 | 0.028 | 1.6× |
+| exact fp32 (sdpa) | 0.0002 | 0.0019 | 0.019 | 8× |
+
+The noise enters the loss as τΔ_noise. It adds ≈τ²·0.25 to the regression loss (L0 ≈ 0.1): about 250% at τ=1,
+22% at τ=0.3, 2.5% at τ=0.1 and under 0.25% at τ ≤ 0.03. The stored anchor (bf16 FSDP) itself differs from fp32
+by the same ≈0.5 nats.
+
+**Fix (`PRECISION=tf32`).**
+- The actor uses fp32 params and compute (`fsdp_config.dtype=fp32`) with TF32 tensor-core matmuls
+  (`fsdp_config.allow_tf32=True`, set in `fsdp_workers._build_model_optimizer`).
+- Flash attention only takes fp16/bf16, so `monkey_patch._ulysses_flash_attention_forward` runs the kernel in fp16
+  and returns fp32.
+- fp16's range would flush the ≈1e-7 gradients of a full-batch mean loss. The gradient crossing the kernel is
+  therefore scaled by 2^16 (`_FP16_ATTN_GRAD_SCALE`). In `diag/grad_check.py` the gradient cosine to exact fp32 is
+  0.9999 with the scale and 0.27 without it.
+- The anchor must come from the same precision. `MODE=master_anchor` recomputes it once per master bank into
+  `anchors/<tag>/shard_XXXXX.pt` (`_build_master_anchor`; flat fp32 in the shard's response layout). A run with
+  `master_anchor=<tag>` reads it (`gather_rows(..., anchor=tag)`).
+
+Smoke at τ=1, lr 1e-7 (`smoke_precision.sh`, 12 prompts × 2 samples):
+
+| | probe Δ rms, steps 1–3 | probe loss, start → step 3 |
+|---|---|---|
+| tf32 | 0.04, 0.04, 0.07 | 0.124 → 0.074 |
+| bf16 | 0.34, 0.52, 0.25 | 0.163 → 0.43, 0.56, 0.09 (noise) |
+
+Earlier results this affects:
+- **τ ≥ 0.3 runs.** Any bf16 run at τ ≥ 0.3 measured mostly noise in its regression metrics.
+- **Held-out ratios.** The ≈1.1 held-out ratio "from step 1" at τ=0.3 is this effect.
+- **τ ≤ 0.1 conclusions** stand, apart from a ≤2.5% loss offset.
+- **On-policy K2 runs** (bf16 `old_log_probs` recomputed every step) get the same ≈0.5-nat noise in Δ from their
+  second mini-batch step on, because the first step starts from the same weights as the anchor.
+

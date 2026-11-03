@@ -27,6 +27,9 @@ fi
 # Knobs: TAU LR ANCHOR(ref|current) BASELINE(mean|tau_logz) STEPS TEST_FREQ SAVE_FREQ HF_SAVE_FREQ HF_DENSE VAL_N BANK_DIR PROMPT_DIR TAG
 # Master bank (README.md): MODE=master_build JOB_INDEX=j NUM_JOBS=J [N_MASTER=64 CHUNK=512 MASTER_DIR=...] builds shards;
 #   SELECTION=<dir from prepare_master_selection.py> TAU=... LR=... trains on that subset (BSZ, N taken from it)
+# Precision (README.md "Numerical precision"): PRECISION=bf16 (default) | tf32 | fp32 sets the actor's FSDP compute
+#   dtype; a non-bf16 run reads the anchor recomputed in that precision (ANCHOR_TAG, default = PRECISION), built
+#   once by MODE=master_anchor PRECISION=tf32 JOB_INDEX=j NUM_JOBS=J.
 ####################
 MODE=${MODE:-train}
 BSZ=${BSZ:-4096}
@@ -47,6 +50,14 @@ VAL_N=${VAL_N:-4}
 SAVE_FREQ=${SAVE_FREQ:-25}
 HF_SAVE_FREQ=${HF_SAVE_FREQ:-5}
 HF_DENSE=${HF_DENSE:-20}
+PRECISION=${PRECISION:-bf16}   # actor FSDP compute: bf16 | tf32 (fp32 params, TF32 matmuls) | fp32
+case "${PRECISION}" in
+    bf16) PREC_ARGS=(actor_rollout_ref.actor.fsdp_config.dtype=bfloat16) ;;
+    tf32) PREC_ARGS=(actor_rollout_ref.actor.fsdp_config.dtype=fp32 actor_rollout_ref.actor.fsdp_config.allow_tf32=True) ;;
+    fp32) PREC_ARGS=(actor_rollout_ref.actor.fsdp_config.dtype=fp32 actor_rollout_ref.actor.fsdp_config.allow_tf32=False) ;;
+    *) echo "unknown PRECISION=${PRECISION}"; exit 1 ;;
+esac
+if [ "${PRECISION}" = "bf16" ]; then ANCHOR_TAG=${ANCHOR_TAG:-}; else ANCHOR_TAG=${ANCHOR_TAG:-${PRECISION}}; fi
 TAG=${TAG:-}
 
 PROMPT_DIR=${PROMPT_DIR:-/n/netscratch/dam_lab/Everyone/brachit/kimi_k2_fixed/prompts_b${BSZ}_h${HOLDOUT_PROMPTS}_seed0}
@@ -62,7 +73,7 @@ JOB_INDEX=${JOB_INDEX:-0}      # this build job takes shards c with c % NUM_JOBS
 NUM_JOBS=${NUM_JOBS:-1}
 SELECTION=${SELECTION:-}       # dir with selection.json + monitor_{seen,fresh}.parquet (prepare_master_selection.py)
 MASTER_SELECTION_ARG=()
-if [ "${MODE}" = "master_build" ]; then
+if [ "${MODE}" = "master_build" ] || [ "${MODE}" = "master_anchor" ]; then
     N=${N_MASTER:-64}
     BSZ=${CHUNK}
     HOLDOUT_PROMPTS=0
@@ -75,11 +86,16 @@ elif [ -n "${SELECTION}" ]; then
     PROMPT_DIR=${SELECTION}
     MASTER_PROMPTS=${SEL_PROMPTS}
     MASTER_SELECTION_ARG=(trainer.fixed_dataset.master_selection=${SELECTION}/selection.json)
+    if [ -n "${ANCHOR_TAG}" ]; then MASTER_SELECTION_ARG+=(trainer.fixed_dataset.master_anchor=${ANCHOR_TAG}); fi
 fi
 
 project_name=${PROJECT:-"kimi_k2_fixed"}
 if [ "${MODE}" = "master_build" ]; then
     experiment_name="master_$(basename "${MASTER_DIR}")_job${JOB_INDEX}of${NUM_JOBS}"
+    build_only=True
+elif [ "${MODE}" = "master_anchor" ]; then
+    [ -n "${ANCHOR_TAG}" ] || { echo "MODE=master_anchor needs PRECISION != bf16 or ANCHOR_TAG"; exit 1; }
+    experiment_name="anchor_${ANCHOR_TAG}_$(basename "${MASTER_DIR}")_job${JOB_INDEX}of${NUM_JOBS}"
     build_only=True
 elif [ "${MODE}" = "build" ]; then
     experiment_name="bank_b${BSZ}_n${N}_hp${HOLDOUT_PROMPTS}_hs${HOLDOUT_SAMPLE_PROMPTS}"
@@ -88,6 +104,7 @@ else
     experiment_name="k2fix_n${N}_bsz${BSZ}_tau${TAU}_${LEVEL}_${FORM}_fullbatch_lr${LR}_anchor${ANCHOR}"
     if [ "${BASELINE}" != "mean" ]; then experiment_name="${experiment_name}_bl${BASELINE}"; fi
     if [ -n "${SELECTION}" ]; then experiment_name="${experiment_name}_sel$(basename "${SELECTION}")"; fi
+    if [ "${PRECISION}" != "bf16" ]; then experiment_name="${experiment_name}_p${PRECISION}"; fi
     build_only=False
 fi
 if [ -n "${TAG}" ]; then experiment_name="${experiment_name}_${TAG}"; fi
@@ -119,11 +136,14 @@ model_path=/n/netscratch/sham_lab/Everyone/cmohri/rl_cbs/models/Qwen2.5-Math-1.5
 train_data=${PROMPT_DIR}/bank_prompts.parquet
 aime_data=/n/netscratch/sham_lab/Everyone/cmohri/rl_cbs/data/aime1983_2024.parquet
 val_files="[${aime_data},${PROMPT_DIR}/monitor_seen.parquet,${PROMPT_DIR}/monitor_fresh.parquet]"
-if [ "${MODE}" = "master_build" ]; then
+if [ "${MODE}" = "master_build" ] || [ "${MODE}" = "master_anchor" ]; then
     train_data=${MASTER_PROMPTS}
     val_files="[${aime_data}]"   # not run (VAL_BEFORE=False, no training steps), but the trainer loads it
     MASTER_SELECTION_ARG=(trainer.fixed_dataset.master_dir=${MASTER_DIR} trainer.fixed_dataset.master_chunk_prompts=${CHUNK}
         trainer.fixed_dataset.master_job_index=${JOB_INDEX} trainer.fixed_dataset.master_num_jobs=${NUM_JOBS})
+    if [ "${MODE}" = "master_anchor" ]; then
+        MASTER_SELECTION_ARG+=(trainer.fixed_dataset.master_anchor=${ANCHOR_TAG} trainer.fixed_dataset.master_anchor_build=True)
+    fi
 elif [ -n "${SELECTION}" ]; then
     train_data=${MASTER_PROMPTS}
 fi
@@ -199,4 +219,5 @@ python3 -m verl.trainer.main_ppo \
     trainer.test_freq=${TEST_FREQ} \
     trainer.total_training_steps=${STEPS} \
     trainer.total_epochs=1 \
+    "${PREC_ARGS[@]}" \
     "${MASTER_SELECTION_ARG[@]}"

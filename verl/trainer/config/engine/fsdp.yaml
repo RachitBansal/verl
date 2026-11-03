@@ -53,4 +53,7 @@ forward_only: false
 strategy: fsdp
 
 # Mixed precision training param dtype
-dtype: bfloat16 # ["bfloat16", "float16"]
+dtype: bfloat16 # ["bfloat16", "float16", "fp32"]
+
+# allow TF32 tensor-core matmuls for fp32 compute (dtype: fp32); set by the worker at model build
+allow_tf32: false

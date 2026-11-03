@@ -92,6 +92,18 @@ def main():
             i += 1
     print("roundtrip OK", i, "rows")
 
+    # alternative anchor: per-shard flat tensors in the response layout replace ref_log_probs (old_log_probs)
+    for c, (row0, R) in refs.items():
+        m = R["response_mask"].bool()
+        mb.save_anchor(d, "alt", c, (R["old_log_probs"] + 1000.0)[m], {"c": c})
+    out2 = mb.unpack_rows(mb.gather_rows(d, reqs, anchor="alt")["pieces"], PAD, Lp, Lr)
+    m = out2["response_mask"].bool()
+    assert torch.equal(out2["old_log_probs"][m], out["old_log_probs"][m] + 1000.0)
+    assert torch.equal(out2["old_log_probs"][~m], out["old_log_probs"][~m])
+    for key in ("responses", "attention_mask", "position_ids", "rollout_log_probs"):
+        assert torch.equal(out2[key], out[key]), key
+    print("anchor substitution OK")
+
 
 if __name__ == "__main__":
     main()

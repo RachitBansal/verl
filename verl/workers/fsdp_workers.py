@@ -468,6 +468,14 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
             reduce_dtype = torch.float32
             buffer_dtype = torch.float32
 
+        if fsdp_config.get("allow_tf32", False):
+            # fp32 compute on tensor cores (10-bit mantissa); process-wide, vLLM's bf16 kernels are unaffected
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        print(
+            f"{role} FSDP mixed precision: param {param_dtype}, reduce {reduce_dtype}, buffer {buffer_dtype}, "
+            f"tf32 {torch.backends.cuda.matmul.allow_tf32}"
+        )
         mixed_precision = MixedPrecision(param_dtype=param_dtype, reduce_dtype=reduce_dtype, buffer_dtype=buffer_dtype)
 
         auto_wrap_policy = get_fsdp_wrap_policy(

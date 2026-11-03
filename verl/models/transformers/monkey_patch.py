@@ -46,6 +46,45 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     return hidden_states.reshape(batch, slen, num_key_value_heads * n_rep, head_dim)
 
 
+# ---- fp32 compute through flash attention (actor fsdp_config.dtype=fp32; the Kimi-K2 fixed-bank study, whose
+# sequence-level log-ratios are below bf16 resolution: a bf16 forward re-run after any weight change moves
+# sum_t log pi by ~0.5 nats rms).  flash-attn only takes fp16/bf16, and HF's own fp32 fallback casts to the
+# *weight* dtype (fp32 here) and returns a half output that the fp32 o_proj rejects.  The kernel runs in fp16
+# (10-bit mantissa like TF32: measured seq-sum noise 0.02 vs 0.08 with bf16 attention, 0.56 all-bf16) and its
+# output goes back to fp32; the matmuls around it stay fp32/TF32.  fp16's narrow range would flush the tiny
+# gradients of a large-batch mean loss (~1e-7) to zero, so the gradient crossing the fp16 kernel is scaled by
+# _FP16_ATTN_GRAD_SCALE on the way in and unscaled on the way out.
+_FP16_ATTN_GRAD_SCALE = float(2**16)
+
+
+class _ToFp16UnscaledGrad(torch.autograd.Function):
+    """fp32 -> fp16 cast whose backward divides the (scaled) fp16 gradient by the scale, in fp32."""
+
+    @staticmethod
+    def forward(ctx, x):
+        return x.to(torch.float16)
+
+    @staticmethod
+    def backward(ctx, g):
+        return g.float() / _FP16_ATTN_GRAD_SCALE
+
+
+class _ToFp32ScaledGrad(torch.autograd.Function):
+    """fp16 -> fp32 cast whose backward multiplies the fp32 gradient by the scale before casting to fp16."""
+
+    @staticmethod
+    def forward(ctx, x):
+        return x.float()
+
+    @staticmethod
+    def backward(ctx, g):
+        return (g * _FP16_ATTN_GRAD_SCALE).to(torch.float16)
+
+
+def _fp32_attention_inputs(*xs: torch.Tensor):
+    return tuple(_ToFp16UnscaledGrad.apply(x) for x in xs)
+
+
 def _ulysses_flash_attention_forward(
     query_states: torch.Tensor,
     key_states: torch.Tensor,
@@ -105,9 +144,16 @@ def _ulysses_flash_attention_forward(
 
     # (bsz, seq_len, n_head/n, head_dim)
     query_length = query_states.size(1)
+    # fp32 compute (fsdp_config.dtype=fp32): see _fp32_attention_inputs
+    in_dtype = query_states.dtype
+    if in_dtype == torch.float32:
+        query_states, key_states, value_states = _fp32_attention_inputs(query_states, key_states, value_states)
+        kwargs["target_dtype"] = None
     attn_output = _flash_attention_forward(
         query_states, key_states, value_states, attention_mask, query_length, *args, position_ids=position_ids, **kwargs
     )
+    if in_dtype == torch.float32:
+        attn_output = _ToFp32ScaledGrad.apply(attn_output)
 
     ########## AlltoAll for Ulysses ##########
     if ulysses_sp_size > 1 and position_ids is not None:

@@ -223,6 +223,12 @@ trainer:
     # selection json (examples/kimi_k2/fixed_ref/prepare_master_selection.py): when set, the run's bank is loaded
     # from the master bank (rollout.n must equal the selection's k) instead of from path
     master_selection: null
+    # alternative anchor tag (anchors/<tag>/ under the master dir): the frozen reference log-probs recomputed
+    # with the actor's current precision (e.g. fsdp dtype fp32 + tf32).  The stored anchor is bf16-FSDP, whose
+    # sequence-level noise (~0.5 nats rms) swamps the K2 targets at large tau.  null = stored anchor.
+    master_anchor: null
+    # true: compute anchors/<master_anchor>/ for every shard (job split via master_job_index/num_jobs), then exit
+    master_anchor_build: false
 
   # Stop training once a validation metric reaches this value (null = never). The final
   # checkpoint is saved and the last validation is logged before the trainer returns.

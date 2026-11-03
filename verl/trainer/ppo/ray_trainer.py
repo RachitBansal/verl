@@ -1367,6 +1367,78 @@ class RayPPOTrainer:
             missing = [c for c in range(n_chunks) if not mb.shard_done(out_dir, c)]
             print(f"master bank: job {job} done; shards still missing (other jobs): {missing}")
 
+    def _build_master_anchor(self, logger) -> None:
+        """Recompute the frozen anchor (reference log-probs) of every master-bank row with the actor as currently
+        configured (e.g. fsdp_config.dtype=fp32 + allow_tf32) and store it as ``anchors/<tag>/shard_XXXXX.pt``
+        beside the shards (tag = ``fixed_dataset.master_anchor``).  Runs at the initial weights only; job split /
+        resume as in ``_build_master_bank``.  A run reads the anchor with the same ``master_anchor`` tag, so its
+        anchor and its training forward share one numerical precision."""
+        from verl.trainer.ppo import kimi_master_bank as mb
+
+        fd = self.config.trainer.fixed_dataset
+        assert self.global_steps == 0, "the anchor must be computed at the reference weights (no checkpoint)"
+        master_dir, tag = fd.master_dir, fd.master_anchor
+        job, num_jobs = int(fd.get("master_job_index", 0)), int(fd.get("master_num_jobs", 1))
+        man = mb.load_manifest(master_dir)
+        n, ws = man["n"], self.actor_rollout_wg.world_size
+        fsdp_cfg = self.config.actor_rollout_ref.actor.fsdp_config
+        cfg = {
+            "tag": tag,
+            "model": self.config.actor_rollout_ref.model.path,
+            "fsdp_dtype": str(fsdp_cfg.get("dtype")),
+            "allow_tf32": bool(fsdp_cfg.get("allow_tf32", False)),
+            # fp32 compute runs flash attention in fp16 (verl/models/transformers/monkey_patch.py)
+            "attention": "flash fp16" if str(fsdp_cfg.get("dtype")) in ("fp32", "float32") else "flash",
+            "temperature": float(self.config.actor_rollout_ref.rollout.temperature),
+        }
+        adir = os.path.join(master_dir, "anchors", tag)
+        os.makedirs(adir, exist_ok=True)
+        cfg_path = os.path.join(adir, "anchor_config.json")
+        if os.path.exists(cfg_path):
+            with open(cfg_path) as f:
+                old = json.load(f)
+            diff = {k: (old.get(k), v) for k, v in cfg.items() if old.get(k) != v}
+            assert not diff, f"anchor {adir} was started with different settings: {diff}"
+        else:
+            mb.atomic_write_json(cfg_path, cfg)
+        n_sh = len(man["shards"])
+        mine = [c for c in range(n_sh) if c % num_jobs == job and not mb.anchor_done(master_dir, tag, c)]
+        print(f"master anchor {adir}: {cfg}; job {job}/{num_jobs} computes shards {mine}")
+        for c in mine:
+            t0 = time.time()
+            s = man["shards"][c]
+            prow = list(range(s["prompt_row_start"], s["prompt_row_end"]))
+            pieces = mb.gather_rows(master_dir, [(p, list(range(n))) for p in prow])["pieces"]
+            t = mb.unpack_rows(
+                pieces,
+                pad_token_id=self.tokenizer.pad_token_id,
+                max_prompt_length=int(self.config.data.max_prompt_length),
+                max_response_length=int(self.config.data.max_response_length),
+            )
+            keys = ("input_ids", "attention_mask", "position_ids", "responses", "response_mask")
+            rows = DataProto.from_dict(tensors={k: t[k] for k in keys})
+            rows, pad = pad_dataproto_to_divisor(rows, ws)
+            out = self.actor_rollout_wg.compute_log_prob(rows)
+            lp = out.batch["old_log_probs"][: len(rows) - pad].float()
+            rmask = t["response_mask"].bool()
+            flat = lp[rmask]  # row-major = the shard's flat response layout (row lp * n + s, real tokens only)
+            old = torch.cat([r for p in pieces for r in p["ref_log_probs"]]).float()
+            assert flat.numel() == old.numel(), f"shard {c}: {flat.numel()} anchor tokens vs {old.numel()} stored"
+            seq_new = (lp * rmask).sum(-1).double()
+            seq_old = (t["old_log_probs"].float() * rmask).sum(-1).double()
+            st = {
+                "num_rows": int(rmask.shape[0]),
+                "num_tokens": int(flat.numel()),
+                "seq_delta_vs_stored_rms": float(((seq_new - seq_old) ** 2).mean().sqrt()),
+                "tok_delta_vs_stored_rms": float(((flat - old).double() ** 2).mean().sqrt()),
+                "seconds": time.time() - t0,
+            }
+            mb.save_anchor(master_dir, tag, c, flat, st)
+            print(f"master anchor shard {c}: {st}")
+            logger.log(data={f"master_anchor/{k}": v for k, v in st.items()}, step=c)
+        missing = [c for c in range(n_sh) if not mb.anchor_done(master_dir, tag, c)]
+        print(f"master anchor {tag}: job {job} done; shards still missing: {missing}")
+
     def _load_master_bank(self) -> tuple[DataProto, dict]:
         """Bank of one run from the master bank: rows chosen by ``fixed_dataset.master_selection`` (json written
         by examples/kimi_k2/fixed_ref/prepare_master_selection.py): training prompts x their sample indices
@@ -1395,7 +1467,8 @@ class RayPPOTrainer:
                 uids += [uid] * k
                 puids += [own] * k
         t0 = time.time()
-        got = mb.gather_rows(master_dir, requests)
+        anchor = fd.get("master_anchor", None)
+        got = mb.gather_rows(master_dir, requests, anchor=anchor)
         pieces = got["pieces"]
         tensors = mb.unpack_rows(
             pieces,
@@ -1421,7 +1494,8 @@ class RayPPOTrainer:
         bank = self._finalize_fixed_bank(bank, n_roll, metrics)
         metrics["bank/load_s"] = time.time() - t0
         print(
-            f"master bank {master_dir}: loaded {len(bank)} rows for selection {fd.master_selection} in "
+            f"master bank {master_dir} (anchor {anchor or 'stored'}): loaded {len(bank)} rows for selection "
+            f"{fd.master_selection} in "
             f"{metrics['bank/load_s']:.0f}s; summary: {metrics}"
         )
         return bank, metrics
@@ -1438,6 +1512,11 @@ class RayPPOTrainer:
         fd = self.config.trainer.fixed_dataset
         path = fd.get("path", None)
         build_only = bool(fd.get("build_only", False))
+        if fd.get("master_dir", None) and fd.get("master_anchor_build", False):
+            self._build_master_anchor(logger)
+            if hasattr(logger, "finish"):
+                logger.finish()
+            return
         if fd.get("master_dir", None) and build_only:
             self._build_master_bank(logger)
             if hasattr(logger, "finish"):

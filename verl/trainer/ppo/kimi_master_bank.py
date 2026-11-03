@@ -159,6 +159,27 @@ def shard_done(master_dir: str, c: int) -> bool:
     return os.path.exists(p) and os.path.exists(p[:-3] + ".json")
 
 
+# ---- alternative anchors: the same rows' reference log-probs recomputed under another numerical precision -------
+# anchors/<tag>/shard_XXXXX.pt holds one flat fp32 tensor in the shard's response_tokens layout (row-major, real
+# tokens only); anchors/<tag>/shard_XXXXX.json is its sidecar (written last = done marker).
+def anchor_path(master_dir: str, tag: str, c: int) -> str:
+    return os.path.join(master_dir, "anchors", tag, f"shard_{c:05d}.pt")
+
+
+def save_anchor(master_dir: str, tag: str, c: int, flat: torch.Tensor, stats: dict) -> None:
+    path = anchor_path(master_dir, tag, c)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.tmp.{os.getpid()}"
+    torch.save(flat.float().contiguous().cpu(), tmp)
+    os.replace(tmp, path)
+    atomic_write_json(path[:-3] + ".json", stats)
+
+
+def anchor_done(master_dir: str, tag: str, c: int) -> bool:
+    p = anchor_path(master_dir, tag, c)
+    return os.path.exists(p) and os.path.exists(p[:-3] + ".json")
+
+
 def write_manifest(master_dir: str, num_chunks: int, chunk_prompts: int, max_response_length: int, taus) -> dict:
     """Combine the sidecars into manifest.json and summary.json (call once every shard is done)."""
     from verl.trainer.ppo.kimi_fixed_bank import bank_floor_summary
@@ -214,9 +235,11 @@ def load_manifest(master_dir: str) -> dict:
         return json.load(f)
 
 
-def gather_rows(master_dir: str, requests: list[tuple[int, list[int]]]) -> dict:
+def gather_rows(master_dir: str, requests: list[tuple[int, list[int]]], anchor: Optional[str] = None) -> dict:
     """Load the compact pieces of the requested rows.  ``requests`` is a list of (prompt_row, sample indices);
-    the output rows are in request order (all samples of a request contiguous).  Loads each needed shard once."""
+    the output rows are in request order (all samples of a request contiguous).  Loads each needed shard once.
+    ``anchor``: tag of an alternative anchor (anchors/<tag>/) whose log-probs replace the stored
+    ``ref_log_probs``."""
     man = load_manifest(master_dir)
     n = man["n"]
     starts = np.array([s["prompt_row_start"] for s in man["shards"]])
@@ -229,6 +252,11 @@ def gather_rows(master_dir: str, requests: list[tuple[int, list[int]]]) -> dict:
     pieces: list[Optional[dict]] = [None] * len(requests)
     for c, req_ids in sorted(by_shard.items()):
         sh = torch.load(os.path.join(master_dir, "shards", man["shards"][c]["file"]), weights_only=False)
+        if anchor:
+            assert anchor_done(master_dir, anchor, c), f"anchor {anchor}: shard {c} missing (MODE=master_anchor)"
+            alt = torch.load(anchor_path(master_dir, anchor, c))
+            assert alt.shape == sh["ref_log_probs"].shape, f"anchor {anchor} shard {c}: shape mismatch"
+            sh["ref_log_probs"] = alt
         p0 = int(sh["prompt_rows"][0])
         po, ro = sh["prompt_offsets"], sh["response_offsets"]
         for i in req_ids:
