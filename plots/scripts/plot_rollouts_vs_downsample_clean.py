@@ -26,11 +26,8 @@ import numpy as np, pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-# Paper scale (shared style with the iclr_figs figures and paperstyle.py): this script lays figures out on a 26-inch "line width"
-# with 28-34 pt type; drawing it on a 19-inch canvas instead (x 19/26) prints the type at ~8-10 pt and lines at ~1.4 pt when the
-# figure is scaled to the 5.5-inch text width, the same as the other paper figures.
-PAPER_SCALE = 19.0 / 26.0
 from matplotlib.lines import Line2D
+from matplotlib.legend_handler import HandlerTuple
 
 SURFACE, INK, INK2, GRID, MUTED = "#ffffff", "#0b0b0b", "#52514e", "#e6e5e1", "#a8a7a2"
 GREEN, PURPLE = "#2ca02c", "#c2378f"     # tab:green = the rollout sweep's colour in Figure 1; magenta for upsampling (unused elsewhere; purple is the B = 1024 sweep). Green/magenta stay apart under protan, deutan and tritan simulation (CIE76 92/56/102)
@@ -139,8 +136,7 @@ for series, hits, never in [("more_rollouts", roll, roll_never), ("downsample", 
 pd.DataFrame(rows).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_table.csv")), index=False)
 
 # ------------------------------------------------------------------ figure (styled like plot_steps_to_50_combined.py)
-TICK, LABEL, TITLE, NOTE, LEGEND = 28, 31, 32, 29, 27       # type sizes, as in the steps_to_50 figures
-MS_SHRINK = 0.66     # marker size factor (curves keep their width): the two series' markers overlapped at full size
+TICK, LABEL, TITLE, NOTE, LEGEND = 28, 31, 32, 29, 34       # type sizes, as in the steps_to_50 figures
 # two panels side by side: steps to target on the left, every LR tried at each K on the right (ring = fastest), to show the
 # LR choice barely moves between the two series
 MISSING = "#8f8e8a"
@@ -159,9 +155,9 @@ def style_axes(a_):
 def draw_left(ax):
     """steps to target vs K for both series, the Figure 1 fit of the rollout sweep, sequences per step on top, legend inside"""
     style_axes(ax)
-    series = [("more rollouts: generate K, train K", roll, GREEN, "p", 19 * MS_SHRINK),
-              ("upsampling: generate 64, train the K largest-|advantage|", ds, PURPLE, "D", 16 * MS_SHRINK)]
-    for label, pts, color, marker, ms in series:
+    series = [("more rollouts: generate K, train K", roll, GREEN, "p", 19, -0.1),
+              ("upsampling: generate 64, train the K largest-|advantage|", ds, PURPLE, "D", 16, +0.1)]
+    for label, pts, color, marker, ms, nudge in series:      # nudge: the two series side by side at each K (as in the right panel), so coinciding points both show
         if FIT and pts is roll:
             ft = pd.read_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(FIT_TABLE)) if not os.path.isabs(FIT_TABLE) and not os.path.exists(FIT_TABLE) else FIT_TABLE)
             f1 = ft[ft["series"] == f"more rollouts, B = {B}"].iloc[0]
@@ -170,8 +166,8 @@ def draw_left(ax):
             ax.plot(xs, smin * (1 + nstar / xs), ls="-", lw=4.8, color=color, zorder=3)
             fits.append(dict(series=label, S_min=smin, N_crit=nstar, K_crit=nstar / B, rms_log=float(f1["rms_log"]), points=int(f1["n_points"]), source=FIT_TABLE))
         else:                                   # no fit for this series: join its points
-            ax.plot(pts["seqs"], pts["steps"], lw=4.8, color=color, zorder=3)
-        ax.scatter(pts["seqs"], pts["steps"], s=ms ** 2 * 1.5, marker=marker, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=6)
+            ax.plot(pts["seqs"] * 2.0 ** nudge, pts["steps"], lw=4.8, color=color, zorder=3)
+        ax.scatter(pts["seqs"] * 2.0 ** nudge, pts["steps"], s=ms ** 2 * 1.5, marker=marker, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=6)
     if FIT:
         pd.DataFrame(fits).to_csv(os.path.join(os.path.dirname(os.path.abspath(csv_in)), os.path.basename(png_out).replace(".png", "_fit_table.csv")), index=False)
 
@@ -183,25 +179,25 @@ def draw_left(ax):
     ax.set_xlim(min(ticks) / 1.9, max(ticks) * 1.9)     # same K range as the right panel (x is in sequences = K x B)
     ax.set_ylabel("steps to target", color=INK, fontsize=LABEL)
     # (the sequences-per-step axis along the top was dropped 2026-10-22: K x B = 128 is in the x label)
-    legend = [Line2D([], [], marker="p", ls="", ms=19 * MS_SHRINK, color=GREEN, mec=SURFACE, label="generate K, train K"),
-              Line2D([], [], marker="D", ls="", ms=16 * MS_SHRINK, color=PURPLE, mec=SURFACE, label="generate 64, train K")]
+    legend = [Line2D([], [], marker="p", ls="", ms=19, color=GREEN, mec=SURFACE, label="generate K, train K"),
+              Line2D([], [], marker="D", ls="", ms=16, color=PURPLE, mec=SURFACE, label="generate 64, train K")]
     if FIT:
         legend += [Line2D([], [], ls="-", lw=4.8, color=GREEN, label="fit")]
-    ax.legend(handles=legend, loc="upper right", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)   # the upper right is empty: steps fall with N
+    ax.legend(handles=legend, loc="upper right", frameon=False, fontsize=LEGEND - 4, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)   # the upper right is empty: steps fall with N
 
 
 def draw_right(axr):
     """every LR tried at each K for both series; ring = fastest; legend under the panel"""
     style_axes(axr)
     # ---- right panel: every LR tried at each K; filled = reached the target, hollow = did not reach it after training at least as long as the fastest LR, x = too early to tell; ring = fastest
-    for lad, color, marker, ms, nudge in [(roll_lad, GREEN, "p", 19 * MS_SHRINK, -0.2), (ds_lad, PURPLE, "D", 16 * MS_SHRINK, +0.2)]:
+    for lad, color, marker, ms, nudge in [(roll_lad, GREEN, "p", 19, -0.15), (ds_lad, PURPLE, "D", 16, +0.15)]:
         x = lad["k"] * 2.0 ** nudge                       # the two series side by side within each K column
         hit = lad[lad["verdict"].isin(["hit", "best"])]; nev = lad[lad["verdict"] == "never"]; inc = lad[lad["verdict"] == "inconclusive"]
         axr.scatter(x[hit.index], hit["lr"], s=ms ** 2 * 1.5, marker=marker, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=5)
-        axr.scatter(x[nev.index], nev["lr"], s=ms ** 2 * 1.5, marker=marker, facecolors="none", edgecolors=color, linewidths=2.2, zorder=5)
+        axr.scatter(x[nev.index], nev["lr"], s=ms ** 2 * 1.5, marker=marker, facecolors="none", edgecolors=color, linewidths=2.6, zorder=5)
         axr.scatter(x[inc.index], inc["lr"], s=220, marker="x", c=MISSING, linewidths=2.8, zorder=5)
         best = lad[lad["verdict"] == "best"]
-        axr.scatter(x[best.index], best["lr"], s=1050 * MS_SHRINK ** 2, marker="o", facecolors="none", edgecolors=INK, linewidths=3.2, zorder=6)
+        axr.scatter(x[best.index], best["lr"], s=1050, marker="o", facecolors="none", edgecolors=INK, linewidths=3.8, zorder=6)
     axr.set_xscale("log", base=2); axr.set_yscale("log")
     ks = sorted(set(roll_lad["k"]) | set(ds_lad["k"]))
     axr.set_xticks(ks); axr.set_xticklabels([str(k) for k in ks])
@@ -209,24 +205,31 @@ def draw_right(axr):
     axr.set_xlim(min(ks) / 1.9, max(ks) * 1.9)
     axr.set_xlabel(f"trained rollouts K  (B = {B})", color=INK, fontsize=LABEL)
     axr.set_ylabel("learning rate", color=INK, fontsize=LABEL)
-    from matplotlib.legend_handler import HandlerTuple
-    mk = lambda m, ms, c, filled: Line2D([], [], marker=m, ls="", ms=ms, color=c, mfc=c if filled else "none", mec=SURFACE if filled else c, mew=1.5 if filled else 2.2)
-    legend_r = [(mk("p", 19 * MS_SHRINK, GREEN, True), mk("D", 16 * MS_SHRINK, PURPLE, True)),
-                (mk("p", 19 * MS_SHRINK, GREEN, False), mk("D", 16 * MS_SHRINK, PURPLE, False)),
-                Line2D([], [], marker="o", ls="", ms=26.5 * MS_SHRINK, mfc="none", mec=INK, mew=3.2)]
+    # legend handles drawn like the markers they explain: both series' shapes side by side, filled = reached, hollow = did not, ring = fastest
+    mk = lambda m, ms, c, fill: Line2D([], [], marker=m, ls="", ms=ms, mfc=c if fill else "none", mec=SURFACE if fill else c, mew=1.5 if fill else 2.6)
+    ring = Line2D([], [], marker="o", ls="", ms=26.5, mfc="none", mec=INK, mew=3.8)
+    fastest = ring       # the ring alone (it marks the fastest LR of either series)
+    legend_r = [(mk("p", 19, GREEN, True), mk("D", 16, PURPLE, True)), (mk("p", 19, GREEN, False), mk("D", 16, PURPLE, False)), fastest]
     labels_r = ["reached target", "did not reach target", "fastest LR"]
     if (roll_lad["verdict"] == "inconclusive").any() or (ds_lad["verdict"] == "inconclusive").any():
         legend_r.append(Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6)); labels_r.append("too early to tell")
-    # inside panel (b), in an empty band on top (a strip under both panels would read as applying to (a) too)
-    lo, hi = axr.get_ylim(); axr.set_ylim(lo, hi * 9); axr.set_yticks([t for t in (1e-6, 1e-5, 1e-4) if lo <= t <= hi])
-    axr.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
-    axr.legend(legend_r, labels_r, loc="upper center", ncol=2, frameon=False, fontsize=LEGEND,
-               labelcolor=INK, handletextpad=0.3, columnspacing=0.9, borderaxespad=0.15, handler_map={tuple: HandlerTuple(ndivide=None, pad=0.2)})
+    fig_ = axr.figure; own = fig_.get_layout_engine() is not None      # the sub-figure file (constrained layout) vs the combined figure
+    def leg_r(fs):
+        kw = dict(ncol=len(legend_r), frameon=False, fontsize=fs, labelcolor=INK, handletextpad=0.4, columnspacing=1.0, handlelength=1.9,
+                  handler_map={tuple: HandlerTuple(ndivide=None, pad=0.3)})
+        if own:     # a figure legend across the top, so the layout does not narrow the axes to the legend's width
+            return fig_.legend(legend_r, labels_r, loc="outside upper center", **kw)
+        return axr.legend(legend_r, labels_r, loc="lower center", bbox_to_anchor=(0.5, 1.0), **kw)   # directly above the right panel, one row
+    fs = LEGEND - 4
+    leg = leg_r(fs); axr.figure.canvas.draw()
+    while leg.get_window_extent().width > 0.98 * axr.figure.bbox.width and fs > 18:   # the narrow sub-figure: smaller type rather than a second row
+        leg.remove(); fs -= 1; leg = leg_r(fs); axr.figure.canvas.draw()
+    if fs != LEGEND - 4: print(f"panel (b) legend at {fs} pt to fit one row")
 
 
 # combined figure (a full line width) and the two sub-figure files (a: 0.53, b: 0.46 of the line width; not cropped, equal height, so
 # they top-align when LaTeX sets them side by side, as for the LR split figure)
-fig, (ax, axr) = plt.subplots(1, 2, figsize=(PAPER_SCALE * (26.0), PAPER_SCALE * (6.6)), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1]))
+fig, (ax, axr) = plt.subplots(1, 2, figsize=(26.0, 6.6), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1]))
 fig.subplots_adjust(left=0.06, right=0.99, top=0.84, bottom=0.22, wspace=0.22)
 draw_left(ax); draw_right(axr)
 if FIT:
@@ -238,7 +241,7 @@ pdf_out = os.path.join(pdf_dir, os.path.basename(png_out).replace(".png", ".pdf"
 fig.savefig(pdf_out, facecolor=SURFACE, bbox_inches="tight")
 stem = png_out.replace(".png", "")
 for tag, fn, wfrac in (("a", draw_left, 0.53), ("b", draw_right, 0.46)):
-    f_, a_ = plt.subplots(figsize=(PAPER_SCALE * (wfrac * 26.0), PAPER_SCALE * (6.6)), facecolor=SURFACE, layout="constrained"); fn(a_)
+    f_, a_ = plt.subplots(figsize=(wfrac * 26.0, 6.6), facecolor=SURFACE, layout="constrained"); fn(a_)
     f_.savefig(f"{stem}_{tag}.png", dpi=170, facecolor=SURFACE)
     f_.savefig(os.path.join(pdf_dir, os.path.basename(stem) + f"_{tag}.pdf"), facecolor=SURFACE)
     plt.close(f_)
