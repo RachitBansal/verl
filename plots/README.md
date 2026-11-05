@@ -131,6 +131,16 @@ $PLOT scripts/plot_steps_vs_seqs_paper.py csv/steps_to_50_seqs.csv png/steps_vs_
 $PLOT scripts/plot_steps_to_50_combined.py csv/steps_to_50_kl.csv png/steps_to_50_split.png --n2 64 --lr-max 1.2e-4 --lr-min 5e-7 --split --nstar csv/steps_vs_seqs_b1024_fit_fit_table.csv --fig1-colors --no-nstar-n2 --no-fit-n2 --no-early --share-b   # LR figure: Figure 1 palette; K=64 panel without N* line or fit; no "too early to tell" runs
 $PLOT scripts/plot_rollouts_vs_downsample_clean.py csv/steps_to_50_seqs.csv png/rollouts_vs_downsample_clean_fit.png --fit      # upsampling figure
 ```
+Paper figures as of 2026-11-05 (paper commit 118eeb9, Nov-5 pull; fits unchanged):
+```bash
+$PLOT scripts/plot_steps_to_50_combined.py csv/steps_to_50_kl.csv png/steps_to_50_split_b128.png --bsz 128 --n2 64 --lr-max 1.2e-4 --lr-min 5e-7 --split --nstar csv/steps_vs_seqs_b1024_fit_fit_table.csv --fig1-colors --no-nstar-n2 --no-fit-n2 --no-early --share-b --near 2   # B=128 LR table for Figure 1b
+$PLOT scripts/plot_fig1_one_axis.py csv/steps_to_50_seqs.csv png/fig1_k16_b128.png --rollout-b 128 --one --lr-panel --lin 0.2 --flat-rollouts --lr-table csv/steps_to_50_split_b128_table.csv   # Figure 1
+$PLOT scripts/plot_sweeps_two_panel.py csv/steps_to_50_seqs.csv png/sweeps_two_panel.png --lin 0.2                                      # Figure 2
+$PLOT scripts/plot_steps_to_50_combined.py csv/steps_to_50_kl.csv png/steps_to_50_split.png --n2 64 --lr-max 1.2e-4 --lr-min 5e-7 --split --nstar csv/steps_vs_seqs_b1024_fit_fit_table.csv --fig1-colors --no-nstar-n2 --no-fit-n2 --no-early --share-b --near 2   # Figure 3
+$PLOT scripts/plot_rollouts_vs_downsample_clean.py csv/steps_to_50_seqs.csv png/rollouts_vs_downsample_clean_fit.png --fit            # Figure 4
+$PLOT iclr_figs/make_kl_fig.py --traj <cbs>/data/traj_all.nov05.csv --meta <cbs>/data/all_runs.nov05.jsonl --out iclr_out --fit-table csv/steps_vs_seqs_b1024_kl2_fit_fit_table.csv --lin 0.2   # Figure 6
+```
+All of these must run on these scripts as committed (PAPER_SCALE = 19/26): rendering on a 26-in canvas prints the type at ~5.9 pt instead of ~8-9 pt.
 Figure 3 (KL): `$PLOT iclr_figs/make_kl_fig.py --traj <traj.csv> --meta <runs.jsonl> --out iclr_out --fit-table csv/steps_vs_seqs_b1024_kl2_fit_fit_table.csv` (refresh that fit table first with `plot_steps_vs_seqs_paper.py ... --b1024 --fit --kl2`; the trajectories can be the cbs repo's `iclr_figs/data/traj_all.<date>.csv` / `all_runs.<date>.jsonl`), PDF in `paper/fig_kl_stability.pdf`.
 All paper figures share `scripts/paperstyle.py` (canvas 2.45x the printed width; Figure 1 palette).
 Budget frontier, CBS vs tokens and the appendix trajectories come from the cbs repo, `critical-batch-rlvr/analysis/iclr_figs` (README there; `fetch_incremental.py` refreshes the trajectories).

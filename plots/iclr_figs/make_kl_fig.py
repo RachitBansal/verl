@@ -117,9 +117,11 @@ def panel_a(ax):
     if fits is not None: hnd.append(Line2D([], [], ls="-", lw=4.8, color=INK2, label="fit  $S = S_\\min\\,(1 + N^*/N)$"))
     if fits is not None and a.lin:
         hnd.append(Line2D([], [], ls=(0, (4, 2.5)), lw=4.6, color=INK2, alpha=0.9, marker="o", ms=12, mfc=SURFACE, mec=INK2, mew=2.4,
-                          label=f"linear scaling ends\n(${a.lin:g} \\times N^*$)"))
-    if a.lin:      # B labels sit at the bottom left of their lines, so the legend takes the empty upper right, opaque over the dashed lines
-        ax.legend(handles=hnd, loc="upper right", frameon=True, facecolor=SURFACE, edgecolor="none", framealpha=1.0, fontsize=LEGEND - 2,
+                          label=f"linear scaling ends (${a.lin:g} \\times N^*$)"))
+    if a.lin:      # B labels sit at the bottom left of their lines, so the legend takes an empty band on top, opaque over the dashed lines
+        lo, hi = ax.get_ylim(); ax.set_ylim(lo, hi * 5); ax.set_yticks([t for t in (1e1, 1e2, 1e3, 1e4) if lo <= t <= hi])
+        ax.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+        ax.legend(handles=hnd, loc="upper right", frameon=True, facecolor=SURFACE, edgecolor="none", framealpha=1.0, fontsize=LEGEND,
                   labelcolor=INK, handletextpad=0.5, borderaxespad=0.2, labelspacing=0.35, borderpad=0.3)
     else:
         ax.legend(handles=hnd, loc="lower left", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)
@@ -129,34 +131,26 @@ def panel_a(ax):
 STABLE_LABEL = {"reach": "largest LR that reaches target", "hold": "largest LR that holds target", "peak": "highest stable LR"}
 FAIL_LABEL = {"reach": "did not reach target", "hold": "did not reach / hold target", "peak": "collapsed / did not reach"}
 def panel_b(ax):
-    for kl, nudge in zip(KLS, (-0.07, +0.07)):
-        bs = np.array(sorted(set(best[kl]) & set(ceil[kl])), float) * 2.0 ** nudge
-        yb = np.array([best[kl][int(round(v))] for v in bs / 2.0 ** nudge]); yc = np.array([ceil[kl][int(round(v))] for v in bs / 2.0 ** nudge])
-        ax.fill_between(bs, yb, yc, color=KLC[kl], alpha=0.12, lw=0)
-        ax.plot(bs, yc, ls="-", lw=4.8, color=KLC[kl], zorder=5)
-        ax.plot(bs, yb, ls=(0, (5, 2.5)), lw=4.0, color=KLC[kl], alpha=0.8, zorder=4)
-        ax.scatter(bs, yb, s=MS[kl] ** 2 * 1.5, marker=MK[kl], color=KLC[kl], edgecolors=SURFACE, linewidths=1.5, zorder=6)
-        for x in rows:   # runs above the ceiling that did not qualify
-            if x["kl"] == kl and x["out"] in ("reached_collapsed", "never") and x["lr"] > ceil[kl].get(x["B"], 0):
-                ax.scatter([x["B"] * 2.0 ** nudge], [x["lr"]], s=110, marker="o", facecolors="none", edgecolors=KLC[kl], alpha=0.35, linewidths=1.8, zorder=3)
-    style(ax); ax.set_ylabel("learning rate", color=INK, fontsize=LABEL); ax.set_xlim(min(Bs) / 1.9, max(Bs) * 1.9)
-    lo = min(min(best[kl].values()) for kl in KLS); ax.set_ylim(min(lo / 1.2, 9e-7) / 2.6, ax.get_ylim()[1])   # below the 1e-6 tick: an empty band under the data for the legend
-    hnd = [Line2D([], [], ls=(0, (5, 2.5)), lw=4.0, marker="o", ms=12, color=INK2, mec=SURFACE, label="fastest LR"),
-           Line2D([], [], ls="-", lw=4.8, color=INK2, label=STABLE_LABEL[a.stable]),
-           Line2D([], [], marker="o", ls="", ms=9, mfc="none", mec=INK2, alpha=0.6, mew=1.8, label=FAIL_LABEL[a.stable])]
-    ax.legend(handles=hnd, loc="lower right", frameon=False, fontsize=LEGEND - 3, labelcolor=INK, handletextpad=0.4, borderaxespad=0.2,
-              labelspacing=0.25, handlelength=1.6)      # inside panel (b), in its empty lower-right corner: a strip under both panels would read as applying to (a) too
+    """the fastest LR per KL at each B, joined (the KL colours are in the shared strip under both panels)"""
+    for kl, nudge in zip(KLS, (-0.04, +0.04)):
+        bs = np.array(sorted(best[kl]), float)
+        yb = np.array([best[kl][int(b)] for b in bs])
+        ax.plot(bs * 2.0 ** nudge, yb, ls="-", lw=4.8, color=KLC[kl], alpha=0.85, zorder=4)
+        ax.scatter(bs * 2.0 ** nudge, yb, s=MS[kl] ** 2 * 1.5, marker=MK[kl], color=KLC[kl], edgecolors=SURFACE, linewidths=1.5, zorder=6)
+    style(ax); ax.set_ylabel("fastest LR", color=INK, fontsize=LABEL); ax.set_xlim(min(Bs) / 1.9, max(Bs) * 1.9)
+    ax.set_ylim(7e-7, 1.4e-4); ax.set_yticks([1e-6, 1e-5, 1e-4])      # whole decades, as in the other learning-rate panels (Figures 1b, 3, 4b)
+    ax.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
 
 
 paper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "paper"); os.makedirs(paper, exist_ok=True)
 # sub-figures for a LaTeX subfigure layout (a: 0.53, b: 0.46 of the line width): not cropped, same canvas height and top margin, so the
 # two top-align when LaTeX sets them side by side (as for the LR split figure)
 for tag, fn, wfrac in (("a", panel_a, 0.53), ("b", panel_b, 0.46)):
-    fig, ax = plt.subplots(figsize=(PAPER_SCALE * (wfrac * 26.0), PAPER_SCALE * (8.6)), facecolor=SURFACE, layout="constrained"); fn(ax)
+    fig, ax = plt.subplots(figsize=(PAPER_SCALE * (wfrac * 26.0), PAPER_SCALE * (6.6)), facecolor=SURFACE, layout="constrained"); fn(ax)
     for ext in ("pdf", "png"): fig.savefig(os.path.join(a.out, f"fig_kl_stability_{tag}.{ext}"), dpi=170, facecolor=SURFACE)
     fig.savefig(os.path.join(paper, f"fig_kl_stability_{tag}.pdf"), facecolor=SURFACE)
     plt.close(fig)
-fig, (axl, axr) = plt.subplots(1, 2, figsize=(PAPER_SCALE * (26.0), PAPER_SCALE * (8.6)), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1]))
+fig, (axl, axr) = plt.subplots(1, 2, figsize=(PAPER_SCALE * (26.0), PAPER_SCALE * (6.6)), facecolor=SURFACE, gridspec_kw=dict(width_ratios=[1.15, 1]))
 fig.subplots_adjust(left=0.06, right=0.99, top=0.84, bottom=0.22, wspace=0.22)
 panel_a(axl); panel_b(axr)
 for ext in ("pdf", "png"): fig.savefig(os.path.join(a.out, f"fig_kl_stability.{ext}"), dpi=170, facecolor=SURFACE, bbox_inches="tight")

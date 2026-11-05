@@ -186,7 +186,7 @@ def draw_left(ax):
     legend = [Line2D([], [], marker="p", ls="", ms=19 * MS_SHRINK, color=GREEN, mec=SURFACE, label="generate K, train K"),
               Line2D([], [], marker="D", ls="", ms=16 * MS_SHRINK, color=PURPLE, mec=SURFACE, label="generate 64, train K")]
     if FIT:
-        legend += [Line2D([], [], ls="-", lw=4.8, color=GREEN, label="fit (Figure 2)")]
+        legend += [Line2D([], [], ls="-", lw=4.8, color=GREEN, label="fit")]
     ax.legend(handles=legend, loc="upper right", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.6, borderaxespad=0.3)   # the upper right is empty: steps fall with N
 
 
@@ -209,13 +209,19 @@ def draw_right(axr):
     axr.set_xlim(min(ks) / 1.9, max(ks) * 1.9)
     axr.set_xlabel(f"trained rollouts K  (B = {B})", color=INK, fontsize=LABEL)
     axr.set_ylabel("learning rate", color=INK, fontsize=LABEL)
-    legend_r = [Line2D([], [], marker="o", ls="", ms=26.5 * MS_SHRINK, mfc="none", mec=INK, mew=3.2, label="fastest LR"),
-                Line2D([], [], marker="o", ls="", ms=18.5 * MS_SHRINK, mfc="none", mec=MISSING, mew=2.4, label="did not reach target")]
+    from matplotlib.legend_handler import HandlerTuple
+    mk = lambda m, ms, c, filled: Line2D([], [], marker=m, ls="", ms=ms, color=c, mfc=c if filled else "none", mec=SURFACE if filled else c, mew=1.5 if filled else 2.2)
+    legend_r = [(mk("p", 19 * MS_SHRINK, GREEN, True), mk("D", 16 * MS_SHRINK, PURPLE, True)),
+                (mk("p", 19 * MS_SHRINK, GREEN, False), mk("D", 16 * MS_SHRINK, PURPLE, False)),
+                Line2D([], [], marker="o", ls="", ms=26.5 * MS_SHRINK, mfc="none", mec=INK, mew=3.2)]
+    labels_r = ["reached target", "did not reach target", "fastest LR"]
     if (roll_lad["verdict"] == "inconclusive").any() or (ds_lad["verdict"] == "inconclusive").any():
-        legend_r.append(Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6, label="too early to tell"))
-    lo, hi = axr.get_ylim(); axr.set_ylim(lo / 2.6, hi)     # an empty band under the lowest LRs for the legend
-    axr.legend(handles=legend_r, loc="lower center", ncol=len(legend_r), frameon=False, fontsize=LEGEND - 3, labelcolor=INK, handletextpad=0.3,
-               columnspacing=1.0, borderaxespad=0.1)   # inside panel (b) (a strip under both panels would read as applying to (a) too)
+        legend_r.append(Line2D([], [], marker="x", ls="", ms=15, color=MISSING, mew=2.6)); labels_r.append("too early to tell")
+    # inside panel (b), in an empty band on top (a strip under both panels would read as applying to (a) too)
+    lo, hi = axr.get_ylim(); axr.set_ylim(lo, hi * 9); axr.set_yticks([t for t in (1e-6, 1e-5, 1e-4) if lo <= t <= hi])
+    axr.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+    axr.legend(legend_r, labels_r, loc="upper center", ncol=2, frameon=False, fontsize=LEGEND,
+               labelcolor=INK, handletextpad=0.3, columnspacing=0.9, borderaxespad=0.15, handler_map={tuple: HandlerTuple(ndivide=None, pad=0.2)})
 
 
 # combined figure (a full line width) and the two sub-figure files (a: 0.53, b: 0.46 of the line width; not cropped, equal height, so

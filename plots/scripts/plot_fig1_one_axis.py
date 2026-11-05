@@ -283,7 +283,7 @@ def draw_lr(ax):
     allx = sorted(set(xp) | set(xr)); major = [x for x in allx if int(round(np.log2(x))) % 2 == 0]
     ax.set_xticks(major); ax.set_xticklabels([fmt(x) for x in major]); ax.set_xticks([x for x in allx if x not in major], minor=True)
     ax.set_xticklabels([""] * len([x for x in allx if x not in major]), minor=True); ax.tick_params(axis="x", which="minor", length=0)
-    ax.set_xlim(min(allx) / 1.9, max(allx) * 1.9); ax.set_ylim(min(lp.min(), lr_.min()) / 1.6, max(max(lp.max(), lr_.max()) * 1.8, 1.15e-4))   # keep the 1e-4 tick
+    ax.set_xlim(min(allx) / 1.9, max(allx) * 1.9); ax.set_ylim(min(lp.min(), lr_.min()) / 1.6, max(max(lp.max(), lr_.max()) * 1.8, 1.4e-4))   # keep the 1e-4 tick, with room for its superscript
     ax.set_xlabel("sequences per step  $N = BK$", color=INK, fontsize=LABEL); ax.set_ylabel("fastest learning rate", color=INK, fontsize=LABEL)
     if not SHARED_LEGEND:
         ax.legend(loc="lower right", frameon=False, fontsize=LEGEND, labelcolor=INK, handletextpad=0.5, borderaxespad=0.3, labelspacing=0.3)

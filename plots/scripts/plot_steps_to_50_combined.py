@@ -249,7 +249,7 @@ if SHARE_B:      # the prompt-sweep panels on one batch-size axis (the K = 16 ra
     bax = [(ax, sp) for ax, sp in zip(axes, specs) if sp["xcol"] == "bsz"]
     lo = min(sp["data"]["bsz"].min() for _, sp in bax); hi = max(sp["data"]["bsz"].max() for _, sp in bax)
     allb = [2 ** i for i in range(int(np.log2(lo)), int(np.log2(hi)) + 1)]
-    major = [b for b in allb if int(round(np.log2(b))) % 2 == 0]
+    major = [b for b in allb if int(round(np.log2(b))) % 4 == 2]    # 4, 64, 1k, 16k: every 4x crowds the narrow split panels at paper type size
     for ax, _ in bax:
         ax.set_xlim(lo / 1.6, hi * 1.6)
         ax.set_xticks(major); ax.set_xticklabels([f"{b // 1024}k" if b >= 1024 else str(b) for b in major])
