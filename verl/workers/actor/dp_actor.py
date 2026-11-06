@@ -499,6 +499,12 @@ class DataParallelPPOActor(BasePPOActor):
         # fixed-dataset study: old_log_probs are a frozen anchor (reference log-probs), never the current policy,
         # so the single-mini-batch "on-policy" shortcut (old_log_prob = log_prob.detach()) must not be taken
         frozen_anchor = bool(data.meta_info.get("kimi_frozen_anchor", False))
+        # gradient accumulation across update_actor calls (trainer.fixed_dataset.max_update_rows): the trainer
+        # splits one step's rows into chunks; each chunk's loss is scaled by its share of the step's rows, only the
+        # first chunk zeroes the gradients and only the last one steps the optimizer (and evaluates tracked rows)
+        accum_scale = float(data.meta_info.get("kimi_accum_scale", 1.0))
+        accum_zero_grad = bool(data.meta_info.get("kimi_accum_zero_grad", True))
+        accum_step = bool(data.meta_info.get("kimi_accum_step", True))
 
         data = data.select(batch_keys=select_keys, non_tensor_batch_keys=non_tensor_select_keys)
 
@@ -556,6 +562,8 @@ class DataParallelPPOActor(BasePPOActor):
                     tracked.insert(0, ("kimi_probe", rows, u, rb))
         for k in side_keys:
             data.non_tensor_batch.pop(k, None)
+        if not accum_step:
+            assert not tracked, "tracked (probe / held-out) rows must be in the update_actor call that steps"
         before: dict[str, dict[str, float]] = {}
         for prefix, rows, u, rb in tracked:
             before[prefix] = self._kimi_regression_probe(rows, temperature, prefix=prefix, uid=u, rbar=rb)
@@ -569,6 +577,12 @@ class DataParallelPPOActor(BasePPOActor):
         mini_batches = data.split(self.config.ppo_mini_batch_size)
 
         on_policy = len(mini_batches) == 1 and self.config.ppo_epochs == 1 and not frozen_anchor
+        accumulating = accum_scale != 1.0 or not accum_zero_grad or not accum_step
+        if accumulating:
+            assert len(mini_batches) == 1 and self.config.ppo_epochs == 1 and frozen_anchor and not kimi_trace, (
+                "gradient accumulation across update_actor calls needs one mini-batch per call, ppo_epochs=1 and a "
+                "frozen anchor"
+            )
 
         metrics = {}
         for _ in range(self.config.ppo_epochs):
@@ -586,7 +600,8 @@ class DataParallelPPOActor(BasePPOActor):
                 # rejection sampling) or ppo_mini_batch_size exceeding the available data.
                 mini_batch_size = len(mini_batch)
 
-                self.actor_optimizer.zero_grad()
+                if accum_zero_grad:
+                    self.actor_optimizer.zero_grad()
                 micro_loss_parts: list[dict[str, float]] = []
 
                 for micro_batch in micro_batches:
@@ -602,7 +617,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                     # Row-weighted so that unequal (dynamic) micro-batch means combine into the
                     # mini-batch mean; identical to 1/gradient_accumulation for equal micro-batches.
-                    loss_scale_factor = response_mask.shape[0] / mini_batch_size
+                    loss_scale_factor = response_mask.shape[0] / mini_batch_size * accum_scale
 
                     # all return: (bsz, response_length)
                     calculate_entropy = False
@@ -692,14 +707,16 @@ class DataParallelPPOActor(BasePPOActor):
                     micro_loss_parts.append({"actor/pg_loss": micro_batch_metrics["actor/pg_loss"]})
                     append_to_dict(metrics, micro_batch_metrics)
 
-                grad_norm = self._optimizer_step()
                 # exact mini-batch loss at the parameters before this step (the scaled micro-batch losses sum
-                # to the mini-batch mean; actor/pg_loss above is their *mean*, i.e. the loss / #micro-batches)
+                # to the mini-batch mean; actor/pg_loss above is their *mean*, i.e. the loss / #micro-batches).
+                # When accumulating, this is the chunk's share of the step's loss (the trainer sums the chunks).
                 mini_batch_metrics = {
-                    "actor/grad_norm": grad_norm.detach().item(),
                     # (no "min"/"max" in the key: reduce_metrics would take the min/max over ranks)
                     "actor/loss_exact": float(sum(m["actor/pg_loss"] for m in micro_loss_parts)),
                 }
+                if accum_step:
+                    grad_norm = self._optimizer_step()
+                    mini_batch_metrics["actor/grad_norm"] = grad_norm.detach().item()
                 append_to_dict(metrics, mini_batch_metrics)
                 if kimi_trace:
                     inner_step += 1
@@ -709,6 +726,8 @@ class DataParallelPPOActor(BasePPOActor):
                         lb = before[prefix][f"{prefix}/reg_loss"]
                         trace[f"{prefix}_trace/solve_ratio_s{inner_step}"] = cur[f"{prefix}/reg_loss"] / max(lb, 1e-12)
                         append_to_dict(metrics, trace)
+        if not accum_step:
+            return metrics  # gradients stay accumulated for the next call
         self.actor_optimizer.zero_grad()
 
         # ---- Kimi-K2 solve tracking: evaluate the same rows at theta_{t+1} -------------------------

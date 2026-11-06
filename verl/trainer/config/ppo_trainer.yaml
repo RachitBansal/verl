@@ -229,6 +229,27 @@ trainer:
     master_anchor: null
     # true: compute anchors/<master_anchor>/ for every shard (job split via master_job_index/num_jobs), then exit
     master_anchor_build: false
+    # extension banks (more samples of the same prompts, built with MODE=master_build into another master_dir):
+    # global number of the first sample (= the base bank's n), and whether to run the trainer's reference
+    # log-prob pass (false = baseline-only bank: tokens, vLLM log-probs and rewards, ~20% faster, not loadable for
+    # training).  Use a different actor_rollout_ref.rollout.seed than the base bank.
+    master_sample_offset: 0
+    master_ref_log_probs: true
+    # npz of per-prompt baselines over all samples of a master bank + its extensions
+    # (examples/kimi_k2/fixed_ref/compute_master_baselines.py).  When set, A = r - b(x) with b looked up per prompt:
+    # baseline=mean -> the N-sample pass rate, baseline=tau_logz -> tau log Zhat over the N samples at kimi_tau
+    # (must be precomputed).  null = baseline from the run's own group of rollout.n samples.
+    baseline_file: null
+    # Sub-sampled training (needs master_selection + baseline_file): every step trains on rotate_k samples per
+    # training prompt drawn from a pool of master samples (0..rotate_pool-1, default all n of the master bank,
+    # minus the held-out-sample set of the prompt), without replacement within an epoch of the pool, reshuffled
+    # each epoch (seed).  Held-out sets stay fixed (selection).  rotate_k >= pool = full batch over the pool.
+    # 0 = off (train on the selection's k samples every step).
+    rotate_k: 0
+    rotate_pool: null
+    # Split a step's training rows into update_actor calls of at most this many rows that accumulate gradients
+    # into ONE optimizer step (same gradient as one call; bounds host memory).  0 = one call per step.
+    max_update_rows: 0
 
   # Stop training once a validation metric reaches this value (null = never). The final
   # checkpoint is saved and the last validation is logged before the trainer returns.

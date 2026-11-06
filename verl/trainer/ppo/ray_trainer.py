@@ -260,6 +260,27 @@ def compute_advantage(
     return data
 
 
+def _merge_chunk_metrics(parts: list, sum_keys: tuple = ()) -> dict:
+    """Merge the reduced metrics of the update chunks of one step (sub-sampled training, see
+    RayPPOTrainer._rotation_update): ``parts`` = [(rows, metrics)].  Keys in ``sum_keys`` are summed (each chunk
+    reports its share), keys containing "max"/"min" take the max/min, others the row-weighted mean over the
+    chunks that report them (metrics of the tracked rows / the optimizer step come from the last chunk only)."""
+    out: dict = {}
+    keys = {k for _, m in parts for k in m}
+    for k in keys:
+        vals = [(n, m[k]) for n, m in parts if k in m]
+        if k in sum_keys:
+            out[k] = float(sum(v for _, v in vals))
+        elif "max" in k:
+            out[k] = max(v for _, v in vals)
+        elif "min" in k:
+            out[k] = min(v for _, v in vals)
+        else:
+            w = sum(n for n, _ in vals)
+            out[k] = float(sum(n * v for n, v in vals) / max(w, 1))
+    return out
+
+
 class RayPPOTrainer:
     """Distributed PPO trainer using Ray for scalable reinforcement learning.
 
@@ -1146,7 +1167,7 @@ class RayPPOTrainer:
         gsum, gcnt = np.bincount(inv, weights=seq_r), np.bincount(inv)
         bank.non_tensor_batch["ref_pass_rate"] = (gsum / gcnt)[inv].astype(np.float32)
         probe = np.zeros(len(bank), dtype=np.int64)
-        if n_probe_prompts > 0:
+        if n_probe_prompts > 0 and (flags == 0).any():
             rng = np.random.default_rng(int(fd.get("seed", 0)))
             train_uids = np.unique(uid[flags == 0])
             chosen = set(rng.choice(train_uids, size=min(n_probe_prompts, len(train_uids)), replace=False).tolist())
@@ -1163,13 +1184,14 @@ class RayPPOTrainer:
                 metrics[f"bank/{name}_reward_mean"] = float(seq_r[m].mean())
                 metrics[f"bank/{name}_response_length_mean"] = resp_len[mt].mean().item()
                 metrics[f"bank/{name}_clip_ratio"] = (resp_len[mt] >= max_resp).float().mean().item()
-        k = np.rint(gsum[np.unique(inv[flags == 0])]).astype(np.int64)
-        metrics["bank/train_prompts"] = int(len(k))
-        metrics["bank/zero_adv_prompt_frac"] = float(((k == 0) | (k == n_roll)).mean())
-        metrics["bank/pass_at_n"] = float((k > 0).mean())
-        for kk in range(n_roll + 1):
-            metrics[f"bank/pass_count_hist/{kk}"] = int((k == kk).sum())
-        metrics.update(bank_floor_summary(k, n_roll, [float(t) for t in fd.get("floor_taus", [0.3, 0.1, 0.03])]))
+        if (flags == 0).any():  # (sub-sampled training: no training rows in the bank, see _setup_rotation)
+            k = np.rint(gsum[np.unique(inv[flags == 0])]).astype(np.int64)
+            metrics["bank/train_prompts"] = int(len(k))
+            metrics["bank/zero_adv_prompt_frac"] = float(((k == 0) | (k == n_roll)).mean())
+            metrics["bank/pass_at_n"] = float((k > 0).mean())
+            for kk in range(n_roll + 1):
+                metrics[f"bank/pass_count_hist/{kk}"] = int((k == kk).sum())
+            metrics.update(bank_floor_summary(k, n_roll, [float(t) for t in fd.get("floor_taus", [0.3, 0.1, 0.03])]))
         metrics["bank/probe_rows"] = int(probe.sum())
         return bank
 
@@ -1212,23 +1234,49 @@ class RayPPOTrainer:
         (r - rbar).  ``tau_logz``: A = r - tau log Zhat(x), Zhat = mean_j exp(r_j/tau) over the prompt's group
         (kimi_fixed_bank.soft_value_baseline; tau = actor.policy_loss.kimi_tau), which makes the targets A/tau the
         log-ratios of a normalised policy.  The per-row baseline is stored as ``kimi_baseline`` (the actor's
-        coverage metrics recover the reward as A + baseline).  Returns ``bank_baseline/*`` summary metrics."""
-        assert baseline in ("mean", "tau_logz"), f"unknown fixed_dataset.baseline={baseline}"
-        if baseline == "mean":
-            return {}
-        from verl.trainer.ppo.kimi_fixed_bank import soft_value_baseline
+        coverage metrics recover the reward as A + baseline).  Returns ``bank_baseline/*`` summary metrics.
 
+        With ``fixed_dataset.baseline_file`` (npz from compute_master_baselines.py) the baseline is not taken
+        from the row's group but looked up per prompt row of the master bank: ``mean`` = the pass rate over all
+        N stored samples of the prompt, ``tau_logz`` = the precomputed tau log Zhat over the same N samples at
+        tau = kimi_tau (must be one of the file's taus).  Every row (training and held-out) gets A = r - b(x),
+        ``kimi_baseline`` = b(x) and ``ref_pass_rate`` = the N-sample pass rate."""
+        assert baseline in ("mean", "tau_logz"), f"unknown fixed_dataset.baseline={baseline}"
+        fd = self.config.trainer.fixed_dataset
         tau = float(self.config.actor_rollout_ref.actor.policy_loss.kimi_tau)
         seq_r = bank.batch["token_level_scores"].sum(-1).double().numpy()
         uid = bank.non_tensor_batch["uid"]
-        b = soft_value_baseline(seq_r, uid, tau)
+        out: dict = {}
+        if fd.get("baseline_file", None):
+            from verl.trainer.ppo.kimi_fixed_bank import lookup_master_baseline
+
+            assert "master_prompt_row" in bank.non_tensor_batch, (
+                "fixed_dataset.baseline_file needs a master-bank run (fixed_dataset.master_selection)"
+            )
+            assert not self.config.algorithm.get("norm_adv_by_std_in_grpo", True), (
+                "fixed_dataset.baseline_file replaces the advantages by r - b(x); set "
+                "algorithm.norm_adv_by_std_in_grpo=False (no per-group std scaling)"
+            )
+            with open(fd.master_selection) as f:
+                sel_master = json.load(f).get("master_dir") or fd.master_dir
+            b, rbar, info = lookup_master_baseline(
+                fd.baseline_file, bank.non_tensor_batch["master_prompt_row"], baseline, tau, master_dir=sel_master
+            )
+            bank.non_tensor_batch["ref_pass_rate"] = rbar.astype(np.float32)
+            out.update({f"bank_baseline/{k}": v for k, v in info.items()})
+            print(f"fixed bank baselines from {fd.baseline_file}: {baseline} over N={info['n_samples']} samples")
+        elif baseline == "mean":
+            return {}
+        else:
+            from verl.trainer.ppo.kimi_fixed_bank import soft_value_baseline
+
+            b = soft_value_baseline(seq_r, uid, tau)
         adv = torch.from_numpy(seq_r - b).to(bank.batch["advantages"].dtype)
         mask = bank.batch["response_mask"].to(adv.dtype)
         bank.batch["advantages"] = adv.unsqueeze(-1) * mask
         if "returns" in bank.batch.keys():
             bank.batch["returns"] = bank.batch["advantages"].clone()
         bank.non_tensor_batch["kimi_baseline"] = b.astype(np.float32)
-        out: dict = {}
         flags = bank.non_tensor_batch["kimi_holdout"].astype(np.int64)
         tgt = (seq_r - b) / tau
         for v, name in ((0, "train"), (1, "holdout_prompt"), (2, "holdout_sample")):
@@ -1240,7 +1288,17 @@ class RayPPOTrainer:
             out[f"bank_baseline/{name}_target_wrong_mean"] = float(tgt[neg].mean()) if neg.any() else 0.0
             out[f"bank_baseline/{name}_target_rms"] = float(np.sqrt((tgt[m] ** 2).mean()))
             out[f"bank_baseline/{name}_loss_at_zero_delta"] = float(((seq_r[m] - b[m]) ** 2).mean())
-        print(f"fixed bank re-baselined with tau log Zhat (tau={tau}): {out}")
+            # prompts of this role whose rows all have zero target (no signal), and the in-group mean reward's
+            # distance from the baseline (how far the old group-mean baseline was from this one)
+            _, inv = np.unique(np.asarray(uid[m], dtype=object).astype(str), return_inverse=True)
+            gabs = np.bincount(inv, weights=np.abs(tgt[m]))
+            out[f"bank_baseline/{name}_zero_target_prompt_frac"] = float((gabs < 1e-8).mean())
+            if baseline == "mean":
+                gmean = np.bincount(inv, weights=seq_r[m]) / np.bincount(inv)
+                out[f"bank_baseline/{name}_group_mean_minus_baseline_rms"] = float(
+                    np.sqrt(((gmean[inv] - b[m]) ** 2).mean())
+                )
+        print(f"fixed bank re-baselined ({baseline}, tau={tau}): {out}")
         return out
 
     # ---- master bank (trainer.fixed_dataset.master_dir; verl/trainer/ppo/kimi_master_bank.py) ----------------
@@ -1249,7 +1307,13 @@ class RayPPOTrainer:
         store them as compact shards of ``master_chunk_prompts`` prompts under ``master_dir``.  Job
         ``master_job_index`` of ``master_num_jobs`` builds chunks c with c % num_jobs == job_index and skips
         chunks already on disk, so several jobs can split the work and a resubmitted job resumes.  The job that
-        finds every shard done writes ``manifest.json`` / ``summary.json``."""
+        finds every shard done writes ``manifest.json`` / ``summary.json``.
+
+        Extension banks (more samples of the same prompts, e.g. for baselines): ``master_sample_offset`` numbers
+        the samples from that offset, ``actor_rollout_ref.rollout.seed`` must differ from the base bank's (vLLM
+        is seeded per engine, so the same seed can reproduce the base bank's samples), and
+        ``master_ref_log_probs=False`` skips the trainer's reference log-prob pass (the bank then serves
+        baselines only, see compute_master_baselines.py)."""
         import pandas as pd
 
         from verl.trainer.ppo import kimi_master_bank as mb
@@ -1275,6 +1339,9 @@ class RayPPOTrainer:
         )
         n_chunks = (len(ds) + chunk - 1) // chunk
         rollout = self.config.actor_rollout_ref.rollout
+        sample_offset = int(fd.get("master_sample_offset", 0) or 0)
+        with_ref = bool(fd.get("master_ref_log_probs", True))
+        rollout_seed = int(rollout.get("seed", 0) or 0)
         cfg = {
             "format_version": mb.FORMAT_VERSION,
             "model": self.config.actor_rollout_ref.model.path,
@@ -1288,8 +1355,15 @@ class RayPPOTrainer:
             "top_k": int(rollout.get("top_k", -1)),
             "max_prompt_length": int(self.config.data.max_prompt_length),
             "max_response_length": int(max_resp),
-            "ref_log_probs": "FSDP actor compute_log_prob at the initial weights (the trainer's frozen anchor)",
+            "ref_log_probs": "FSDP actor compute_log_prob at the initial weights (the trainer's frozen anchor)"
+            if with_ref
+            else "none (not computed; baseline-only bank)",
         }
+        # keys added after the first master bank: written only when non-default, so its build_config still matches
+        if sample_offset:
+            cfg["sample_offset"] = sample_offset
+        if rollout_seed:
+            cfg["rollout_seed"] = rollout_seed
         os.makedirs(out_dir, exist_ok=True)
         cfg_path = os.path.join(out_dir, "build_config.json")
         if os.path.exists(cfg_path):
@@ -1301,7 +1375,8 @@ class RayPPOTrainer:
             mb.atomic_write_json(cfg_path, cfg)
         mine = [c for c in range(n_chunks) if c % num_jobs == job and not mb.shard_done(out_dir, c)]
         print(
-            f"master bank {out_dir}: {len(ds)} prompts x {n_roll}, {n_chunks} shards; "
+            f"master bank {out_dir}: {len(ds)} prompts x {n_roll} (samples {sample_offset}..{sample_offset + n_roll - 1}, "
+            f"rollout seed {rollout_seed}, reference log-probs {with_ref}), {n_chunks} shards; "
             f"job {job}/{num_jobs} builds {mine}"
         )
         for c in mine:
@@ -1319,8 +1394,10 @@ class RayPPOTrainer:
                 with marked_timer("reward", timing_raw, color="yellow"):
                     reward_tensor, extras = compute_reward(rows, self.reward_fn)
                 rows.batch["token_level_scores"] = reward_tensor
-                with marked_timer("old_log_prob", timing_raw, color="blue"):
-                    lp = self.actor_rollout_wg.compute_log_prob(rows)
+                lp = None
+                if with_ref:
+                    with marked_timer("old_log_prob", timing_raw, color="blue"):
+                        lp = self.actor_rollout_wg.compute_log_prob(rows)
                 rmask = rows.batch["response_mask"]
                 numeric = {}
                 for k, v in (extras or {}).items():
@@ -1335,12 +1412,12 @@ class RayPPOTrainer:
                         prompt_mask=rows.batch["attention_mask"][:, :prompt_len],
                         responses=rows.batch["responses"],
                         response_mask=rmask,
-                        ref_log_probs=lp.batch["old_log_probs"],
+                        ref_log_probs=None if lp is None else lp.batch["old_log_probs"],
                         rollout_log_probs=rows.batch["rollout_log_probs"]
                         if "rollout_log_probs" in rows.batch.keys()
                         else None,
                         scores=reward_tensor.sum(-1),
-                        entropy_sum=(lp.batch["entropys"].float() * rmask).sum(-1),
+                        entropy_sum=None if lp is None else (lp.batch["entropys"].float() * rmask).sum(-1),
                         n=n_roll,
                         prompt_rows=np.asarray(idx, dtype=np.int64),
                         dapo_index=np.asarray(rows.non_tensor_batch["index"][::n_roll], dtype=np.int64)
@@ -1348,6 +1425,7 @@ class RayPPOTrainer:
                         else np.asarray(idx, dtype=np.int64),
                         data_source=np.asarray(rows.non_tensor_batch["data_source"][::n_roll]),
                         extras=numeric,
+                        sample_offset=sample_offset,
                     )
                     side = mb.save_shard(out_dir, c, sh, max_resp)
             m = {f"master_build/timing_s/{k}": v for k, v in timing_raw.items()}
@@ -1439,11 +1517,41 @@ class RayPPOTrainer:
         missing = [c for c in range(n_sh) if not mb.anchor_done(master_dir, tag, c)]
         print(f"master anchor {tag}: job {job} done; shards still missing: {missing}")
 
-    def _load_master_bank(self) -> tuple[DataProto, dict]:
+    def _master_dataproto(self, pieces: list, roles: list) -> DataProto:
+        """Padded rows of master-bank pieces (kimi_master_bank.unpack_rows; one row per (piece, sample)) with the
+        non-tensor fields of a fixed-bank row.  ``roles[i]`` = (kimi_holdout flag, uid, bank_prompt_uid) of
+        piece i, shared by all its samples."""
+        from verl.trainer.ppo import kimi_master_bank as mb
+
+        tensors = mb.unpack_rows(
+            pieces,
+            pad_token_id=self.tokenizer.pad_token_id,
+            max_prompt_length=int(self.config.data.max_prompt_length),
+            max_response_length=int(self.config.data.max_response_length),
+        )
+        reps = [len(p["samples"]) for p in pieces]
+
+        def rep(vals, dtype):
+            return np.array([v for v, r in zip(vals, reps, strict=True) for _ in range(r)], dtype=dtype)
+
+        non_tensors = {
+            "uid": rep([r[1] for r in roles], object),
+            "bank_prompt_uid": rep([r[2] for r in roles], object),
+            "kimi_holdout": rep([r[0] for r in roles], np.int64),
+            "index": rep([p["dapo_index"] for p in pieces], object),
+            "data_source": rep([p["data_source"] for p in pieces], object),
+            "master_sample": np.array([s for p in pieces for s in p["samples"]], dtype=np.int64),
+            # prompt row in the master prompt file: key of the precomputed baselines (fixed_dataset.baseline_file)
+            "master_prompt_row": rep([p["prompt_row"] for p in pieces], np.int64),
+        }
+        return DataProto.from_dict(tensors=tensors, non_tensors=non_tensors)
+
+    def _load_master_bank(self, role_names: tuple = ("train", "holdout_prompt", "holdout_sample")) -> tuple[DataProto, dict]:
         """Bank of one run from the master bank: rows chosen by ``fixed_dataset.master_selection`` (json written
         by examples/kimi_k2/fixed_ref/prepare_master_selection.py): training prompts x their sample indices
         (flag 0), fresh prompts (flag 1) and second sample sets of some training prompts (flag 2, own uids,
-        ``bank_prompt_uid`` = the training prompt's uid).  Then the same finalisation as a built bank."""
+        ``bank_prompt_uid`` = the training prompt's uid).  Then the same finalisation as a built bank.
+        ``role_names`` restricts the roles loaded (sub-sampled training loads its training rows per step)."""
         from verl.trainer.ppo import kimi_master_bank as mb
 
         fd = self.config.trainer.fixed_dataset
@@ -1454,43 +1562,26 @@ class RayPPOTrainer:
         n_roll = self.config.actor_rollout_ref.rollout.n
         k = int(sel["k"])
         assert k == n_roll, f"selection has k={k} samples per prompt; set actor_rollout_ref.rollout.n={k}"
-        roles = [(0, "train"), (1, "holdout_prompt"), (2, "holdout_sample")]
-        requests, flags, uids, puids = [], [], [], []
+        roles = [r for r in [(0, "train"), (1, "holdout_prompt"), (2, "holdout_sample")] if r[1] in role_names]
+        requests, piece_roles = [], []
         for flag, name in roles:
             samples = [int(s) for s in sel["samples"][name]]
             assert len(samples) == k or not sel[name], f"{name}: {len(samples)} sample indices, expected {k}"
             for prow in sel[name]:
                 requests.append((int(prow), samples))
                 uid = f"{name}:{int(prow)}"
-                own = f"train:{int(prow)}" if flag == 2 else uid
-                flags += [flag] * k
-                uids += [uid] * k
-                puids += [own] * k
+                piece_roles.append((flag, uid, f"train:{int(prow)}" if flag == 2 else uid))
         t0 = time.time()
         anchor = fd.get("master_anchor", None)
-        got = mb.gather_rows(master_dir, requests, anchor=anchor)
-        pieces = got["pieces"]
-        tensors = mb.unpack_rows(
-            pieces,
-            pad_token_id=self.tokenizer.pad_token_id,
-            max_prompt_length=int(self.config.data.max_prompt_length),
-            max_response_length=int(self.config.data.max_response_length),
-        )
-        non_tensors = {
-            "uid": np.array(uids, dtype=object),
-            "bank_prompt_uid": np.array(puids, dtype=object),
-            "kimi_holdout": np.array(flags, dtype=np.int64),
-            "index": np.array([p["dapo_index"] for p in pieces for _ in range(k)], dtype=object),
-            "data_source": np.array([p["data_source"] for p in pieces for _ in range(k)], dtype=object),
-            "master_sample": np.array([s for p in pieces for s in p["samples"]], dtype=np.int64),
-        }
-        bank = DataProto.from_dict(tensors=tensors, non_tensors=non_tensors)
+        pieces = mb.gather_rows(master_dir, requests, anchor=anchor)["pieces"]
+        bank = self._master_dataproto(pieces, piece_roles)
         metrics: dict = {}
         ent = torch.cat([p["ref_entropy_sum"] for p in pieces]).double()
-        train = torch.from_numpy(non_tensors["kimi_holdout"] == 0)
-        metrics["bank/entropy_ref_token_mean"] = float(
-            ent[train].sum() / bank.batch["response_mask"][train].sum().clamp(min=1)
-        )
+        train = torch.from_numpy(bank.non_tensor_batch["kimi_holdout"] == 0)
+        if bool(train.any()):
+            metrics["bank/entropy_ref_token_mean"] = float(
+                ent[train].sum() / bank.batch["response_mask"][train].sum().clamp(min=1)
+            )
         bank = self._finalize_fixed_bank(bank, n_roll, metrics)
         metrics["bank/load_s"] = time.time() - t0
         print(
@@ -1499,6 +1590,134 @@ class RayPPOTrainer:
             f"{metrics['bank/load_s']:.0f}s; summary: {metrics}"
         )
         return bank, metrics
+
+    # ---- sub-sampled training (trainer.fixed_dataset.rotate_k) ---------------------------------------------------
+    def _setup_rotation(self) -> tuple[dict, dict]:
+        """Training pool of sub-sampled training: every training prompt of the selection x master samples
+        0..rotate_pool-1 (default all n), minus the prompt's held-out-sample set (selection role holdout_sample),
+        kept in memory in compact form (gather_rows pieces).  Per prompt: the precomputed baseline b(x) and
+        N-sample pass rate (fixed_dataset.baseline_file; required, the targets must not depend on the step's
+        sub-sample) and the probe flag (same draw as _finalize_fixed_bank).  Prompts are ordered non-probe first,
+        probe last, so the step's last update chunk holds the probe rows.  Returns (state, step-0 metrics)."""
+        from verl.trainer.ppo import kimi_master_bank as mb
+        from verl.trainer.ppo.kimi_fixed_bank import lookup_master_baseline
+
+        fd = self.config.trainer.fixed_dataset
+        assert fd.get("master_selection", None), "fixed_dataset.rotate_k needs a master-bank run (master_selection)"
+        assert fd.get("baseline_file", None), (
+            "fixed_dataset.rotate_k needs fixed_dataset.baseline_file (per-prompt baselines that do not depend on "
+            "the step's sub-sample)"
+        )
+        assert fd.get("anchor", "ref") == "ref", "fixed_dataset.rotate_k supports anchor=ref only"
+        with open(fd.master_selection) as f:
+            sel = json.load(f)
+        master_dir = sel.get("master_dir") or fd.master_dir
+        man = mb.load_manifest(master_dir)
+        pool_n = int(fd.get("rotate_pool", None) or man["n"])
+        assert 0 < pool_n <= man["n"], f"rotate_pool={pool_n} outside 1..{man['n']}"
+        k = int(fd.rotate_k)
+        hs_prompts = {int(p) for p in sel["holdout_sample"]}
+        hs_samples = {int(s) for s in sel["samples"]["holdout_sample"]}
+        train = np.array([int(p) for p in sel["train"]], dtype=np.int64)
+        pools = [
+            np.array([s for s in range(pool_n) if not (p in hs_prompts and s in hs_samples)], dtype=np.int64)
+            for p in train
+        ]
+        for p in pools:
+            assert k >= len(p) or len(p) % k == 0, f"pool of {len(p)} samples is not a multiple of rotate_k={k}"
+        tau = float(self.config.actor_rollout_ref.actor.policy_loss.kimi_tau)
+        b, rbar, info = lookup_master_baseline(
+            fd.baseline_file, train, fd.get("baseline", "mean"), tau, master_dir=master_dir
+        )
+        n_probe = int(fd.get("probe_prompts", 0) or 0)
+        uids = np.array([f"train:{p}" for p in train], dtype=object)
+        probe = np.zeros(len(train), dtype=bool)
+        if n_probe > 0:
+            rng = np.random.default_rng(int(fd.get("seed", 0)))
+            train_uids = np.unique(uids.astype(str))
+            chosen = set(rng.choice(train_uids, size=min(n_probe, len(train_uids)), replace=False).tolist())
+            probe = np.array([u in chosen for u in uids.astype(str)])
+        order = np.concatenate([np.flatnonzero(~probe), np.flatnonzero(probe)])
+        t0 = time.time()
+        pieces = mb.gather_rows(
+            master_dir, [(int(train[i]), pools[i].tolist()) for i in order], anchor=fd.get("master_anchor", None)
+        )["pieces"]
+        rot = {
+            "k": k,
+            "seed": int(fd.get("seed", 0)),
+            "max_rows": int(fd.get("max_update_rows", 0) or 0),
+            "pieces": pieces,
+            "pools": [pools[i] for i in order],
+            "b": b[order].astype(np.float64),
+            "rbar": rbar[order].astype(np.float64),
+            "probe": probe[order],
+            "uids": uids[order],
+            "n_nonprobe": int((~probe).sum()),
+        }
+        # step-0 summary of the pool (all rows any step can draw)
+        pool_rows = np.array([len(p) for p in rot["pools"]])
+        scores = np.concatenate([p["score"].double().numpy() for p in pieces])
+        brow = np.repeat(rot["b"], pool_rows)
+        tgt = (scores - brow) / tau
+        resp_tok = np.array([sum(len(r) for r in p["responses"]) for p in pieces])
+        per_step = [min(k, n) for n in pool_rows]
+        m = {
+            "rotation/k": k,
+            "rotation/pool_samples": pool_n,
+            "rotation/train_prompts": len(train),
+            "rotation/pool_rows": int(pool_rows.sum()),
+            "rotation/rows_per_step": int(sum(per_step)),
+            "rotation/steps_per_epoch": int(max(n // min(k, n) for n in pool_rows)),
+            "rotation/pool_reward_mean": float(scores.mean()),
+            "rotation/pool_response_length_mean": float(resp_tok.sum() / pool_rows.sum()),
+            "rotation/pool_target_rms": float(np.sqrt((tgt**2).mean())),
+            "rotation/pool_loss_at_zero_delta": float(((scores - brow) ** 2).mean()),
+            "rotation/pool_load_s": time.time() - t0,
+            **{f"rotation/baseline_{kk}": v for kk, v in info.items()},
+        }
+        print(f"sub-sampled training pool: {m}")
+        return rot, m
+
+    def _rotation_chunks(self, rot: dict, step: int, tracked: DataProto):
+        """Yield (rows, n_update_rows, is_last) for the update chunks of ``step``: the step's sub-sample of the
+        pool (kimi_master_bank.rotation_samples), split by prompts into chunks of at most max_update_rows rows
+        (non-probe prompts; the probe prompts and the tracked held-out rows join the last chunk).  Each chunk is
+        unpacked only when requested, with A = r - b(x) per row."""
+        from verl.trainer.ppo import kimi_master_bank as mb
+
+        chosen = mb.rotation_samples(rot["pools"], rot["k"], step, rot["seed"])
+        rows_per = np.array([len(c) for c in chosen], dtype=np.int64)
+        total = int(rows_per.sum())
+        n_np = rot["n_nonprobe"]
+        # greedy split of the non-probe prompts into chunks of at most max_rows rows; the probe prompts join the
+        # last chunk (so it can exceed max_rows by the probe rows)
+        ranges, lo, acc = [], 0, 0
+        for i in range(n_np):
+            if rot["max_rows"] > 0 and acc > 0 and acc + rows_per[i] > rot["max_rows"]:
+                ranges.append((lo, i))
+                lo, acc = i, 0
+            acc += int(rows_per[i])
+        ranges.append((lo, len(chosen)))  # last chunk: remaining non-probe prompts + the probe prompts
+        for ci, (lo, hi) in enumerate(ranges):
+            idx = range(lo, hi)
+            pieces = [mb.subset_piece(rot["pieces"][i], chosen[i]) for i in idx]
+            roles = [(0, rot["uids"][i], rot["uids"][i]) for i in idx]
+            rows = self._master_dataproto(pieces, roles)
+            reps = rows_per[lo:hi]
+            b = np.repeat(rot["b"][lo:hi], reps)
+            seq_r = rows.batch["token_level_scores"].sum(-1).double().numpy()
+            adv = torch.from_numpy(seq_r - b).float().unsqueeze(-1) * rows.batch["response_mask"].float()
+            rows.batch["advantages"] = adv
+            rows.batch["returns"] = adv.clone()
+            rows.non_tensor_batch["ref_pass_rate"] = np.repeat(rot["rbar"][lo:hi], reps).astype(np.float32)
+            rows.non_tensor_batch["kimi_probe"] = np.repeat(rot["probe"][lo:hi], reps).astype(np.int64)
+            rows.non_tensor_batch["kimi_baseline"] = b.astype(np.float32)
+            n_update = len(rows)
+            last = ci == len(ranges) - 1
+            if last and len(tracked):
+                rows = DataProto.concat([rows, tracked])
+            rows.meta_info = {}
+            yield rows, n_update, total, last
 
     def _save_hf_weights(self):
         path = os.path.join(self.config.trainer.default_local_dir, f"hf_step_{self.global_steps}")
@@ -1522,7 +1741,15 @@ class RayPPOTrainer:
             if hasattr(logger, "finish"):
                 logger.finish()
             return
-        if fd.get("master_selection", None):
+        rot = None
+        if fd.get("master_selection", None) and int(fd.get("rotate_k", 0) or 0) > 0:
+            # sub-sampled training: the bank holds the fixed held-out rows; training rows are drawn per step
+            bank, bank_metrics = self._load_master_bank(role_names=("holdout_prompt", "holdout_sample"))
+            rot, rot_metrics = self._setup_rotation()
+            bank_metrics.update(rot_metrics)
+            if self.global_steps == 0:
+                logger.log(data=bank_metrics, step=0)
+        elif fd.get("master_selection", None):
             bank, bank_metrics = self._load_master_bank()
             if self.global_steps == 0:
                 logger.log(data=bank_metrics, step=0)
@@ -1554,7 +1781,6 @@ class RayPPOTrainer:
         baseline_metrics = self._rebaseline_fixed_bank(bank, fd.get("baseline", "mean"))
         if baseline_metrics and self.global_steps == 0:
             logger.log(data=baseline_metrics, step=0)
-        loss_agg_mode = self.config.actor_rollout_ref.actor.loss_agg_mode
         hf_freq = int(fd.get("hf_save_freq", 0) or 0)
         hf_dense = int(fd.get("hf_save_dense_until", 0) or 0)
 
@@ -1567,27 +1793,10 @@ class RayPPOTrainer:
             timing_raw: dict = {}
             is_last_step = self.global_steps >= self.total_training_steps
             with marked_timer("step", timing_raw):
-                with marked_timer("layout", timing_raw):
-                    batch = self._layout_fixed_bank(bank, metrics)
-                batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
-                if anchor == "current":
-                    with marked_timer("old_log_prob", timing_raw, color="blue"):
-                        old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
-                        batch.batch["old_log_probs"] = old_log_prob.batch["old_log_probs"]
-                        keep = torch.from_numpy(batch.non_tensor_batch["kimi_holdout"] == 0)
-                        metrics["actor/entropy"] = agg_loss(
-                            loss_mat=old_log_prob.batch["entropys"][keep],
-                            loss_mask=batch.batch["response_mask"][keep],
-                            loss_agg_mode=loss_agg_mode,
-                        ).item()
-                batch.meta_info["kimi_holdout_prefixes"] = holdout_prefixes
-                batch.meta_info["kimi_frozen_anchor"] = True  # stored old_log_probs, no on-policy shortcut
-                batch.meta_info["multi_turn"] = self.config.actor_rollout_ref.rollout.multi_turn.enable
-                # the main loop inherits these from generate_sequences' meta_info; the bank carries none
-                batch.meta_info["temperature"] = self.config.actor_rollout_ref.rollout.temperature
-                with marked_timer("update_actor", timing_raw, color="red"):
-                    actor_output = self.actor_rollout_wg.update_actor(batch)
-                metrics.update(reduce_metrics(actor_output.meta_info["metrics"]))
+                if rot is not None:
+                    batch, train_rows = self._rotation_update(rot, bank, holdout_prefixes, metrics, timing_raw)
+                else:
+                    batch, train_rows = self._fixed_bank_update(bank, anchor, holdout_prefixes, metrics, timing_raw)
                 # global solve ratios: every rank holds an equal share of each tracked set, so the rank-mean
                 # of reg_loss is the set's loss; the per-rank ratios averaged by reduce_metrics are not
                 # (a rank whose rows all have zero advantage has loss_before = 0)
@@ -1600,10 +1809,6 @@ class RayPPOTrainer:
                     metrics[f"{pfx}/solve_ratio"] = la / max(lb, 1e-12)  # this step
                     metrics[f"{pfx}/solve_ratio_vs_zero_delta"] = la / max(l0, 1e-12)  # vs theta_ref (anchor=ref)
                     metrics[f"{pfx}/recompute_floor_share"] = (lb - l0) / max(l0, 1e-12)
-                train_rows = batch.select_idxs(batch.non_tensor_batch["kimi_holdout"] == 0)
-                train_rows.meta_info = {
-                    "global_token_num": torch.sum(train_rows.batch["attention_mask"], dim=-1).tolist()
-                }
 
             if (
                 self.val_reward_fn is not None
@@ -1630,7 +1835,10 @@ class RayPPOTrainer:
 
             self.max_steps_duration = max(self.max_steps_duration, timing_raw["step"])
             metrics.update({"training/global_step": self.global_steps, "training/epoch": self.global_steps})
-            metrics.update(compute_data_metrics(batch=train_rows, use_critic=self.use_critic))
+            if rot is not None:  # data metrics of all chunks (the last chunk alone is a part of the step)
+                metrics.update(self._rotation_data_metrics)
+            else:
+                metrics.update(compute_data_metrics(batch=train_rows, use_critic=self.use_critic))
             metrics.update(compute_timing_metrics(batch=train_rows, timing_raw=timing_raw))
             n_gpus = self.resource_pool_manager.get_n_gpus()
             metrics.update(compute_throughout_metrics(batch=train_rows, timing_raw=timing_raw, n_gpus=n_gpus))
@@ -1644,6 +1852,90 @@ class RayPPOTrainer:
                 if hasattr(logger, "finish"):
                     logger.finish()
                 return
+
+    def _update_meta(self, batch: DataProto, holdout_prefixes: dict) -> None:
+        batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
+        batch.meta_info["kimi_holdout_prefixes"] = holdout_prefixes
+        batch.meta_info["kimi_frozen_anchor"] = True  # stored old_log_probs, no on-policy shortcut
+        batch.meta_info["multi_turn"] = self.config.actor_rollout_ref.rollout.multi_turn.enable
+        # the main loop inherits these from generate_sequences' meta_info; the bank carries none
+        batch.meta_info["temperature"] = self.config.actor_rollout_ref.rollout.temperature
+
+    def _rotation_update(self, rot: dict, tracked: DataProto, holdout_prefixes: dict, metrics: dict, timing_raw: dict):
+        """One optimizer step of sub-sampled training: the step's chunks go through update_actor in turn,
+        accumulating gradients (kimi_accum_*: loss scaled by the chunk's share of the step's training rows, zero_grad
+        on the first chunk, optimizer step + tracked-row evaluation on the last).  Chunk metrics are merged: the
+        exact loss is summed over chunks, other per-micro-batch means are row-weighted, and the tracked/grad-norm
+        metrics come from the last chunk.  Returns (last chunk, all training rows' data-metric batch)."""
+        step = self.global_steps
+        parts: list[tuple[int, dict]] = []
+        data_parts: list[tuple[int, dict]] = []
+        tok_total: list[int] = []
+        n_chunks = 0
+        with marked_timer("layout", timing_raw):
+            gen = self._rotation_chunks(rot, step, tracked)
+        while True:
+            with marked_timer("layout", timing_raw):
+                nxt = next(gen, None)
+                if nxt is None:
+                    break
+                rows, n_update, total, last = nxt
+                mini_rows = int(self.config.actor_rollout_ref.actor.ppo_mini_batch_size) * int(
+                    self.config.actor_rollout_ref.rollout.n
+                )
+                assert n_update <= mini_rows, (
+                    f"update chunk of {n_update} rows exceeds ppo_mini_batch_size x rollout.n = {mini_rows}: it would "
+                    "take several optimizer steps; lower fixed_dataset.max_update_rows or raise ppo_mini_batch_size"
+                )
+                batch = self._layout_fixed_bank(rows, metrics)
+                del rows
+                self._update_meta(batch, holdout_prefixes)
+                batch.meta_info["kimi_accum_scale"] = n_update / total
+                batch.meta_info["kimi_accum_zero_grad"] = n_chunks == 0
+                batch.meta_info["kimi_accum_step"] = bool(last)
+            with marked_timer("update_actor", timing_raw, color="red"):
+                out = self.actor_rollout_wg.update_actor(batch)
+            parts.append((n_update, reduce_metrics(out.meta_info["metrics"])))
+            train_rows = batch.select_idxs(batch.non_tensor_batch["kimi_holdout"] == 0)
+            tok_total += torch.sum(train_rows.batch["attention_mask"], dim=-1).tolist()
+            data_parts.append((len(train_rows), compute_data_metrics(batch=train_rows, use_critic=self.use_critic)))
+            n_chunks += 1
+            if not last:
+                del batch, train_rows
+        metrics.update(_merge_chunk_metrics(parts, sum_keys=("actor/loss_exact",)))
+        data_m = _merge_chunk_metrics(data_parts)
+        metrics["rotation/chunks"] = n_chunks
+        metrics["rotation/rows"] = int(sum(n for n, _ in parts))
+        per_epoch = max(len(p) // min(rot["k"], len(p)) for p in rot["pools"])
+        metrics["rotation/epoch"] = (step - 1) // per_epoch
+        metrics["rotation/slot"] = (step - 1) % per_epoch
+        # the caller computes data/timing metrics on train_rows: hand it the last chunk with the step's token count
+        train_rows.meta_info = {"global_token_num": tok_total}
+        self._rotation_data_metrics = data_m
+        return batch, train_rows
+
+    def _fixed_bank_update(self, bank: DataProto, anchor: str, holdout_prefixes: dict, metrics: dict, timing_raw: dict):
+        loss_agg_mode = self.config.actor_rollout_ref.actor.loss_agg_mode
+        with marked_timer("layout", timing_raw):
+            batch = self._layout_fixed_bank(bank, metrics)
+        batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
+        if anchor == "current":
+            with marked_timer("old_log_prob", timing_raw, color="blue"):
+                old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
+                batch.batch["old_log_probs"] = old_log_prob.batch["old_log_probs"]
+                keep = torch.from_numpy(batch.non_tensor_batch["kimi_holdout"] == 0)
+                metrics["actor/entropy"] = agg_loss(
+                    loss_mat=old_log_prob.batch["entropys"][keep],
+                    loss_mask=batch.batch["response_mask"][keep],
+                    loss_agg_mode=loss_agg_mode,
+                ).item()
+        self._update_meta(batch, holdout_prefixes)
+        with marked_timer("update_actor", timing_raw, color="red"):
+            actor_output = self.actor_rollout_wg.update_actor(batch)
+        metrics.update(reduce_metrics(actor_output.meta_info["metrics"]))
+        train_rows = batch.select_idxs(batch.non_tensor_batch["kimi_holdout"] == 0)
+        train_rows.meta_info = {"global_token_num": torch.sum(train_rows.batch["attention_mask"], dim=-1).tolist()}
+        return batch, train_rows
 
     def fit(self):
         """

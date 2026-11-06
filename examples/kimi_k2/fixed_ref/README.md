@@ -131,9 +131,85 @@ Options:
 3. uids are `train:<row>`, `holdout_prompt:<row>` and `holdout_sample:<row>`. `bank_prompt_uid` of a flag-2 row
    points at the training uid of the same prompt.
 4. `_finalize_fixed_bank` runs exactly as in §2a, so advantages and baselines are computed **within the selected
-   k samples**, as for a pickled bank.
+   k samples**, as for a pickled bank, unless `baseline_file` is set (§2e).
 
 `actor_rollout_ref.rollout.n` must equal the selection's k; `launch.sh` sets it from the selection.
+
+### 2e. Large-N baselines: extension banks + `baseline_file`
+
+A run trains on k samples per prompt, but its baseline b(x) in A = r − b(x) can come from many more samples of the
+same prompt. The pooled samples are only scored, never trained on.
+
+1. **Extension bank** (`MODE=master_build` into a new dir, same prompt file). Three settings differ from the base
+   build:
+   - `master_sample_offset` = the base bank's n, so samples are numbered on from it (`sample_index`).
+   - `actor_rollout_ref.rollout.seed` ≠ the base bank's seed (0). vLLM is seeded per engine, so the same prompts
+     in the same order with the same seed can reproduce the base bank's samples. The smoke test
+     (`smoke_master_ext.sh`) builds a seed-0 control extension to measure this.
+   - `master_ref_log_probs=False` skips the FSDP reference pass (~20% of build time). Tokens, vLLM log-probs and
+     rewards are stored; the manifest says `has_ref_log_probs: false` and `gather_rows` refuses the bank, so it
+     cannot be trained on by mistake.
+2. **Pooling** (`compute_master_baselines.py`, CPU, reads only the shard sidecars). It checks that the banks share
+   model, prompt file and sampling settings, that sample ranges are disjoint, that seeds differ and that the
+   dataset index of every prompt row agrees, and `--check-overlap K` counts identical responses across banks on K
+   prompts. It writes `<out>.npz` with, per prompt row: `correct`, `total` (N), `mean` = correct/N, and `tau_logz`
+   (T × P) = τ log((N−k)/N + (k/N)·e^{1/τ}) for each τ in `--taus` (default 1, 0.3, 0.1, 0.03, 0.01). That is the
+   group formula of `soft_value_baseline` applied to all N samples (rewards are binary, so pass counts suffice).
+   `<out>.json` holds the sources and summary statistics.
+3. **Training** (`trainer.fixed_dataset.baseline_file=<out>.npz`, `baseline=mean|tau_logz`, launch knobs
+   `BASELINE_FILE`, `BASELINE`). `_rebaseline_fixed_bank` looks up b by `master_prompt_row` with
+   `kimi_fixed_bank.lookup_master_baseline`: `mean` → the N-sample pass rate; `tau_logz` → the precomputed column
+   at the run's `kimi_tau`, which must be one of the file's τ. Every row gets the same b(x) as its prompt's
+   training rows, held-out flag-2 rows included, so training and held-out targets are directly comparable.
+   `ref_pass_rate` becomes the N-sample pass rate. The baseline includes the k trained samples (b is the mean over
+   all N). Step-0 metrics `bank_baseline/*` report N, the targets per role and the fraction of prompts with all
+   targets zero.
+
+```bash
+M=/n/netscratch/dam_lab/Everyone/brachit/kimi_k2_fixed
+for j in 0 1 2 3 4 5 6 7; do MODE=master_build MASTER_DIR=$M/master_dapo_n448_s1 \
+    MASTER_PROMPTS=$M/master_dapo_n64/prompts/master_prompts.parquet N_MASTER=448 SAMPLE_OFFSET=64 ROLLOUT_SEED=1 \
+    REF_LOGPROBS=False CHUNK=64 JOB_INDEX=$j NUM_JOBS=8 sbatch -J k2ext_j$j --mem=400G --time=12:00:00 \
+    examples/kimi_k2/fixed_ref/launch.sh; done
+python examples/kimi_k2/fixed_ref/compute_master_baselines.py --master $M/master_dapo_n64 \
+    --master $M/master_dapo_n448_s1 --out $M/master_dapo_n64/baselines/n512.npz --check-overlap 64
+BASELINE_FILE=$M/master_dapo_n64/baselines/n512.npz BASELINE=tau_logz bash examples/kimi_k2/fixed_ref/launch_full_grid.sh
+```
+
+### 2f. Sub-sampled training: `rotate_k` + `max_update_rows`
+
+To measure what sub-sampling costs against full-batch gradient descent, a run can train every step on `rotate_k`
+**different** samples per training prompt, drawn from a pool of master samples, with targets r − b(x) from a
+`baseline_file` (required: the targets must not depend on the step's sub-sample, so every cell optimizes the same
+pool objective and only the gradient noise differs).
+
+- **Pool** (`_setup_rotation`): samples 0..`rotate_pool`−1 (default all n) of every training prompt of the
+  selection, minus the prompt's held-out-sample set (selection role `holdout_sample`; with the full selection the
+  first 256 training prompts keep samples 16–31 out, so their pool is 48). Loaded once in compact form (gather_rows
+  pieces, ~12 GB for 17k × 64), with b(x), the N-sample pass rate and the probe flag per prompt.
+- **Schedule** (`kimi_master_bank.rotation_samples`): an epoch is pool/k steps in which every pool sample is used
+  exactly once; the order is reshuffled every epoch (rng keyed by seed, epoch, pool size). It is a pure function of
+  the step, so a resumed run continues the same schedule. `rotate_k >= pool`: the whole pool every step, i.e.
+  full-batch gradient descent on the pool objective.
+- **Fixed held-out sets**: the selection's held-out-prompt and held-out-sample rows are loaded once and evaluated
+  every step as before. The probe rows are the probe prompts' rows *of this step* (so they rotate).
+- **Chunked steps** (`_rotation_chunks`, `_rotation_update`): a step's training rows are split by prompts into
+  `update_actor` calls of at most `max_update_rows` rows (the probe prompts and the held-out rows join the last
+  call). The calls accumulate gradients into one optimizer step: meta `kimi_accum_scale` (= the call's share of the
+  step's rows) multiplies the loss, only the first call zeroes the gradients, only the last one steps the optimizer,
+  the lr scheduler and evaluates the tracked rows (dp_actor `update_policy`, fsdp_workers `update_actor`). The
+  gradient equals one call over all rows; host memory is bounded by the chunk. `actor/loss_exact` is the sum over
+  the calls (the exact loss of the step's rows at θ_t); `rotation/{chunks,rows,epoch,slot}` describe the step.
+- `actor/loss_exact` is an unbiased estimate of the pool loss at θ_t for every k (for k = pool it is the pool
+  loss), so the training-loss curves of different k are comparable; the held-out sets measure fresh samples.
+
+```bash
+# K in {4, 64, 16} x tau in {0.03, 0.1}, lr 1e-5, mean baseline from all 512 samples
+bash examples/kimi_k2/fixed_ref/launch_rotate_grid.sh
+```
+
+Smoke: `smoke_rotate.sh` (same step with 1 and 3 update calls must match; full-pool run). CPU test:
+`test_rotation.py`.
 
 ---
 
@@ -210,7 +286,9 @@ SELECTION=$SEL TAU=0.03 LR=3e-6 sbatch --mem=400G examples/kimi_k2/fixed_ref/lau
 ```
 
 Smoke tests: `smoke_test.sh` (pickled bank), `smoke_master.sh` (master build split over 2 jobs → selection →
-3 training steps) and `smoke_precision.sh` (tf32 anchor + 3 tf32 steps vs 3 bf16 steps on the smoke master bank).
+3 training steps), `smoke_precision.sh` (tf32 anchor + 3 tf32 steps vs 3 bf16 steps on the smoke master bank) and
+`smoke_master_ext.sh` (base bank + baseline-only extension + seed-0 control → pooled baselines → tau_logz and mean
+runs). CPU tests: `test_master_roundtrip.py`, `test_master_baselines.py`.
 
 ```bash
 # fp32/TF32 actor (needed for tau >= 0.3, see "Numerical precision" below)
@@ -230,7 +308,11 @@ The current master bank is at `/n/netscratch/dam_lab/Everyone/brachit/kimi_k2_fi
 | `path` | pickled bank (built if missing) |
 | `build_only` | build (pickled bank, or this job's master shards) and exit |
 | `anchor` | `ref` (frozen π_ref log-probs) or `current` (recomputed every step) |
-| `baseline` | `mean` (group mean, published K2) or `tau_logz` (τ log Ẑ of the group) |
+| `baseline` | `mean` (group mean, published K2) or `tau_logz` (τ log Ẑ of the group, or of all N pooled samples with `baseline_file`) |
+| `baseline_file` | npz from `compute_master_baselines.py`: b(x) over all pooled samples of the prompt (§2e) |
+| `rotate_k`, `rotate_pool` | sub-sampled training: k fresh pool samples per prompt per step (§2f); 0 = off |
+| `max_update_rows` | split a step into gradient-accumulating `update_actor` calls of at most this many rows (§2f) |
+| `master_sample_offset`, `master_ref_log_probs` | extension builds: first sample number; `false` = no reference pass (§2e) |
 | `holdout_sample_prompts`, `probe_prompts`, `seed` | held-out fresh samples (pickled build), in-sample probe groups |
 | `master_dir`, `master_chunk_prompts`, `master_job_index`, `master_num_jobs` | master build |
 | `master_selection` | selection.json, so the bank is loaded from the master bank |
@@ -244,7 +326,8 @@ Other settings that matter:
   precision (launch knob `PRECISION=bf16|tf32|fp32`).
 - `actor.ppo_mini_batch_size` = B gives one full-batch Adam step per step.
 - `actor.policy_loss.loss_mode=kimi_k2`, with `kimi_tau`, `kimi_target_level=seq_sum` and `kimi_form=squared`.
-- `algorithm.adv_estimator=grpo` with `norm_adv_by_std_in_grpo=False`.
+- `algorithm.adv_estimator=grpo` with `norm_adv_by_std_in_grpo=False` (required with `baseline_file`).
+- `actor_rollout_ref.rollout.seed`: vLLM engine seed (default 0); launch knob `ROLLOUT_SEED`.
 - `data.kimi_holdout_prompts`: pickled build only. It is 0 for master selections.
 
 ---
@@ -287,8 +370,11 @@ Checkpoints:
   "minibatch").
 - **Padded pickles are large.** 241 KB/row at 1024+3072 tokens. Use the master bank for anything big, because it
   stores only real tokens.
-- **Advantages use the selected samples only.** With a master selection of k=16, the baseline uses those 16
-  samples, not all 64, which keeps it comparable with pickled banks.
+- **Advantages use the selected samples only, unless `baseline_file` is set.** With a master selection of k=16
+  and no baseline file, the baseline uses those 16 samples, not all 64, which keeps it comparable with pickled
+  banks. With a baseline file it uses all pooled samples (§2e).
+- **Same seed, same samples.** A second build over the same prompts needs a different `rollout.seed`;
+  `compute_master_baselines.py` refuses banks with equal seeds.
 - **The anchor comes from FSDP, not vLLM.** The anchor is the FSDP forward at θ_ref. vLLM's log-probs are kept
   (`rollout_log_probs`) for mismatch diagnostics only.
 - **Cost scales with the selected rows.** Every training step costs ~8 ms per selected row on 4×H200. A full-batch

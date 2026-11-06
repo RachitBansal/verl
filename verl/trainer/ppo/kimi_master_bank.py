@@ -68,19 +68,23 @@ def pack_shard(
     prompt_mask: torch.Tensor,
     responses: torch.Tensor,
     response_mask: torch.Tensor,
-    ref_log_probs: torch.Tensor,
+    ref_log_probs: Optional[torch.Tensor],
     rollout_log_probs: Optional[torch.Tensor],
     scores: torch.Tensor,
-    entropy_sum: torch.Tensor,
+    entropy_sum: Optional[torch.Tensor],
     n: int,
     prompt_rows: np.ndarray,
     dapo_index: np.ndarray,
     data_source: np.ndarray,
     extras: Optional[dict] = None,
+    sample_offset: int = 0,
 ) -> dict:
     """Compact form of R = P*n rows that are ``n`` interleaved samples of each of P prompts (row r is sample
     r % n of prompt r // n, as ``DataProto.repeat(interleave=True)`` lays them out).  ``prompts``/``prompt_mask``
-    are left-padded, ``responses``/``response_mask`` right-padded with a prefix mask."""
+    are left-padded, ``responses``/``response_mask`` right-padded with a prefix mask.  ``ref_log_probs`` /
+    ``entropy_sum`` may be None (a bank built without the trainer's reference pass, e.g. an extension used only
+    for baselines); such a bank cannot be gathered for training.  ``sample_offset``: global number of this bank's
+    first sample (an extension of a master bank with n0 samples per prompt uses n0), stored in ``sample_index``."""
     R = responses.shape[0]
     assert R % n == 0, f"{R} rows not a multiple of n={n}"
     P = R // n
@@ -109,11 +113,12 @@ def pack_shard(
         "prompt_offsets": _offsets(plen),
         "response_tokens": _flat_prefix(responses.cpu(), rlen).to(torch.int32),
         "response_offsets": _offsets(rlen),
-        "ref_log_probs": _flat_prefix(ref_log_probs.cpu().float(), rlen),
+        "ref_log_probs": None if ref_log_probs is None else _flat_prefix(ref_log_probs.cpu().float(), rlen),
         "rollout_log_probs": None if rollout_log_probs is None else _flat_prefix(rollout_log_probs.cpu().float(), rlen),
         "score": scores.cpu().float(),
-        "ref_entropy_sum": entropy_sum.cpu().float(),
-        "sample_index": (torch.arange(R) % n).to(torch.int16),
+        "ref_entropy_sum": None if entropy_sum is None else entropy_sum.cpu().float(),
+        "sample_offset": int(sample_offset),
+        "sample_index": (int(sample_offset) + torch.arange(R) % n).to(torch.int32),
         "extras": {k: torch.as_tensor(np.asarray(v, dtype=np.float32)) for k, v in (extras or {}).items()},
     }
     return out
@@ -137,7 +142,9 @@ def shard_sidecar(sh: dict, max_response_length: int) -> dict:
         "response_tokens": int(rlen.sum()),
         "prompt_tokens": int(sh["prompt_offsets"][-1]),
         "clipped_rows": int((rlen >= max_response_length).sum()),
-        "ref_entropy_sum": float(sh["ref_entropy_sum"].double().sum()),
+        "ref_entropy_sum": None if sh["ref_entropy_sum"] is None else float(sh["ref_entropy_sum"].double().sum()),
+        "sample_offset": int(sh.get("sample_offset", 0)),
+        "dapo_index": [int(i) for i in sh["dapo_index"]],
     }
 
 
@@ -190,12 +197,17 @@ def write_manifest(master_dir: str, num_chunks: int, chunk_prompts: int, max_res
             sides.append(json.load(f))
     n = sides[0]["n"]
     assert all(s["n"] == n for s in sides)
+    offset = int(sides[0].get("sample_offset", 0))
+    assert all(int(s.get("sample_offset", 0)) == offset for s in sides)
+    has_ref = all(s["ref_entropy_sum"] is not None for s in sides)
     pass_counts = np.concatenate([np.asarray(s["pass_counts"], dtype=np.int64) for s in sides])
     rows = sum(s["num_rows"] for s in sides)
     resp_tok = sum(s["response_tokens"] for s in sides)
     manifest = {
         "format_version": FORMAT_VERSION,
         "n": n,
+        "sample_offset": offset,
+        "has_ref_log_probs": has_ref,
         "chunk_prompts": chunk_prompts,
         "num_shards": num_chunks,
         "num_prompts": int(len(pass_counts)),
@@ -218,7 +230,7 @@ def write_manifest(master_dir: str, num_chunks: int, chunk_prompts: int, max_res
         "master/response_length_mean": resp_tok / rows,
         "master/prompt_length_mean": sum(s["prompt_tokens"] for s in sides) / len(pass_counts),
         "master/clip_ratio": sum(s["clipped_rows"] for s in sides) / rows,
-        "master/entropy_ref_token_mean": sum(s["ref_entropy_sum"] for s in sides) / resp_tok,
+        "master/entropy_ref_token_mean": sum(s["ref_entropy_sum"] for s in sides) / resp_tok if has_ref else None,
         "master/pass_at_n": float((pass_counts > 0).mean()),
         "master/zero_adv_prompt_frac": float(((pass_counts == 0) | (pass_counts == n)).mean()),
     }
@@ -242,6 +254,10 @@ def gather_rows(master_dir: str, requests: list[tuple[int, list[int]]], anchor: 
     ``ref_log_probs``."""
     man = load_manifest(master_dir)
     n = man["n"]
+    assert man.get("has_ref_log_probs", True), (
+        f"master bank {master_dir} was built without reference log-probs (baseline-only extension); "
+        "it cannot be loaded for training"
+    )
     starts = np.array([s["prompt_row_start"] for s in man["shards"]])
     by_shard: dict[int, list[int]] = {}
     for i, (prow, samples) in enumerate(requests):
@@ -333,4 +349,103 @@ def unpack_rows(pieces: list[dict], pad_token_id: int, max_prompt_length: int, m
     }
     if has_roll:
         out["rollout_log_probs"] = roll_lp
+    return out
+
+
+# ---- per-prompt baselines from all samples of one or more banks over the same prompt file -----------------------
+# compute_master_baselines.py combines a master bank and its extensions (same prompts, disjoint sample ranges) into
+# <out>.npz with, per prompt row of the prompt file: the number of samples N, the number correct, the mean
+# baseline (= pass rate) and tau log Zhat for a list of tau.  A run selects one column with
+# trainer.fixed_dataset.baseline_file + baseline=mean|tau_logz (ray_trainer._rebaseline_fixed_bank).
+BASELINE_KEYS_CHECKED = ("model", "prompt_file", "num_prompts", "temperature", "top_p", "top_k", "max_prompt_length",
+                         "max_response_length")
+
+
+def load_pass_counts(master_dir: str) -> dict:
+    """Per-prompt pass counts of a complete bank from its sidecars (no shard loads): {"n", "sample_offset",
+    "pass_counts" (num_prompts,), "reward_sum", "dapo_index" (or None for sidecars written before it was stored),
+    "build_config"}.  Requires binary rewards: the sidecar's reward_sum must equal its summed pass counts."""
+    man = load_manifest(master_dir)
+    with open(os.path.join(master_dir, "build_config.json")) as f:
+        cfg = json.load(f)
+    counts, dapo, reward_sum = [], [], 0.0
+    expect = 0
+    for s_ in man["shards"]:
+        with open(os.path.join(master_dir, "shards", s_["file"][:-3] + ".json")) as f:
+            side = json.load(f)
+        assert side["prompt_row_start"] == expect, f"{master_dir}: shard rows not contiguous at {expect}"
+        expect = side["prompt_row_end"]
+        pc = np.asarray(side["pass_counts"], dtype=np.int64)
+        assert abs(float(pc.sum()) - float(side["reward_sum"])) < 1e-3, (
+            f"{master_dir} {s_['file']}: reward_sum {side['reward_sum']} != pass-count sum {pc.sum()} "
+            "(non-binary reward: pass counts do not determine the baselines)"
+        )
+        counts.append(pc)
+        dapo.append(side.get("dapo_index"))
+        reward_sum += float(side["reward_sum"])
+    has_dapo = all(d is not None for d in dapo)
+    return {
+        "n": int(man["n"]),
+        "sample_offset": int(man.get("sample_offset", 0)),
+        "pass_counts": np.concatenate(counts),
+        "reward_sum": reward_sum,
+        "dapo_index": np.concatenate([np.asarray(d, dtype=np.int64) for d in dapo]) if has_dapo else None,
+        "build_config": cfg,
+    }
+
+
+def tau_logz_from_counts(correct: np.ndarray, total: np.ndarray, tau: float) -> np.ndarray:
+    """tau log Zhat, Zhat = (1/N) sum_j exp(r_j/tau), for binary rewards with ``correct`` of ``total`` samples:
+    tau * log((N-k)/N + (k/N) e^{1/tau}) in float64 (stable logaddexp); exactly 0 for k = 0 and 1 for k = N
+    (the same values kimi_fixed_bank.soft_value_baseline gives a constant group)."""
+    k = np.asarray(correct, dtype=np.float64)
+    N = np.asarray(total, dtype=np.float64)
+    p = k / N
+    with np.errstate(divide="ignore"):
+        b = tau * np.logaddexp(np.log1p(-p), 1.0 / tau + np.log(p))
+    b = np.where(k == 0, 0.0, b)
+    b = np.where(k == N, 1.0, b)
+    return b
+
+
+# ---- sub-sampled training (trainer.fixed_dataset.rotate_k) ---------------------------------------------------------
+def rotation_samples(pools: list, k: int, step: int, seed: int = 0) -> list:
+    """Samples of each prompt trained on at ``step`` (1-based) when every step takes ``k`` samples per prompt from
+    its pool (a sorted array of master sample indices).  Within an epoch of len(pool) // k steps every pool sample
+    is used exactly once; the order is reshuffled every epoch (rng keyed by seed, epoch and pool size, so it is a
+    pure function of the step: a resumed run continues the same schedule).  k >= len(pool): the whole pool every
+    step (full batch).  Returns one sorted int64 array per prompt."""
+    assert step >= 1 and k >= 1
+    out: list = [None] * len(pools)
+    by_size: dict[int, list[int]] = {}
+    for i, p in enumerate(pools):
+        by_size.setdefault(len(p), []).append(i)
+    for size, idx in by_size.items():
+        arr = np.stack([np.asarray(pools[i], dtype=np.int64) for i in idx])  # (P, size)
+        if k >= size:
+            for j, i in enumerate(idx):
+                out[i] = arr[j].copy()
+            continue
+        assert size % k == 0, f"pool of {size} samples is not a multiple of rotate_k={k}"
+        per_epoch = size // k
+        epoch, slot = divmod(step - 1, per_epoch)
+        keys = np.random.default_rng([int(seed), int(epoch), int(size)]).random((len(idx), size))
+        pick = np.argsort(keys, axis=1)[:, slot * k : (slot + 1) * k]
+        chosen = np.sort(np.take_along_axis(arr, pick, axis=1), axis=1)
+        for j, i in enumerate(idx):
+            out[i] = chosen[j]
+    return out
+
+
+def subset_piece(piece: dict, samples) -> dict:
+    """The rows of ``piece`` (from gather_rows) for the given sample indices (a subset of piece["samples"])."""
+    pos = {s: j for j, s in enumerate(piece["samples"])}
+    js = [pos[int(s)] for s in samples]
+    out = dict(piece)
+    out["samples"] = [int(s) for s in samples]
+    for key in ("responses", "ref_log_probs", "rollout_log_probs"):
+        if piece[key] is not None:
+            out[key] = [piece[key][j] for j in js]
+    for key in ("score", "ref_entropy_sum"):
+        out[key] = piece[key][js]
     return out

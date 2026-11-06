@@ -895,7 +895,13 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
 
             lr = self.actor_lr_scheduler.get_last_lr()[0]
             metrics["actor/lr"] = lr.item() if torch.is_tensor(lr) else lr
-            self.actor_lr_scheduler.step()
+            # gradient accumulation across calls (kimi_accum_*): the schedule advances once per optimizer step
+            if bool(data.meta_info.get("kimi_accum_step", True)):
+                self.actor_lr_scheduler.step()
+            else:
+                assert not self._is_offload_param and not self._is_offload_optimizer, (
+                    "gradient accumulation across update_actor calls needs param/optimizer offload off"
+                )
 
             # TODO: here, we should return all metrics
             output = DataProto(meta_info={"metrics": metrics})

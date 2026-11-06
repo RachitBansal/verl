@@ -30,6 +30,13 @@ fi
 # Precision (README.md "Numerical precision"): PRECISION=bf16 (default) | tf32 | fp32 sets the actor's FSDP compute
 #   dtype; a non-bf16 run reads the anchor recomputed in that precision (ANCHOR_TAG, default = PRECISION), built
 #   once by MODE=master_anchor PRECISION=tf32 JOB_INDEX=j NUM_JOBS=J.
+# Extension bank (README.md "Large-N baselines"): MODE=master_build MASTER_DIR=<new dir> MASTER_PROMPTS=<base bank's
+#   prompts parquet> N_MASTER=448 SAMPLE_OFFSET=64 ROLLOUT_SEED=1 REF_LOGPROBS=False CHUNK=64 builds more samples of
+#   the same prompts; compute_master_baselines.py pools them into an npz; BASELINE_FILE=<npz> BASELINE=mean|tau_logz
+#   trains with b(x) looked up per prompt from all pooled samples.
+# Sub-sampled training (README.md "Sub-sampled training"): SELECTION=... BASELINE_FILE=... ROTATE_K=4 trains every step
+#   on 4 fresh samples per training prompt from the master pool (ROTATE_POOL, default all n), reshuffled per epoch;
+#   MAX_UPDATE_ROWS splits a step into gradient-accumulating update_actor calls (one optimizer step).
 ####################
 MODE=${MODE:-train}
 BSZ=${BSZ:-4096}
@@ -38,6 +45,13 @@ LR=${LR:-1e-5}
 TAU=${TAU:-0.03}
 ANCHOR=${ANCHOR:-ref}
 BASELINE=${BASELINE:-mean}   # mean | tau_logz (fixed_dataset.baseline)
+BASELINE_FILE=${BASELINE_FILE:-}   # npz from compute_master_baselines.py (fixed_dataset.baseline_file); empty = group baseline
+SAMPLE_OFFSET=${SAMPLE_OFFSET:-0}  # master_build: global number of the first sample (extension banks)
+ROLLOUT_SEED=${ROLLOUT_SEED:-0}    # vLLM engine seed (an extension bank needs a seed != the base bank's)
+REF_LOGPROBS=${REF_LOGPROBS:-True} # master_build: False = skip the reference log-prob pass (baseline-only bank)
+ROTATE_K=${ROTATE_K:-0}            # samples per training prompt per step, drawn from the pool (0 = selection's k, fixed)
+ROTATE_POOL=${ROTATE_POOL:-null}   # pool = master samples 0..ROTATE_POOL-1 (null = all)
+MAX_UPDATE_ROWS=${MAX_UPDATE_ROWS:-0}  # rows per update_actor call; a step's calls accumulate into one optimizer step
 LEVEL=${LEVEL:-seq_sum}
 FORM=${FORM:-squared}
 STD_ADV=${STD_ADV:-False}
@@ -102,8 +116,13 @@ elif [ "${MODE}" = "build" ]; then
     build_only=True
 else
     experiment_name="k2fix_n${N}_bsz${BSZ}_tau${TAU}_${LEVEL}_${FORM}_fullbatch_lr${LR}_anchor${ANCHOR}"
-    if [ "${BASELINE}" != "mean" ]; then experiment_name="${experiment_name}_bl${BASELINE}"; fi
+    if [ -n "${BASELINE_FILE}" ]; then
+        experiment_name="${experiment_name}_bl${BASELINE}_bf$(basename "${BASELINE_FILE}" .npz)"
+    elif [ "${BASELINE}" != "mean" ]; then
+        experiment_name="${experiment_name}_bl${BASELINE}"
+    fi
     if [ -n "${SELECTION}" ]; then experiment_name="${experiment_name}_sel$(basename "${SELECTION}")"; fi
+    if [ "${ROTATE_K}" != "0" ]; then experiment_name="${experiment_name}_rot${ROTATE_K}"; fi
     if [ "${PRECISION}" != "bf16" ]; then experiment_name="${experiment_name}_p${PRECISION}"; fi
     build_only=False
 fi
@@ -117,6 +136,8 @@ PYEXTRAS=${PYEXTRAS:-$(dirname "${VERL_ROOT}")/pyextras}
 [ -d "${PYEXTRAS}" ] || PYEXTRAS=/n/netscratch/dam_lab/Everyone/brachit/share/kimi_k2_hp128/pyextras
 export PYTHONPATH=${VERL_ROOT}:${PYEXTRAS}:${PYTHONPATH:-}
 cd "${VERL_ROOT}"
+# hydra writes outputs/<date>/ into the working directory: use OUTPUT_DIR when the code dir is read-only (shared snapshot)
+if [ ! -w . ]; then mkdir -p "${OUTPUT_DIR}/hydra_cwd"; cd "${OUTPUT_DIR}/hydra_cwd"; fi
 
 export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_JOB_ID}
 export TORCHINDUCTOR_CACHE_DIR=/tmp/inductor_${SLURM_JOB_ID}
@@ -140,13 +161,19 @@ if [ "${MODE}" = "master_build" ] || [ "${MODE}" = "master_anchor" ]; then
     train_data=${MASTER_PROMPTS}
     val_files="[${aime_data}]"   # not run (VAL_BEFORE=False, no training steps), but the trainer loads it
     MASTER_SELECTION_ARG=(trainer.fixed_dataset.master_dir=${MASTER_DIR} trainer.fixed_dataset.master_chunk_prompts=${CHUNK}
-        trainer.fixed_dataset.master_job_index=${JOB_INDEX} trainer.fixed_dataset.master_num_jobs=${NUM_JOBS})
+        trainer.fixed_dataset.master_job_index=${JOB_INDEX} trainer.fixed_dataset.master_num_jobs=${NUM_JOBS}
+        trainer.fixed_dataset.master_sample_offset=${SAMPLE_OFFSET} trainer.fixed_dataset.master_ref_log_probs=${REF_LOGPROBS})
     if [ "${MODE}" = "master_anchor" ]; then
         MASTER_SELECTION_ARG+=(trainer.fixed_dataset.master_anchor=${ANCHOR_TAG} trainer.fixed_dataset.master_anchor_build=True)
     fi
 elif [ -n "${SELECTION}" ]; then
     train_data=${MASTER_PROMPTS}
+    if [ -n "${BASELINE_FILE}" ]; then MASTER_SELECTION_ARG+=(trainer.fixed_dataset.baseline_file=${BASELINE_FILE}); fi
+    MASTER_SELECTION_ARG+=(trainer.fixed_dataset.rotate_k=${ROTATE_K} trainer.fixed_dataset.rotate_pool=${ROTATE_POOL}
+        trainer.fixed_dataset.max_update_rows=${MAX_UPDATE_ROWS})
 fi
+[ "${ROTATE_K}" = "0" ] || [ -n "${BASELINE_FILE}" ] || { echo "ROTATE_K needs BASELINE_FILE (and SELECTION)"; exit 1; }
+[ -z "${BASELINE_FILE}" ] || [ -n "${SELECTION}" ] || { echo "BASELINE_FILE needs SELECTION (master-bank run)"; exit 1; }
 [ -f "${train_data}" ] || { echo "missing ${train_data}: run examples/kimi_k2/fixed_ref/prepare_prompts.py --out ${PROMPT_DIR}"; exit 1; }
 if [ "${MODE}" = "train" ] && [ -z "${SELECTION}" ] && [ ! -f "${BANK}" ]; then echo "missing bank ${BANK}: run MODE=build first"; exit 1; fi
 
@@ -190,6 +217,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.7 \
     actor_rollout_ref.rollout.n=${N} \
+    actor_rollout_ref.rollout.seed=${ROLLOUT_SEED} \
     actor_rollout_ref.rollout.temperature=1.0 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
     actor_rollout_ref.rollout.val_kwargs.temperature=1.0 \

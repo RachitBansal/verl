@@ -27,7 +27,9 @@ policy can reach on fresh pi_ref samples of that prompt.
 
 from __future__ import annotations
 
+import json
 import math
+import os
 
 import numpy as np
 
@@ -128,3 +130,44 @@ def soft_value_baseline(seq_reward: np.ndarray, uid: np.ndarray, tau: float) -> 
     b_g = gmax + tau * np.log(s / cnt)
     b_g = np.where(gmax == gmin, gmax, b_g)  # constant-reward group: exact zero advantage
     return b_g[inv]
+
+
+def lookup_master_baseline(
+    path: str, prompt_rows, baseline: str, tau: float, master_dir: str | None = None
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    """Per-row baselines from a precomputed baseline file (examples/kimi_k2/fixed_ref/compute_master_baselines.py).
+
+    The npz holds, per prompt row of the master prompt file, ``correct`` (number of correct samples), ``total``
+    (N, the samples pooled over the master bank and its extensions), ``mean`` = correct/total, ``taus`` (T,) and
+    ``tau_logz`` (T, P) = tau log((1/N) sum_j exp(r_j/tau)), plus ``meta`` (json: the source banks).  Returns
+    (b, rbar, info) for the rows' ``prompt_rows``: b = the chosen baseline (``mean`` or ``tau_logz`` at ``tau``,
+    which must be one of the file's taus), rbar = the N-sample pass rate, info = summary numbers.
+    ``master_dir``, when given, must be one of the file's source banks (guards against a file of another bank)."""
+    assert baseline in ("mean", "tau_logz"), f"unknown baseline {baseline}"
+    with np.load(path, allow_pickle=False) as z:
+        d = {k: z[k] for k in z.files}
+    meta = json.loads(str(d["meta"]))
+    if master_dir is not None:
+        srcs = [os.path.realpath(s["master_dir"]) for s in meta["sources"]]
+        assert os.path.realpath(master_dir) in srcs, f"baseline file {path} was not built from {master_dir}: {srcs}"
+    rows = np.asarray(prompt_rows, dtype=np.int64)
+    P = len(d["mean"])
+    assert rows.min() >= 0 and rows.max() < P, f"prompt rows outside the baseline file's {P} prompts"
+    rbar = d["mean"][rows].astype(np.float64)
+    if baseline == "mean":
+        b = rbar.copy()
+    else:
+        taus = d["taus"].astype(np.float64)
+        hit = np.flatnonzero(np.isclose(taus, tau, rtol=1e-6, atol=0.0))
+        assert len(hit) == 1, f"tau={tau} not precomputed in {path} (taus {taus.tolist()})"
+        b = d["tau_logz"][int(hit[0])][rows].astype(np.float64)
+    total = d["total"][rows]
+    info = {
+        "n_samples": int(total.min()),
+        "n_samples_max": int(total.max()),
+        "prompt_pass_rate_mean": float(np.mean(d["mean"][np.unique(rows)])),
+        "prompt_zero_or_all_frac": float(
+            np.mean(np.isin(d["mean"][np.unique(rows)], (0.0, 1.0)))
+        ),
+    }
+    return b, rbar, info

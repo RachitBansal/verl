@@ -73,6 +73,10 @@ enable_chunked_prefill: True
 # Prefix caching kv-cache blocks is a popular optimization in LLM inference to avoid redundant prompt computations.
 enable_prefix_caching: True
 
+# Engine-level random seed of the inference engine (vLLM LLM(seed=...)). Two generations of the same prompts with
+# the same seed can reproduce each other's samples; give extensions of a sample bank a different seed.
+seed: 0
+
 # Which loader to use for rollout model weights: dummy, hf, megatron, etc.
 # safetensors (for huge model, and set use_shm=True); dummy: randomly init model weight
 load_format: dummy

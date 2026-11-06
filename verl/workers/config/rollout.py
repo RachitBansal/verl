@@ -186,6 +186,8 @@ class RolloutConfig(BaseConfig):
 
     enable_prefix_caching: bool = True
 
+    seed: int = 0
+
     load_format: str = "dummy"
 
     layered_summon: bool = False
